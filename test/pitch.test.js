@@ -196,3 +196,56 @@ describe("parse: actions", () => {
     expect(scene.actions).toEqual([{ kind: "pass", from: "A", to: { ref: "B" }, seq: 1 }]);
   });
 });
+
+describe("parse: robustness", () => {
+  const nasty = [
+    "",
+    "\n\n\n",
+    "area:",
+    "area: x",
+    ":::",
+    "red:",
+    "red: @@@",
+    "pass:",
+    "pass: ->",
+    "zone: 1,1",
+    "label:",
+    "area: 40x25 half\nred: A@1,1\npass: A->A",
+    " ",
+    "a".repeat(10000),
+    "pass: A->B\n".repeat(500),
+  ];
+
+  it("never throws, whatever the input", () => {
+    for (const src of nasty) {
+      expect(() => parse(src), JSON.stringify(src.slice(0, 40))).not.toThrow();
+    }
+  });
+
+  it("always returns a usable scene shape", () => {
+    for (const src of nasty) {
+      const { scene, errors } = parse(src);
+      expect(Array.isArray(scene.marks)).toBe(true);
+      expect(Array.isArray(scene.players)).toBe(true);
+      expect(Array.isArray(scene.actions)).toBe(true);
+      expect(typeof scene.area.w).toBe("number");
+      expect(Array.isArray(errors)).toBe(true);
+    }
+  });
+
+  it("accepts undefined and null as empty input", () => {
+    expect(parse(undefined).errors).toEqual([]);
+    expect(parse(null).scene.players).toEqual([]);
+  });
+
+  it("reports every error with a line number and a message", () => {
+    const { errors } = parse("nonsense\nred: bad\ngoal: nope\n");
+    expect(errors.length).toBeGreaterThan(0);
+    for (const e of errors) {
+      expect(typeof e.line).toBe("number");
+      expect(e.line).toBeGreaterThan(0);
+      expect(typeof e.message).toBe("string");
+      expect(e.message.length).toBeGreaterThan(0);
+    }
+  });
+});
