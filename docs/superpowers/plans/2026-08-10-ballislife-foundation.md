@@ -338,6 +338,9 @@ silently breaks Vite and Vitest:
 export PATH="$HOME/.nvm/versions/node/v20.20.2/bin:$PATH"
 ```
 
+`grep` is broken in this sandbox — it exits 1 with no output even for strings that are
+present. Never use it to verify absence; use the Grep tool or node.
+
 ## Commands
 
 ```bash
