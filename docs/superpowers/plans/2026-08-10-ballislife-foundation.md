@@ -2343,6 +2343,13 @@ describe("PitchDiagram", () => {
     expect(render('label: "3v2 to end line"\n')).toContain("3v2 to end line");
   });
 
+  it("gives arrowheads a fixed size independent of stroke width", () => {
+    // Without markerUnits="userSpaceOnUse", SVG scales markers by stroke-width and the
+    // 4px shot gets a ~28px arrowhead that swamps a 7px player. Caught by rendering.
+    const html = render("red: A@2,2 B@30,20\nshot: A->>B\n");
+    expect(html).toContain('markerUnits="userSpaceOnUse"');
+  });
+
   it("renders parse errors with their line numbers and keeps the diagram", () => {
     const html = render("area: 40x25 half\ngoal: nope\n");
     expect(html).toContain("line 2");
@@ -2416,7 +2423,11 @@ function Mark({ mark }) {
   const p = toPx(mark.x, mark.y);
   if (mark.kind === "zone") {
     const a = toPx(mark.x, mark.y);
-    const label = toPx(mark.x + mark.w / 2, mark.y + mark.h / 2);
+    // Label at the top of the zone, not its centre: the centre is where the play
+    // happens, so a centred label collided with arrows and sequence badges. The dark
+    // stroke behind the glyphs (paintOrder) keeps it readable over a tinted zone —
+    // plain white-on-tint was not.
+    const label = toPx(mark.x + mark.w / 2, mark.y);
     return (
       <g>
         <rect
@@ -2425,7 +2436,10 @@ function Mark({ mark }) {
           stroke="var(--yellow)" strokeOpacity="0.7" strokeWidth="1.3" strokeDasharray="5 3"
         />
         {mark.label ? (
-          <text x={label.x} y={label.y} fontSize="9" fill="#fff" fillOpacity="0.9" textAnchor="middle">
+          <text
+            x={label.x} y={label.y + 13} fontSize="9" fill="#fff"
+            stroke="#1d4d31" strokeWidth="2.5" paintOrder="stroke" textAnchor="middle"
+          >
             {mark.label}
           </text>
         ) : null}
@@ -2488,12 +2502,16 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
     <div>
       <svg className="pitch" viewBox={viewBox(scene.area)} role="img">
         <defs>
+          {/* markerUnits="userSpaceOnUse" is essential: SVG markers scale with
+              stroke-width by default, so the 4px-wide shot would get a ~28px arrowhead
+              that swamps a 7px player marker. Verified by rendering — it looks
+              cartoonish without this. */}
           {Object.entries(ACTION_STROKE).map(([kind, colour]) => (
             <marker
-              key={kind} id={`arrow-${kind}`}
-              markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"
+              key={kind} id={`arrow-${kind}`} markerUnits="userSpaceOnUse"
+              markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"
             >
-              <path d="M0,0 L7,3.5 L0,7 z" fill={colour} />
+              <path d="M0,0 L9,4.5 L0,9 z" fill={colour} />
             </marker>
           ))}
         </defs>
@@ -2543,7 +2561,7 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
 npx vitest run test/pitchDiagram.test.jsx
 ```
 
-Expected: `Tests  9 passed (9)`.
+Expected: `Tests  10 passed (10)`.
 
 - [ ] **Step 5: Verify the build still succeeds**
 
