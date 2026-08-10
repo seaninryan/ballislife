@@ -23,7 +23,35 @@ function parseArea(rest, ctx) {
   ctx.scene.area = { w: Number(m[1]), h: Number(m[2]), markings };
 }
 
+export const TEAMS = ["red", "blue", "yellow", "gk"];
+
+// "A@10,20 B@25,14" -> one player per token. A bad token fails alone.
+function parsePlayers(team) {
+  return (rest, ctx) => {
+    for (const token of rest.split(/\s+/).filter(Boolean)) {
+      const m = token.match(/^([A-Za-z][A-Za-z0-9]{0,3})@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
+      if (!m) {
+        // Name the real problem when the label is simply too long. Drills get pasted
+        // from an LLM, which reaches for words like STRIKER, and "expected
+        // <label>@<x>,<y>" gives no clue what is actually wrong with that.
+        const long = token.match(/^([A-Za-z][A-Za-z0-9]{4,})@/);
+        ctx.fail(long
+          ? `player label "${long[1]}" is too long (max 4 characters)`
+          : `expected "<label>@<x>,<y>" but got "${token}"`);
+        continue;
+      }
+      const label = m[1];
+      if (ctx.scene.players.some((p) => p.label === label)) {
+        ctx.fail(`duplicate player label "${label}"`);
+        continue;
+      }
+      ctx.scene.players.push({ team, label, x: Number(m[2]), y: Number(m[3]) });
+    }
+  };
+}
+
 const DIRECTIVES = { area: parseArea };
+for (const team of TEAMS) DIRECTIVES[team] = parsePlayers(team);
 
 export function parse(src) {
   const scene = emptyScene();
