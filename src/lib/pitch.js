@@ -217,6 +217,22 @@ const pt = (o) => `${n(o.x)},${n(o.y)}`;
 // unquoted as `label: "a"`, which parses back as the bare string `a`.
 const quote = (s) => (/\s/.test(s) || s.startsWith(`"`) ? `"${s}"` : s);
 
+// Consecutive items sharing a key, in array order. Grouping globally by kind or team
+// discarded the original order, which broke parse(serialise(scene)) deep-equality for
+// any scene whose directives interleave — a drill written red, blue, red came back as
+// red, red, blue. Grouping was only ever cosmetic; runs keep the tidy one-line-per-team
+// output for the common case AND preserve order.
+function runs(items, keyOf) {
+  const out = [];
+  for (const item of items) {
+    const key = keyOf(item);
+    const last = out[out.length - 1];
+    if (last && last.key === key) last.items.push(item);
+    else out.push({ key, items: [item] });
+  }
+  return out;
+}
+
 // Scene -> canonical source. Inverse of parse() at the MODEL level:
 // parse(serialise(scene)).scene deep-equals scene, and serialise is stable under
 // re-parse. It is NOT byte-identical to arbitrary input source: directives are
@@ -226,25 +242,26 @@ const quote = (s) => (/\s/.test(s) || s.startsWith(`"`) ? `"${s}"` : s);
 // comments a coach hand-wrote in the block.
 export function serialise(scene) {
   const lines = [];
-  const marksOf = (kind) => scene.marks.filter((m) => m.kind === kind);
 
   const { w, h, markings } = scene.area;
   lines.push(`area: ${n(w)}x${n(h)}${markings === "plain" ? "" : ` ${markings}`}`);
 
-  for (const z of marksOf("zone")) {
-    const label = z.label ? ` ${quote(z.label)}` : "";
-    lines.push(`zone: ${pt(z)} ${n(z.w)}x${n(z.h)}${label}`);
+  for (const run of runs(scene.marks, (m) => m.kind)) {
+    if (run.key === "zone") {
+      for (const z of run.items) {
+        const label = z.label ? ` ${quote(z.label)}` : "";
+        lines.push(`zone: ${pt(z)} ${n(z.w)}x${n(z.h)}${label}`);
+      }
+    } else if (run.key === "goal") {
+      for (const g of run.items) {
+        lines.push(`goal: ${pt(g)}${g.size === "full" ? "" : ` ${g.size}`}`);
+      }
+    } else {
+      lines.push(`${run.key}: ${run.items.map(pt).join(" ")}`);
+    }
   }
-  for (const g of marksOf("goal")) {
-    lines.push(`goal: ${pt(g)}${g.size === "full" ? "" : ` ${g.size}`}`);
-  }
-  for (const kind of ["cone", "ball", "flag"]) {
-    const ms = marksOf(kind);
-    if (ms.length) lines.push(`${kind}: ${ms.map(pt).join(" ")}`);
-  }
-  for (const team of TEAMS) {
-    const ps = scene.players.filter((p) => p.team === team);
-    if (ps.length) lines.push(`${team}: ${ps.map((p) => `${p.label}@${pt(p)}`).join(" ")}`);
+  for (const run of runs(scene.players, (p) => p.team)) {
+    lines.push(`${run.key}: ${run.items.map((p) => `${p.label}@${pt(p)}`).join(" ")}`);
   }
   for (const a of [...scene.actions].sort((x, y) => x.seq - y.seq)) {
     const to = a.to.ref !== undefined ? a.to.ref : pt(a.to);
