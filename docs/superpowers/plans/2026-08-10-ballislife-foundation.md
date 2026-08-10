@@ -594,7 +594,7 @@ export function parseDoc(src) {
 npx vitest run test/frontmatter.test.js
 ```
 
-Expected: `Tests  15 passed (15)`.
+Expected: `Tests  14 passed (14)`.
 
 - [ ] **Step 5: Commit**
 
@@ -707,7 +707,7 @@ export function serialiseDoc({ meta, body, error, front }) {
 npx vitest run test/frontmatter.test.js
 ```
 
-Expected: `Tests  20 passed (20)`.
+Expected: `Tests  19 passed (19)`.
 
 - [ ] **Step 5: Commit**
 
