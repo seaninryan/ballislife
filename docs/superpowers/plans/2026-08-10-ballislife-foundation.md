@@ -654,6 +654,16 @@ describe("serialiseDoc", () => {
     expect(fixed).not.toContain("[transition");
     expect(parseDoc(fixed).error).toBe(null);
   });
+
+  it("resurrects the original if a caller forgets to clear error and front", () => {
+    // A documented hazard, NOT desired behaviour. An empty `meta` cannot distinguish
+    // "nothing recovered yet" from "the user deleted every field", so a caller that
+    // spreads its loaded state must clear `error` and `front` to honour the latter.
+    // Pinned here so Plan 2's editor meets the trap named rather than discovering it.
+    const broken = parseDoc("---\ntags: [transition\n---\n\nReds attack.\n");
+    expect(serialiseDoc({ ...broken, meta: {} })).toContain("[transition");
+    expect(serialiseDoc({ ...broken, meta: {}, error: null, front: null })).toBe("Reds attack.\n");
+  });
 });
 ```
 
@@ -685,6 +695,12 @@ export function serialiseDoc({ meta, body, error, front }) {
   // frontmatter text intact — dropping it would delete the very thing the editor exists
   // to let the user repair. Guarded on `meta` being empty as well, so that once a caller
   // supplies replacement metadata the repair wins over the unparseable original.
+  //
+  // HAZARD for callers: an empty `meta` cannot distinguish "nothing recovered yet" from
+  // "the user deliberately deleted every field". A caller holding editor state as
+  // `{...parseDoc(src)}` MUST also clear `error` and `front` when the user's intent is to
+  // discard the broken original, or this branch resurrects the unparseable frontmatter
+  // instead of honouring an intentionally empty result. Pinned by a test below.
   if (error && front != null && keys.length === 0) {
     return `---\n${front}\n---\n\n${text.replace(/^\n+/, "")}`;
   }
@@ -707,7 +723,7 @@ export function serialiseDoc({ meta, body, error, front }) {
 npx vitest run test/frontmatter.test.js
 ```
 
-Expected: `Tests  19 passed (19)`.
+Expected: `Tests  20 passed (20)`.
 
 - [ ] **Step 5: Commit**
 
