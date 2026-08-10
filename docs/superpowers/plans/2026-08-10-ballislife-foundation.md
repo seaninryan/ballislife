@@ -462,6 +462,52 @@ describe("parseDoc", () => {
   it("consumes every blank line between the fence and the body", () => {
     expect(parseDoc("---\ntitle: T\n---\n\n\n\nBody.\n").body).toBe("Body.\n");
   });
+
+  it("tolerates trailing whitespace on the fence lines", () => {
+    expect(parseDoc("---   \ntitle: T\n---   \n\nBody.\n")).toEqual({
+      meta: { title: "T" },
+      body: "Body.\n",
+      error: null,
+    });
+  });
+
+  it("rejects frontmatter that is not a mapping, keeping the body", () => {
+    expect(parseDoc("---\n5\n---\nbody\n").error).toBe("yaml: frontmatter must be a mapping");
+    expect(parseDoc("---\n- a\n- b\n---\nbody\n").error).toBe("yaml: frontmatter must be a mapping");
+    expect(parseDoc("---\n5\n---\nbody\n").body).toBe("body\n");
+  });
+
+  it("includes a line number in a yaml error so the editor can point at it", () => {
+    const doc = parseDoc("---\ntitle: T\nbad: [unclosed\n---\n\nBody.\n");
+    expect(doc.error).toMatch(/line \d+/);
+    expect(doc.body).toBe("Body.\n");
+  });
+
+  it("reports a non-string argument instead of coercing it", () => {
+    expect(parseDoc({ foo: 1 })).toEqual({ meta: {}, body: "", error: "expected a string" });
+    expect(parseDoc(123).error).toBe("expected a string");
+  });
+
+  it("never throws, whatever the argument", () => {
+    for (const v of [undefined, null, "", 0, 123, {}, [], true, () => {}]) {
+      expect(() => parseDoc(v)).not.toThrow();
+    }
+  });
+
+  it("leaves a --- rule in the body alone when real frontmatter is present", () => {
+    const doc = parseDoc("---\ntitle: T\n---\n\nIntro.\n\n---\n\nOutro.\n");
+    expect(doc.meta).toEqual({ title: "T" });
+    expect(doc.body).toBe("Intro.\n\n---\n\nOutro.\n");
+  });
+
+  it("documents the leading-rule ambiguity every frontmatter parser shares", () => {
+    // A document with NO frontmatter whose first line is a `---` rule has the text up
+    // to the next `---` read as frontmatter. Intended, matching Jekyll/Hugo/gray-matter
+    // — pinned here so a refactor cannot change it silently.
+    const doc = parseDoc("---\n\nkey: value\n\n---\n\nMore text.\n");
+    expect(doc.meta).toEqual({ key: "value" });
+    expect(doc.body).toBe("More text.\n");
+  });
 });
 ```
 
@@ -483,17 +529,32 @@ import yaml from "js-yaml";
 
 // Consumes the blank line(s) between the closing fence and the body, so the body
 // starts at real content. `*` rather than `+` so a document that ends at the closing
-// fence with no body still matches.
-const FENCE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)*/;
+// fence with no body still matches. `[ \t]*` tolerates trailing whitespace on either
+// fence line, which copy-paste and editor auto-formatting both introduce.
+const FENCE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n)*/;
 
 // -> { meta, body, error }. Never throws: a document with broken frontmatter still
 // returns its body so it can be opened and repaired in the editor.
+//
+// KNOWN LIMITATION, shared with every frontmatter parser (Jekyll, Hugo, gray-matter):
+// in a document whose FIRST line is `---`, the text up to the next `---` is read as
+// frontmatter even if it was meant as a horizontal rule. This only affects documents
+// with no real frontmatter that open with a rule — a `---` rule anywhere after real
+// frontmatter is left alone. Pinned by tests rather than guarded against, because
+// every heuristic for detecting intent (e.g. requiring `key:` on the next line)
+// breaks legitimate frontmatter that opens with a YAML comment.
 export function parseDoc(src) {
-  const text = String(src ?? "");
-  const m = text.match(FENCE);
-  if (!m) return { meta: {}, body: text, error: null };
+  if (src === null || src === undefined) return { meta: {}, body: "", error: null };
+  if (typeof src !== "string") {
+    // A non-string is a caller bug, not a malformed drill. Report it rather than
+    // coercing it into an "[object Object]" body that reaches the catalogue.
+    return { meta: {}, body: "", error: "expected a string" };
+  }
 
-  const body = text.slice(m[0].length);
+  const m = src.match(FENCE);
+  if (!m) return { meta: {}, body: src, error: null };
+
+  const body = src.slice(m[0].length);
   try {
     const meta = yaml.load(m[1]);
     if (meta === null || meta === undefined) return { meta: {}, body, error: null };
@@ -502,7 +563,9 @@ export function parseDoc(src) {
     }
     return { meta, body, error: null };
   } catch (e) {
-    return { meta: {}, body, error: `yaml: ${e.reason || e.message}` };
+    // mark.line is 0-based within the frontmatter block, not the file.
+    const where = e.mark ? ` (line ${e.mark.line + 1})` : "";
+    return { meta: {}, body, error: `yaml: ${e.reason || e.message}${where}` };
   }
 }
 ```
@@ -513,7 +576,7 @@ export function parseDoc(src) {
 npx vitest run test/frontmatter.test.js
 ```
 
-Expected: `Tests  6 passed (6)`.
+Expected: `Tests  13 passed (13)`.
 
 - [ ] **Step 5: Commit**
 
@@ -584,7 +647,7 @@ export function serialiseDoc({ meta, body }) {
 npx vitest run test/frontmatter.test.js
 ```
 
-Expected: `Tests  9 passed (9)`.
+Expected: `Tests  16 passed (16)`.
 
 - [ ] **Step 5: Commit**
 
