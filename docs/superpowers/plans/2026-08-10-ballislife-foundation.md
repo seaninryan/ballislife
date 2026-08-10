@@ -951,6 +951,19 @@ describe("parse: area", () => {
     expect(scene.area.markings).toBe("box");
     expect(errors).toEqual([]);
   });
+
+  it("rejects a zero dimension rather than collapsing the pitch", () => {
+    expect(parse("area: 0x0\n").errors).toEqual([
+      { line: 1, message: 'area must be larger than 0x0, got "0x0"' },
+    ]);
+    // The default area survives, so the rest of the drill still renders.
+    expect(parse("area: 0x0\n").scene.area).toEqual({ w: 40, h: 25, markings: "plain" });
+    expect(parse("area: 20x0 half\n").errors[0].message).toMatch(/larger than 0x0/);
+    // Negative dimensions never match the unsigned regex, so they get the syntax error.
+    expect(parse("area: -5x10\n").errors).toEqual([
+      { line: 1, message: 'expected "<width>x<height> [markings]"' },
+    ]);
+  });
 });
 ```
 
@@ -990,7 +1003,15 @@ function parseArea(rest, ctx) {
   if (!MARKINGS.includes(markings)) {
     return ctx.fail(`unknown markings "${markings}" (expected ${MARKINGS.join(", ")})`);
   }
-  ctx.scene.area = { w: Number(m[1]), h: Number(m[2]), markings };
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  // A zero dimension collapses the whole pitch and would render an empty box with no
+  // explanation — the exact "blank preview from a typo" failure this module exists to
+  // prevent. Negative dimensions are already rejected by the unsigned regex above.
+  if (w <= 0 || h <= 0) {
+    return ctx.fail(`area must be larger than 0x0, got "${m[1]}x${m[2]}"`);
+  }
+  ctx.scene.area = { w, h, markings };
 }
 
 const DIRECTIVES = { area: parseArea };
@@ -1031,7 +1052,7 @@ export function parse(src) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  5 passed (5)`.
+Expected: `Tests  6 passed (6)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1150,7 +1171,7 @@ for (const team of TEAMS) DIRECTIVES[team] = parsePlayers(team);
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  11 passed (11)`.
+Expected: `Tests  12 passed (12)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1247,11 +1268,14 @@ In `src/lib/pitch.js`, add above `DIRECTIVES`:
 
 ```js
 export const GOAL_SIZES = ["full", "small", "mini"];
-const POINT_MARKS = ["cone", "ball", "flag"];
+export const POINT_MARKS = ["cone", "ball", "flag"];
 const NUM = "-?\\d+(?:\\.\\d+)?";
+// Built once at module scope rather than per token parsed.
+const POINT_RE = new RegExp(`^(${NUM}),(${NUM})$`);
+const ZONE_RE = new RegExp(`^(${NUM}),(${NUM})\\s+(${NUM})\\s*x\\s*(${NUM})\\s*(.*)$`);
 
 function parsePoint(token) {
-  const m = token.match(new RegExp(`^(${NUM}),(${NUM})$`));
+  const m = token.match(POINT_RE);
   return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
 }
 
@@ -1279,7 +1303,7 @@ function parseGoal(rest, ctx) {
 
 // '12,0 16x25 "press here"'
 function parseZone(rest, ctx) {
-  const m = rest.match(new RegExp(`^(${NUM}),(${NUM})\\s+(${NUM})\\s*x\\s*(${NUM})\\s*(.*)$`));
+  const m = rest.match(ZONE_RE);
   if (!m) return ctx.fail('expected "<x>,<y> <w>x<h> [label]"');
   ctx.scene.marks.push({
     kind: "zone",
@@ -1316,7 +1340,7 @@ for (const kind of POINT_MARKS) DIRECTIVES[kind] = parsePointMarks(kind);
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  18 passed (18)`.
+Expected: `Tests  19 passed (19)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1512,7 +1536,7 @@ export function parse(src) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  25 passed (25)`.
+Expected: `Tests  26 passed (26)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1597,7 +1621,7 @@ describe("parse: robustness", () => {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  29 passed (29)`. If any fail, fix `pitch.js` — do not weaken the
+Expected: `Tests  30 passed (30)`. If any fail, fix `pitch.js` — do not weaken the
 test. A self-referential pass (`A->A`) is legal input and must simply render as a
 degenerate arrow, not error.
 
@@ -1774,7 +1798,7 @@ export function serialise(scene) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  36 passed (36)`.
+Expected: `Tests  37 passed (37)`.
 
 - [ ] **Step 5: Commit**
 
