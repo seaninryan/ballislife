@@ -40,3 +40,16 @@ textarea, input, select {
 .split { display: flex; gap: 10px; align-items: flex-start; }
 .split > * { flex: 1; min-width: 0; }
 @media (max-width: 780px) { .split { flex-direction: column; } }
+.prose { line-height: 1.55; }
+.prose h1, .prose h2, .prose h3 { margin: 14px 0 6px; line-height: 1.25; }
+.prose h1 { font-size: 20px; } .prose h2 { font-size: 17px; } .prose h3 { font-size: 15px; }
+.prose p { margin: 0 0 10px; }
+.prose ul, .prose ol { margin: 0 0 10px; padding-left: 22px; }
+.prose li { margin: 2px 0; }
+.prose code { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 13px; }
+.prose pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; overflow-x: auto; }
+.prose blockquote { margin: 0 0 10px; padding-left: 10px; border-left: 3px solid var(--line); color: var(--dim); }
+.prose a { color: var(--accent); }
+.prose img { max-width: 100%; }
+.prose table { border-collapse: collapse; }
+.prose th, .prose td { border: 1px solid var(--line); padding: 4px 8px; }

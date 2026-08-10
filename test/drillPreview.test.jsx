@@ -1,11 +1,18 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import DrillPreview from "../src/components/DrillPreview.jsx";
 
-const fixture = (name) =>
-  readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
+// Under the jsdom environment Vite rewrites `new URL(rel, import.meta.url)` into a
+// browser-style asset URL (honouring vite.config.js's GitHub Pages `base`), which no
+// longer resolves to a real file path. Resolving via fileURLToPath instead keeps fixture
+// loading working the same way it did under the node environment.
+const here = dirname(fileURLToPath(import.meta.url));
+const fixture = (name) => readFileSync(join(here, "fixtures", name), "utf8");
 
 const render = (src) => renderToStaticMarkup(<DrillPreview source={src} />);
 
@@ -48,13 +55,12 @@ describe("DrillPreview", () => {
     expect(render(src)).toContain("line 8");
   });
 
-  it("keeps single line breaks so a written list stays readable", () => {
-    // Coaches write checklists one item per line. Rendering the paragraph as a single
-    // text node folded them into one run-on sentence.
-    const html = render("---\ntitle: T\n---\n\nWarm-up:\n- jog\n- stretches\n\nThen play.\n");
-    expect(html).toContain("<br");
-    expect(html).toContain("- jog");
-    expect(html).toContain("- stretches");
+  it("renders a written list as a real list", () => {
+    // Superseded the interim line-break rendering: `- item` lines are now a real <ul>,
+    // which is what the markdown always meant.
+    const html = render("---\ntitle: T\n---\n\nWarm-up:\n\n- jog\n- stretches\n\nThen play.\n");
+    expect(html).toContain("<ul>");
+    expect(html).toContain("<li>jog</li>");
     expect(html).toContain("Then play.");
   });
 

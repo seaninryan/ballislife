@@ -1,9 +1,10 @@
 // src/components/DrillPreview.jsx
 // Renders one drill document: metadata header, prose, and every pitch diagram.
-// Prose is plain text for now; markdown rendering lands with the editor in Plan 2.
+// Prose is rendered as sanitised markdown HTML via lib/prose.js.
 import React, { useMemo } from "react";
 import { parseDoc } from "../lib/frontmatter.js";
 import { splitSegments } from "../lib/markdown.js";
+import { renderProse } from "../lib/prose.js";
 import PitchDiagram from "./PitchDiagram.jsx";
 
 // The pitch block's line within the FILE = frontmatter lines + its line in the body.
@@ -36,24 +37,11 @@ export default function DrillPreview({ source = "" }) {
         seg.kind === "pitch" ? (
           <PitchDiagram key={i} source={seg.text} baseLine={seg.line + offset} />
         ) : (
-          <div key={i}>
-            {seg.text.split(/\n{2,}/).map((para, j) =>
-              para.trim() ? (
-                <p key={j}>
-                  {/* Single newlines become line breaks. Without this, a checklist
-                      written one item per line collapses into a single run-on
-                      sentence, because HTML folds internal newlines to spaces —
-                      worse than no formatting at all. */}
-                  {para.trim().split("\n").map((line, k) => (
-                    <React.Fragment key={k}>
-                      {k > 0 ? <br /> : null}
-                      {line}
-                    </React.Fragment>
-                  ))}
-                </p>
-              ) : null,
-            )}
-          </div>
+          <div
+            key={i}
+            className="prose"
+            dangerouslySetInnerHTML={{ __html: renderProse(seg.text) }}
+          />
         ),
       )}
     </div>
