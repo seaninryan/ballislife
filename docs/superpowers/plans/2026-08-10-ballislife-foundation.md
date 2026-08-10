@@ -1950,6 +1950,16 @@ describe("markings", () => {
     const [bound] = markings({ w: 40, h: 25, markings: "plain" });
     expect(bound).toMatchObject({ x: PAD * S, y: PAD * S, w: 40 * S, h: 25 * S });
   });
+
+  it("draws the penalty arc only beyond the box line", () => {
+    // Both endpoints must sit on the penalty box line, so the arc is the "D" poking out
+    // of the box rather than a semicircle cutting through it.
+    const arc = markings({ w: 40, h: 25, markings: "half" }).find((s) => s.type === "arc");
+    const boxLine = toPx(Math.min(16.5, 40 * 0.35), 0).x;
+    const t = arc.d.split(/\s+/); // M x y A rx ry rot laf sf x y
+    expect(Number(t[1])).toBeCloseTo(boxLine);
+    expect(Number(t[9])).toBeCloseTo(boxLine);
+  });
 });
 ```
 
@@ -2007,13 +2017,19 @@ export function markings(area) {
   switch (area.markings) {
     case "half": {
       out.push(...boxesAt(w, h));
-      const spot = toPx(SPOT_X(w), h / 2);
-      const r = ARC_R(h) * S;
-      // Semicircle bulging away from the goal, drawn top to bottom.
-      out.push({
-        type: "arc",
-        d: `M ${spot.x} ${spot.y - r} A ${r} ${r} 0 0 1 ${spot.x} ${spot.y + r}`,
-      });
+      // The penalty arc is only the part of the circle that lies beyond the box line —
+      // the "D". A full semicircle centred on the spot would cut straight through the
+      // penalty box, which reads as wrong to anyone who knows a pitch. Omitted entirely
+      // when the caps put the whole circle inside the box.
+      const bd = BOX_DEPTH(w);
+      const r = ARC_R(h);
+      const dx = bd - SPOT_X(w);
+      if (Math.abs(dx) < r) {
+        const dy = Math.sqrt(r * r - dx * dx);
+        const top = toPx(bd, h / 2 - dy);
+        const bot = toPx(bd, h / 2 + dy);
+        out.push({ type: "arc", d: `M ${top.x} ${top.y} A ${r * S} ${r * S} 0 0 1 ${bot.x} ${bot.y}` });
+      }
       break;
     }
     case "full": {
@@ -2044,7 +2060,7 @@ export function markings(area) {
 npx vitest run test/pitchSvg.test.js
 ```
 
-Expected: `Tests  11 passed (11)`.
+Expected: `Tests  12 passed (12)`.
 
 - [ ] **Step 5: Commit**
 
@@ -2139,6 +2155,15 @@ describe("actionPath", () => {
     const same = { kind: "pass", from: "A", to: { ref: "A" }, seq: 1 };
     expect(actionPath(same, scene)).toBe(null);
   });
+
+  it("draws a short action instead of dropping it", () => {
+    // A fixed marker gap erased any action between close players — realistic in a small
+    // rondo — leaving neither an arrow nor an error to explain where it went.
+    const small = parse("area: 10x10\nred: A@4,5 B@5,5\npass: A->B\n").scene;
+    const p = actionPath(small.actions[0], small);
+    expect(p).not.toBe(null);
+    expect(p.d).toMatch(/^M [\d.]+ [\d.]+ L [\d.]+ [\d.]+$/);
+  });
 });
 ```
 
@@ -2181,11 +2206,15 @@ export function actionPath(action, scene) {
   const b = toPx(to.x, to.y);
   const dx = b.x - a.x, dy = b.y - a.y;
   const len = Math.hypot(dx, dy);
-  if (len <= MARKER_GAP) return null; // too short to draw, and would divide by zero
+  if (len < 1) return null; // genuinely coincident, and would divide by zero
 
   const ux = dx / len, uy = dy / len;
-  const start = { x: a.x + ux * MARKER_GAP, y: a.y + uy * MARKER_GAP };
-  const end = { x: b.x - ux * MARKER_GAP, y: b.y - uy * MARKER_GAP };
+  // Shrink the gap for short actions rather than dropping them. A fixed gap silently
+  // erased any action between close-together players — realistic in a small rondo —
+  // leaving neither an arrow nor an error to explain where it went.
+  const gap = Math.min(MARKER_GAP, len * 0.35);
+  const start = { x: a.x + ux * gap, y: a.y + uy * gap };
+  const end = { x: b.x - ux * gap, y: b.y - uy * gap };
   const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -2230,7 +2259,7 @@ export function actionPath(action, scene) {
 npx vitest run test/pitchSvg.test.js
 ```
 
-Expected: `Tests  23 passed (23)`.
+Expected: `Tests  24 passed (24)`.
 
 - [ ] **Step 5: Commit**
 
