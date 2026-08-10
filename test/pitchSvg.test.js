@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { S, PAD, viewBox, toPx, markings, resolvePoint, actionPath, MARKER_GAP } from "../src/lib/pitchSvg.js";
+import { S, PAD, viewBox, toPx, markings, resolvePoint, actionPath, MARKER_GAP, markShape } from "../src/lib/pitchSvg.js";
 import { parse } from "../src/lib/pitch.js";
 
 describe("scaling", () => {
@@ -187,5 +187,40 @@ describe("actionPath", () => {
     const p = actionPath(small.actions[0], small);
     expect(p).not.toBe(null);
     expect(p.d).toMatch(/^M [\d.]+ [\d.]+ L [\d.]+ [\d.]+$/);
+  });
+});
+
+describe("markShape", () => {
+  it("places a cone triangle at its point", () => {
+    const s = markShape({ kind: "cone", x: 5, y: 5 });
+    expect(s.type).toBe("path");
+    expect(s.d).toContain(`M ${toPx(5, 5).x}`);
+  });
+
+  it("sizes a goal by its real half-height in metres", () => {
+    const full = markShape({ kind: "goal", x: 0, y: 12, size: "full" });
+    const mini = markShape({ kind: "goal", x: 0, y: 12, size: "mini" });
+    expect(full.h).toBeCloseTo(3.66 * 2 * S);
+    expect(mini.h).toBeCloseTo(1.2 * 2 * S);
+    expect(full.y).toBeCloseTo(toPx(0, 12).y - 3.66 * S);
+  });
+
+  it("defaults an unknown goal size to full rather than producing NaN", () => {
+    expect(markShape({ kind: "goal", x: 0, y: 12, size: "enormous" }).h).toBeCloseTo(3.66 * 2 * S);
+    expect(markShape({ kind: "goal", x: 0, y: 12 }).h).toBeCloseTo(3.66 * 2 * S);
+  });
+
+  it("gives a ball a circle and a flag a pole", () => {
+    expect(markShape({ kind: "ball", x: 1, y: 1 }).type).toBe("circle");
+    expect(markShape({ kind: "flag", x: 1, y: 1 }).type).toBe("flag");
+  });
+
+  it("returns a zone rect in pixels", () => {
+    const z = markShape({ kind: "zone", x: 2, y: 3, w: 4, h: 5, label: "z" });
+    expect(z).toMatchObject({ type: "zone", x: toPx(2, 3).x, y: toPx(2, 3).y, w: 4 * S, h: 5 * S, label: "z" });
+  });
+
+  it("returns null for an unknown kind rather than throwing", () => {
+    expect(markShape({ kind: "spaceship", x: 1, y: 1 })).toBe(null);
   });
 });

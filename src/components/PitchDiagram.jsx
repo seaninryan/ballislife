@@ -3,7 +3,7 @@
 // renderable scene is still drawn: a typo must never blank the preview.
 import React, { useMemo } from "react";
 import { parse } from "../lib/pitch.js";
-import { viewBox, toPx, markings, actionPath, S } from "../lib/pitchSvg.js";
+import { viewBox, toPx, markings, actionPath, markShape } from "../lib/pitchSvg.js";
 
 const TEAM_FILL = { red: "var(--red)", blue: "var(--blue)", yellow: "var(--yellow)", gk: "var(--gk)" };
 const ACTION_STROKE = {
@@ -31,56 +31,38 @@ function Marking({ shape }) {
 }
 
 function Mark({ mark }) {
-  const p = toPx(mark.x, mark.y);
-  if (mark.kind === "zone") {
-    const a = toPx(mark.x, mark.y);
-    // Label at the top of the zone, not its centre: the centre is where the play
-    // happens, so a centred label collided with arrows and sequence badges. The dark
-    // stroke behind the glyphs (paintOrder) keeps it readable over a tinted zone —
-    // plain white-on-tint was not.
-    const label = toPx(mark.x + mark.w / 2, mark.y);
+  const s = markShape(mark);
+  if (!s) return null;
+  if (s.type === "zone") {
     return (
       <g>
         <rect
-          x={a.x} y={a.y} width={mark.w * S} height={mark.h * S}
+          x={s.x} y={s.y} width={s.w} height={s.h}
           fill="var(--yellow)" fillOpacity="0.16"
           stroke="var(--yellow)" strokeOpacity="0.7" strokeWidth="1.3" strokeDasharray="5 3"
         />
-        {mark.label ? (
+        {s.label ? (
           <text
-            x={label.x} y={label.y + 13} fontSize="9" fill="#fff"
+            x={s.labelX} y={s.labelY} fontSize="9" fill="#fff"
             stroke="#1d4d31" strokeWidth="2.5" paintOrder="stroke" textAnchor="middle"
           >
-            {mark.label}
+            {s.label}
           </text>
         ) : null}
       </g>
     );
   }
-  if (mark.kind === "cone") {
-    return <path d={`M ${p.x} ${p.y - 5} l 5 10 h -10 z`} fill="var(--cone)" />;
-  }
-  if (mark.kind === "ball") {
-    return <circle cx={p.x} cy={p.y} r="5" fill="#fff" stroke="#222" strokeWidth="1" />;
-  }
-  if (mark.kind === "flag") {
+  if (s.type === "path") return <path d={s.d} fill="var(--cone)" />;
+  if (s.type === "circle") return <circle cx={s.cx} cy={s.cy} r={s.r} fill="#fff" stroke="#222" strokeWidth="1" />;
+  if (s.type === "flag") {
     return (
       <g>
-        <line x1={p.x} y1={p.y} x2={p.x} y2={p.y - 22} stroke="#fff" strokeWidth="1.6" />
-        <path d={`M ${p.x} ${p.y - 22} l 12 4 l -12 4 z`} fill="var(--shot-line)" />
+        <line x1={s.x} y1={s.y} x2={s.x} y2={s.top} stroke="#fff" strokeWidth="1.6" />
+        <path d={s.d} fill="var(--shot-line)" />
       </g>
     );
   }
-  // goal
-  const halfHeight = { full: 3.66, small: 2, mini: 1.2 }[mark.size] * S;
-  const depth = 7;
-  return (
-    <rect
-      x={p.x - depth / 2} y={p.y - halfHeight}
-      width={depth} height={halfHeight * 2}
-      fill="none" stroke="#fff" strokeWidth="2"
-    />
-  );
+  return <rect x={s.x} y={s.y} width={s.w} height={s.h} fill="none" stroke="#fff" strokeWidth="2" />;
 }
 
 function Player({ player }) {

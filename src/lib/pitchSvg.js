@@ -167,3 +167,31 @@ export function actionPath(action, scene) {
     badge: { x: mid.x + -uy * (curveOffset + 9), y: mid.y + ux * (curveOffset + 9) },
   };
 }
+
+// Real-world half-heights in metres. Domain geometry, so it belongs here beside the
+// pitch-marking dimensions rather than in a component.
+const GOAL_HALF_HEIGHT = { full: 3.66, small: 2, mini: 1.2 };
+const GOAL_DEPTH = 7; // px; a goal is drawn as a thin box on the line
+
+// A scene mark -> a shape descriptor in pixels, or null for an unknown kind.
+// The component chooses colours and draws; every number comes from here.
+export function markShape(mark) {
+  const p = toPx(mark.x, mark.y);
+  switch (mark.kind) {
+    case "cone":
+      return { type: "path", d: `M ${p.x} ${p.y - 5} l 5 10 h -10 z` };
+    case "ball":
+      return { type: "circle", cx: p.x, cy: p.y, r: 5 };
+    case "flag":
+      return { type: "flag", x: p.x, y: p.y, top: p.y - 22, d: `M ${p.x} ${p.y - 22} l 12 4 l -12 4 z` };
+    case "goal": {
+      const half = (GOAL_HALF_HEIGHT[mark.size] ?? GOAL_HALF_HEIGHT.full) * S;
+      return { type: "rect", x: p.x - GOAL_DEPTH / 2, y: p.y - half, w: GOAL_DEPTH, h: half * 2 };
+    }
+    case "zone":
+      return { type: "zone", x: p.x, y: p.y, w: mark.w * S, h: mark.h * S,
+               label: mark.label ?? null, labelX: toPx(mark.x + mark.w / 2, mark.y).x, labelY: p.y + 13 };
+    default:
+      return null;
+  }
+}
