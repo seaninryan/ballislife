@@ -31,4 +31,15 @@ describe("parseDoc", () => {
     expect(doc.meta.tags).toEqual(["transition", "finishing"]);
     expect(doc.meta.players).toBe("8-12");
   });
+
+  it("handles a document that ends at the closing fence", () => {
+    const doc = parseDoc("---\ntitle: Stub\n---");
+    expect(doc.meta).toEqual({ title: "Stub" });
+    expect(doc.body).toBe("");
+    expect(doc.error).toBe(null);
+  });
+
+  it("consumes every blank line between the fence and the body", () => {
+    expect(parseDoc("---\ntitle: T\n---\n\n\n\nBody.\n").body).toBe("Body.\n");
+  });
 });

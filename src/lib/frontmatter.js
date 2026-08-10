@@ -2,7 +2,10 @@
 // Knows nothing about drills.
 import yaml from "js-yaml";
 
-const FENCE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)+/;
+// Consumes the blank line(s) between the closing fence and the body, so the body
+// starts at real content. `*` rather than `+` so a document that ends at the closing
+// fence with no body still matches.
+const FENCE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)*/;
 
 // -> { meta, body, error }. Never throws: a document with broken frontmatter still
 // returns its body so it can be opened and repaired in the editor.
