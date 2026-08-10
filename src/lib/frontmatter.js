@@ -68,6 +68,12 @@ export function serialiseDoc({ meta, body, error, front }) {
   // frontmatter text intact — dropping it would delete the very thing the editor exists
   // to let the user repair. Guarded on `meta` being empty as well, so that once a caller
   // supplies replacement metadata the repair wins over the unparseable original.
+  //
+  // HAZARD for callers: an empty `meta` cannot distinguish "nothing recovered yet" from
+  // "the user deliberately deleted every field". A caller that spreads its loaded state
+  // to edit it (e.g., editor: load → mutate → save) must clear `error` and `front` to
+  // ensure an intentionally empty document is saved as such, not resurrected from the
+  // original unparseable text. Pinned by test.
   if (error && front != null && keys.length === 0) {
     return `---\n${front}\n---\n\n${text.replace(/^\n+/, "")}`;
   }

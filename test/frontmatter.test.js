@@ -136,4 +136,14 @@ describe("serialiseDoc", () => {
     expect(fixed).not.toContain("[transition");
     expect(parseDoc(fixed).error).toBe(null);
   });
+
+  it("resurrects the original if a caller forgets to clear error and front", () => {
+    // A documented hazard, NOT desired behaviour. An empty `meta` cannot distinguish
+    // "nothing recovered yet" from "the user deleted every field", so a caller that
+    // spreads its loaded state must clear `error` and `front` to honour the latter.
+    // Pinned here so Plan 2's editor meets the trap named rather than discovering it.
+    const broken = parseDoc("---\ntags: [transition\n---\n\nReds attack.\n");
+    expect(serialiseDoc({ ...broken, meta: {} })).toContain("[transition");
+    expect(serialiseDoc({ ...broken, meta: {}, error: null, front: null })).toBe("Reds attack.\n");
+  });
 });
