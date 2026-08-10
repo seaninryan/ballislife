@@ -22,7 +22,7 @@ describe("aboutEmail", () => {
     expect(await aboutEmail("tok")).toBe("a@b.com");
     const [url, opts] = lastCall();
     expect(url).toContain("/drive/v3/about");
-    expect(url).toContain("fields=user%28emailAddress%29");
+    expect(url).toContain("fields=user(emailAddress)");
     expect(opts.headers.Authorization).toBe("Bearer tok");
   });
 

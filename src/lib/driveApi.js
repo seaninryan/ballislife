@@ -19,10 +19,9 @@ const json = async (token, url, opts) => (await call(token, url, opts)).json();
 
 // -> the signed-in account's email, or null if Drive did not report one.
 export async function aboutEmail(token) {
-  // encodeURIComponent deliberately leaves "(" and ")" unescaped (they are valid
-  // unreserved characters per RFC 3986), so they are percent-encoded by hand here.
-  const fields = encodeURIComponent("user(emailAddress)").replace(/\(/g, "%28").replace(/\)/g, "%29");
-  const url = `https://www.googleapis.com/drive/v3/about?fields=${fields}`;
+  // Parentheses are legal unencoded in a query value, and encodeURIComponent leaves
+  // them alone anyway, so spell the fixed value out rather than pretending to encode it.
+  const url = "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)";
   const body = await json(token, url);
   return body?.user?.emailAddress ?? null;
 }
