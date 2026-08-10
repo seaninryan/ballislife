@@ -20,7 +20,15 @@ function parseArea(rest, ctx) {
   if (!MARKINGS.includes(markings)) {
     return ctx.fail(`unknown markings "${markings}" (expected ${MARKINGS.join(", ")})`);
   }
-  ctx.scene.area = { w: Number(m[1]), h: Number(m[2]), markings };
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  // A zero dimension collapses the whole pitch and would render an empty box with no
+  // explanation — the exact "blank preview from a typo" failure this module exists to
+  // prevent. Negative dimensions are already rejected by the unsigned regex above.
+  if (w <= 0 || h <= 0) {
+    return ctx.fail(`area must be larger than 0x0, got "${m[1]}x${m[2]}"`);
+  }
+  ctx.scene.area = { w, h, markings };
 }
 
 export const TEAMS = ["red", "blue", "yellow", "gk"];
@@ -51,11 +59,14 @@ function parsePlayers(team) {
 }
 
 export const GOAL_SIZES = ["full", "small", "mini"];
-const POINT_MARKS = ["cone", "ball", "flag"];
+export const POINT_MARKS = ["cone", "ball", "flag"];
 const NUM = "-?\\d+(?:\\.\\d+)?";
+// Built once at module scope rather than per token parsed.
+const POINT_RE = new RegExp(`^(${NUM}),(${NUM})$`);
+const ZONE_RE = new RegExp(`^(${NUM}),(${NUM})\\s+(${NUM})\\s*x\\s*(${NUM})\\s*(.*)$`);
 
 function parsePoint(token) {
-  const m = token.match(new RegExp(`^(${NUM}),(${NUM})$`));
+  const m = token.match(POINT_RE);
   return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
 }
 
@@ -83,7 +94,7 @@ function parseGoal(rest, ctx) {
 
 // '12,0 16x25 "press here"'
 function parseZone(rest, ctx) {
-  const m = rest.match(new RegExp(`^(${NUM}),(${NUM})\\s+(${NUM})\\s*x\\s*(${NUM})\\s*(.*)$`));
+  const m = rest.match(ZONE_RE);
   if (!m) return ctx.fail('expected "<x>,<y> <w>x<h> [label]"');
   ctx.scene.marks.push({
     kind: "zone",

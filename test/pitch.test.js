@@ -25,6 +25,19 @@ describe("parse: area", () => {
     expect(scene.area.markings).toBe("box");
     expect(errors).toEqual([]);
   });
+
+  it("rejects a zero dimension rather than collapsing the pitch", () => {
+    expect(parse("area: 0x0\n").errors).toEqual([
+      { line: 1, message: 'area must be larger than 0x0, got "0x0"' },
+    ]);
+    // The default area survives, so the rest of the drill still renders.
+    expect(parse("area: 0x0\n").scene.area).toEqual({ w: 40, h: 25, markings: "plain" });
+    expect(parse("area: 20x0 half\n").errors[0].message).toMatch(/larger than 0x0/);
+    // Negative dimensions never match the unsigned regex, so they get the syntax error.
+    expect(parse("area: -5x10\n").errors).toEqual([
+      { line: 1, message: 'expected "<width>x<height> [markings]"' },
+    ]);
+  });
 });
 
 describe("parse: players", () => {
