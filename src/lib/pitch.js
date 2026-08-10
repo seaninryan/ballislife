@@ -50,8 +50,64 @@ function parsePlayers(team) {
   };
 }
 
-const DIRECTIVES = { area: parseArea };
+export const GOAL_SIZES = ["full", "small", "mini"];
+const POINT_MARKS = ["cone", "ball", "flag"];
+const NUM = "-?\\d+(?:\\.\\d+)?";
+
+function parsePoint(token) {
+  const m = token.match(new RegExp(`^(${NUM}),(${NUM})$`));
+  return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
+}
+
+function parsePointMarks(kind) {
+  return (rest, ctx) => {
+    for (const token of rest.split(/\s+/).filter(Boolean)) {
+      const p = parsePoint(token);
+      if (!p) { ctx.fail(`expected "<x>,<y>" but got "${token}"`); continue; }
+      ctx.scene.marks.push({ kind, ...p });
+    }
+  };
+}
+
+// "0,12 small"
+function parseGoal(rest, ctx) {
+  const parts = rest.split(/\s+/).filter(Boolean);
+  const p = parsePoint(parts[0] ?? "");
+  if (!p) return ctx.fail('expected "<x>,<y> [size]"');
+  const size = parts[1] ?? "full";
+  if (!GOAL_SIZES.includes(size)) {
+    return ctx.fail(`unknown goal size "${size}" (expected ${GOAL_SIZES.join(", ")})`);
+  }
+  ctx.scene.marks.push({ kind: "goal", ...p, size });
+}
+
+// '12,0 16x25 "press here"'
+function parseZone(rest, ctx) {
+  const m = rest.match(new RegExp(`^(${NUM}),(${NUM})\\s+(${NUM})\\s*x\\s*(${NUM})\\s*(.*)$`));
+  if (!m) return ctx.fail('expected "<x>,<y> <w>x<h> [label]"');
+  ctx.scene.marks.push({
+    kind: "zone",
+    x: Number(m[1]), y: Number(m[2]),
+    w: Number(m[3]), h: Number(m[4]),
+    label: unquote(m[5]),
+  });
+}
+
+// Strips surrounding double quotes; returns null for empty.
+function unquote(s) {
+  const t = (s ?? "").trim();
+  if (t === "") return null;
+  const m = t.match(/^"(.*)"$/);
+  return m ? m[1] : t;
+}
+
+function parseLabel(rest, ctx) {
+  ctx.scene.label = unquote(rest);
+}
+
+const DIRECTIVES = { area: parseArea, goal: parseGoal, zone: parseZone, label: parseLabel };
 for (const team of TEAMS) DIRECTIVES[team] = parsePlayers(team);
+for (const kind of POINT_MARKS) DIRECTIVES[kind] = parsePointMarks(kind);
 
 export function parse(src) {
   const scene = emptyScene();

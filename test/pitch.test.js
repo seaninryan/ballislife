@@ -68,3 +68,63 @@ describe("parse: players", () => {
     ]);
   });
 });
+
+describe("parse: marks", () => {
+  it("reads repeated point marks from one line", () => {
+    const { scene, errors } = parse("cone: 5,5 5,20 35,5\n");
+    expect(scene.marks).toEqual([
+      { kind: "cone", x: 5, y: 5 },
+      { kind: "cone", x: 5, y: 20 },
+      { kind: "cone", x: 35, y: 5 },
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it("reads balls and flags", () => {
+    const { scene } = parse("ball: 10,12\nflag: 36,4\n");
+    expect(scene.marks).toEqual([
+      { kind: "ball", x: 10, y: 12 },
+      { kind: "flag", x: 36, y: 4 },
+    ]);
+  });
+
+  it("reads a goal with a size, defaulting to full", () => {
+    expect(parse("goal: 0,12 small\n").scene.marks).toEqual([
+      { kind: "goal", x: 0, y: 12, size: "small" },
+    ]);
+    expect(parse("goal: 0,12\n").scene.marks).toEqual([
+      { kind: "goal", x: 0, y: 12, size: "full" },
+    ]);
+  });
+
+  it("rejects an unknown goal size", () => {
+    const { scene, errors } = parse("goal: 0,12 enormous\n");
+    expect(scene.marks).toEqual([]);
+    expect(errors).toEqual([
+      { line: 1, message: 'unknown goal size "enormous" (expected full, small, mini)' },
+    ]);
+  });
+
+  it("reads a zone with dimensions and an optional label", () => {
+    expect(parse('zone: 12,0 16x25 "press here"\n').scene.marks).toEqual([
+      { kind: "zone", x: 12, y: 0, w: 16, h: 25, label: "press here" },
+    ]);
+    expect(parse("zone: 12,0 16x25\n").scene.marks).toEqual([
+      { kind: "zone", x: 12, y: 0, w: 16, h: 25, label: null },
+    ]);
+  });
+
+  it("reports a malformed point without dropping the rest of the line", () => {
+    const { scene, errors } = parse("cone: 5,5 nope 7,7\n");
+    expect(scene.marks).toEqual([
+      { kind: "cone", x: 5, y: 5 },
+      { kind: "cone", x: 7, y: 7 },
+    ]);
+    expect(errors).toEqual([{ line: 1, message: 'expected "<x>,<y>" but got "nope"' }]);
+  });
+
+  it("reads the drill label", () => {
+    expect(parse('label: "3v2 to end line"\n').scene.label).toBe("3v2 to end line");
+    expect(parse("label: 3v2 to end line\n").scene.label).toBe("3v2 to end line");
+  });
+});
