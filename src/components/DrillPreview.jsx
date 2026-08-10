@@ -38,7 +38,20 @@ export default function DrillPreview({ source = "" }) {
         ) : (
           <div key={i}>
             {seg.text.split(/\n{2,}/).map((para, j) =>
-              para.trim() ? <p key={j}>{para.trim()}</p> : null,
+              para.trim() ? (
+                <p key={j}>
+                  {/* Single newlines become line breaks. Without this, a checklist
+                      written one item per line collapses into a single run-on
+                      sentence, because HTML folds internal newlines to spaces —
+                      worse than no formatting at all. */}
+                  {para.trim().split("\n").map((line, k) => (
+                    <React.Fragment key={k}>
+                      {k > 0 ? <br /> : null}
+                      {line}
+                    </React.Fragment>
+                  ))}
+                </p>
+              ) : null,
             )}
           </div>
         ),

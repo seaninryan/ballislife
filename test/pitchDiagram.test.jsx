@@ -36,6 +36,13 @@ describe("PitchDiagram", () => {
     expect(render('label: "3v2 to end line"\n')).toContain("3v2 to end line");
   });
 
+  it("gives the diagram an accessible name", () => {
+    // role="img" with no name announces only "image" to a screen reader, and Plan 2
+    // wants printable session plans where a title survives export.
+    expect(render('label: "3v2 to end line"\n')).toContain('aria-label="3v2 to end line"');
+    expect(render("area: 40x25\n")).toContain('aria-label="Pitch diagram"');
+  });
+
   it("gives arrowheads a fixed size independent of stroke width", () => {
     // Without markerUnits="userSpaceOnUse", SVG scales markers by stroke-width and the
     // 4px shot gets a ~28px arrowhead that swamps a 7px player. Caught by rendering.

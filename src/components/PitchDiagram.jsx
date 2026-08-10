@@ -111,7 +111,10 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
 
   return (
     <div>
-      <svg className="pitch" viewBox={viewBox(scene.area)} role="img">
+      <svg
+        className="pitch" viewBox={viewBox(scene.area)}
+        role="img" aria-label={scene.label || "Pitch diagram"}
+      >
         <defs>
           {/* markerUnits="userSpaceOnUse" is essential: SVG markers scale with
               stroke-width by default, so the 4px-wide shot would get a ~28px arrowhead
@@ -138,7 +141,9 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
             markerEnd={`url(#arrow-${p.kind})`}
           />
         ))}
-        {scene.players.map((p) => <Player key={p.label} player={p} />)}
+        {/* Badges before players, so a crowded drill hides a sequence number rather
+            than a player. A missing player is a missing entity; a missing ordinal is
+            recoverable from the source. */}
         {paths.map((p, i) => (
           <g key={`b${i}`}>
             <circle cx={p.badge.x} cy={p.badge.y} r="6.5" fill="#000" fillOpacity="0.55" />
@@ -147,6 +152,7 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
             </text>
           </g>
         ))}
+        {scene.players.map((p) => <Player key={p.label} player={p} />)}
         {scene.label ? (
           <text x={labelAt.x} y={labelAt.y + 14} fontSize="10" fill="#fff" fillOpacity="0.85" textAnchor="middle">
             {scene.label}

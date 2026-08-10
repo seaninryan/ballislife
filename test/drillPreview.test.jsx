@@ -48,6 +48,16 @@ describe("DrillPreview", () => {
     expect(render(src)).toContain("line 8");
   });
 
+  it("keeps single line breaks so a written list stays readable", () => {
+    // Coaches write checklists one item per line. Rendering the paragraph as a single
+    // text node folded them into one run-on sentence.
+    const html = render("---\ntitle: T\n---\n\nWarm-up:\n- jog\n- stretches\n\nThen play.\n");
+    expect(html).toContain("<br");
+    expect(html).toContain("- jog");
+    expect(html).toContain("- stretches");
+    expect(html).toContain("Then play.");
+  });
+
   it("does not throw on empty input", () => {
     expect(() => render("")).not.toThrow();
   });
