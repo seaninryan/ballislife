@@ -58,9 +58,21 @@ textarea, input, select {
   padding: 8px; border-radius: 10px;
 }
 .drill-card:hover { border-color: var(--accent); }
-.drill-card-thumb { border-radius: 8px; overflow: hidden; }
+/* A fixed aspect ratio so every card is the same height. Without it a square 20x20
+   rondo thumbnail towered over a half-pitch one: the desktop grid went ragged, and on a
+   phone one drill filled the screen. Squarer diagrams letterbox onto the same grass
+   colour, so the seam is invisible. */
+.drill-card-thumb {
+  aspect-ratio: 8 / 5; border-radius: 8px; overflow: hidden; background: var(--grass);
+  display: flex; align-items: center; justify-content: center;
+}
+/* PitchDiagram wraps its svg in a div, so the svg needs a parent with a definite
+   height or its height:100% falls back to auto and the diagram overflows and gets
+   cropped - which silently loses players. */
+.drill-card-thumb > div { width: 100%; height: 100%; }
+.drill-card-thumb svg { width: 100%; height: 100%; }
 .drill-card-empty {
-  aspect-ratio: 44 / 29; display: flex; align-items: center; justify-content: center;
+  aspect-ratio: 8 / 5; display: flex; align-items: center; justify-content: center;
   background: var(--bg); border-radius: 8px; font-size: 13px;
 }
 /* overflow-wrap because a long unbroken title ran past the card edge and pushed the
