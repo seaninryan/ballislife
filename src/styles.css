@@ -65,3 +65,11 @@ textarea, input, select {
 }
 .drill-card-title { font-weight: 700; margin: 8px 0 4px; }
 .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.filters { margin: 8px 0 12px; }
+.chip-button {
+  padding: 3px 10px; border-radius: 99px; font-size: 13px;
+  background: var(--panel); border: 1px solid var(--line); cursor: pointer;
+}
+.chip-button.small { font-size: 12px; padding: 2px 8px; }
+.chip-button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.search { flex: 1; min-width: 140px; }
