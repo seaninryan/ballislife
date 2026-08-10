@@ -1667,8 +1667,21 @@ and that serialising is stable.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `test/pitch.test.js`, and extend the import at the top of the file to
-`import { parse, serialise } from "../src/lib/pitch.js";`
+Append to `test/pitch.test.js`, and extend the import at the top of the file so it
+reads:
+
+```js
+import {
+  parse,
+  serialise,
+  MARKINGS,
+  TEAMS,
+  POINT_MARKS,
+  GOAL_SIZES,
+} from "../src/lib/pitch.js";
+```
+
+(the extra constants are used by the generated-scene test below)
 
 ```js
 describe("serialise", () => {
@@ -1738,6 +1751,69 @@ describe("serialise", () => {
     expect(serialise(again.scene)).toBe(once);
   });
 
+  it("preserves order when directives interleave", () => {
+    // Grouping players by team globally reordered the array, so this round trip failed
+    // deep-equality: red, blue, red came back as red, red, blue. Plan 2's editor
+    // compares scene objects for dirty-checking and undo, so order must survive.
+    const src = "red: A@1,1\nblue: B@2,2\nred: C@3,3\n";
+    const { scene } = parse(src);
+    expect(scene.players.map((p) => p.label)).toEqual(["A", "B", "C"]);
+    const once = serialise(scene);
+    expect(once).toContain("red: A@1,1\nblue: B@2,2\nred: C@3,3");
+    expect(parse(once).scene).toEqual(scene);
+    expect(serialise(parse(once).scene)).toBe(once);
+
+    const marks = parse("cone: 1,1\ngoal: 0,5\nball: 2,2\ncone: 3,3\n").scene;
+    expect(marks.marks.map((m) => m.kind)).toEqual(["cone", "goal", "ball", "cone"]);
+    expect(parse(serialise(marks)).scene).toEqual(marks);
+  });
+
+  it("round-trips a few hundred generated scenes", () => {
+    // A single golden-path example cannot catch an ordering, quoting or number-format
+    // regression in a narrow combination. Seeded, so a failure is reproducible.
+    let seed = 12345;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const pick = (a) => a[Math.floor(rnd() * a.length)];
+    const num = (m) => Math.round(rnd() * m * 10) / 10;
+    const ARROW = { pass: "->", run: "~>", dribble: "=>", shot: "->>" };
+
+    for (let it = 0; it < 300; it++) {
+      const w = 1 + num(60);
+      const h = 1 + num(40);
+      const lines = [`area: ${w}x${h}${rnd() < 0.5 ? " " + pick(MARKINGS) : ""}`];
+      const labels = [];
+      for (let d = 0; d < Math.floor(rnd() * 10); d++) {
+        const r = rnd();
+        if (r < 0.45) {
+          const toks = [];
+          for (let k = 0; k < 1 + Math.floor(rnd() * 3); k++) {
+            const L = "P" + labels.length;
+            if (labels.includes(L)) continue;
+            labels.push(L);
+            toks.push(`${L}@${num(w)},${num(h)}`);
+          }
+          if (toks.length) lines.push(`${pick(TEAMS)}: ${toks.join(" ")}`);
+        } else if (r < 0.7) {
+          lines.push(`${pick(POINT_MARKS)}: ${num(w)},${num(h)}`);
+        } else if (r < 0.8) {
+          lines.push(`goal: ${num(w)},${num(h)}${rnd() < 0.5 ? " " + pick(GOAL_SIZES) : ""}`);
+        } else if (r < 0.9) {
+          lines.push(`zone: ${num(w)},${num(h)} ${1 + num(10)}x${1 + num(10)}`);
+        } else if (labels.length) {
+          const k = pick(Object.keys(ARROW));
+          const to = rnd() < 0.5 ? pick(labels) : `${num(w)},${num(h)}`;
+          lines.push(`${k}: ${pick(labels)}${ARROW[k]}${to}`);
+        }
+      }
+      const first = parse(lines.join("\n") + "\n").scene;
+      const once = serialise(first);
+      const again = parse(once);
+      expect(again.errors, `iteration ${it}`).toEqual([]);
+      expect(again.scene, `iteration ${it}`).toEqual(first);
+      expect(serialise(again.scene), `iteration ${it}`).toBe(once);
+    }
+  });
+
   it("survives a round trip for an empty scene", () => {
     const { scene } = parse("");
     expect(parse(serialise(scene)).scene).toEqual(scene);
@@ -1794,27 +1870,44 @@ const quote = (s) => (/\s/.test(s) || s.startsWith(`"`) ? `"${s}"` : s);
 // entirely — they are stripped by parse and have no home in the scene model. A future
 // drag-to-edit canvas that writes back through serialise will therefore lose any
 // comments a coach hand-wrote in the block.
+// Consecutive items sharing a key, in array order. Grouping globally by kind or team
+// discarded the original order, which broke parse(serialise(scene)) deep-equality for
+// any scene whose directives interleave — a drill written red, blue, red came back as
+// red, red, blue. Grouping was only ever cosmetic; runs keep the tidy one-line-per-team
+// output for the common case AND preserve order.
+function runs(items, keyOf) {
+  const out = [];
+  for (const item of items) {
+    const key = keyOf(item);
+    const last = out[out.length - 1];
+    if (last && last.key === key) last.items.push(item);
+    else out.push({ key, items: [item] });
+  }
+  return out;
+}
+
 export function serialise(scene) {
   const lines = [];
-  const marksOf = (kind) => scene.marks.filter((m) => m.kind === kind);
 
   const { w, h, markings } = scene.area;
   lines.push(`area: ${n(w)}x${n(h)}${markings === "plain" ? "" : ` ${markings}`}`);
 
-  for (const z of marksOf("zone")) {
-    const label = z.label ? ` ${quote(z.label)}` : "";
-    lines.push(`zone: ${pt(z)} ${n(z.w)}x${n(z.h)}${label}`);
+  for (const run of runs(scene.marks, (m) => m.kind)) {
+    if (run.key === "zone") {
+      for (const z of run.items) {
+        const label = z.label ? ` ${quote(z.label)}` : "";
+        lines.push(`zone: ${pt(z)} ${n(z.w)}x${n(z.h)}${label}`);
+      }
+    } else if (run.key === "goal") {
+      for (const g of run.items) {
+        lines.push(`goal: ${pt(g)}${g.size === "full" ? "" : ` ${g.size}`}`);
+      }
+    } else {
+      lines.push(`${run.key}: ${run.items.map(pt).join(" ")}`);
+    }
   }
-  for (const g of marksOf("goal")) {
-    lines.push(`goal: ${pt(g)}${g.size === "full" ? "" : ` ${g.size}`}`);
-  }
-  for (const kind of ["cone", "ball", "flag"]) {
-    const ms = marksOf(kind);
-    if (ms.length) lines.push(`${kind}: ${ms.map(pt).join(" ")}`);
-  }
-  for (const team of TEAMS) {
-    const ps = scene.players.filter((p) => p.team === team);
-    if (ps.length) lines.push(`${team}: ${ps.map((p) => `${p.label}@${pt(p)}`).join(" ")}`);
+  for (const run of runs(scene.players, (p) => p.team)) {
+    lines.push(`${run.key}: ${run.items.map((p) => `${p.label}@${pt(p)}`).join(" ")}`);
   }
   for (const a of [...scene.actions].sort((x, y) => x.seq - y.seq)) {
     const to = a.to.ref !== undefined ? a.to.ref : pt(a.to);
@@ -1836,7 +1929,7 @@ export function serialise(scene) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  39 passed (39)`.
+Expected: `Tests  41 passed (41)`.
 
 - [ ] **Step 5: Commit**
 
