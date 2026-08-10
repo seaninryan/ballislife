@@ -116,13 +116,47 @@ function parseLabel(rest, ctx) {
   ctx.scene.label = unquote(rest);
 }
 
+// Each movement kind is written with a distinct arrow so a reader can tell a pass
+// from a run at a glance in the source, not only in the rendering.
+export const ARROWS = { pass: "->", run: "~>", dribble: "=>", shot: "->>" };
+const ARROW_KINDS = Object.keys(ARROWS);
+
+// Longest arrow first, so "->>" is not mis-read as "->".
+const ARROW_RE = /^(.*?)(->>|~>|=>|->)(.*)$/;
+
+function parseActions(kind) {
+  return (rest, ctx) => {
+    const arrow = ARROWS[kind];
+    for (const token of rest.split(/\s+/).filter(Boolean)) {
+      const m = token.match(ARROW_RE);
+      if (!m || m[2] !== arrow || m[1] === "" || m[3] === "") {
+        ctx.fail(`expected "<from><arrow><to>" but got "${token}"`);
+        continue;
+      }
+      // Resolution is deferred: the player may be declared on a later line.
+      ctx.pending.push({ kind, fromRaw: m[1], toRaw: m[3], line: ctx.line });
+    }
+  };
+}
+
+// A target is a player label, the literal "goal", or a coordinate.
+function resolveTarget(raw, scene) {
+  if (raw === "goal") return { ok: true, to: { ref: "goal" } };
+  const p = parsePoint(raw);
+  if (p) return { ok: true, to: p };
+  if (scene.players.some((pl) => pl.label === raw)) return { ok: true, to: { ref: raw } };
+  return { ok: false, message: `unknown player "${raw}"` };
+}
+
 const DIRECTIVES = { area: parseArea, goal: parseGoal, zone: parseZone, label: parseLabel };
 for (const team of TEAMS) DIRECTIVES[team] = parsePlayers(team);
 for (const kind of POINT_MARKS) DIRECTIVES[kind] = parsePointMarks(kind);
+for (const kind of ARROW_KINDS) DIRECTIVES[kind] = parseActions(kind);
 
 export function parse(src) {
   const scene = emptyScene();
   const errors = [];
+  const pending = [];
   const lines = String(src ?? "").split("\n");
 
   lines.forEach((raw, i) => {
@@ -142,9 +176,30 @@ export function parse(src) {
     }
     handler(m[2].trim(), {
       scene,
+      pending,
+      line: i + 1,
       fail: (message) => { errors.push({ line: i + 1, message }); },
     });
   });
+
+  // Second pass: resolve action endpoints now that every player is known.
+  for (const a of pending) {
+    if (!scene.players.some((p) => p.label === a.fromRaw)) {
+      errors.push({
+        line: a.line,
+        message: `expected a player label as the source, got "${a.fromRaw}"`,
+      });
+      continue;
+    }
+    const t = resolveTarget(a.toRaw, scene);
+    if (!t.ok) { errors.push({ line: a.line, message: t.message }); continue; }
+    scene.actions.push({
+      kind: a.kind,
+      from: a.fromRaw,
+      to: t.to,
+      seq: scene.actions.length + 1,
+    });
+  }
 
   return { scene, errors };
 }

@@ -141,3 +141,58 @@ describe("parse: marks", () => {
     expect(parse("label: 3v2 to end line\n").scene.label).toBe("3v2 to end line");
   });
 });
+
+describe("parse: actions", () => {
+  it("reads a pass between two players", () => {
+    const { scene, errors } = parse("red: A@1,1 B@2,2\npass: A->B\n");
+    expect(scene.actions).toEqual([{ kind: "pass", from: "A", to: { ref: "B" }, seq: 1 }]);
+    expect(errors).toEqual([]);
+  });
+
+  it("reads each movement kind with its own arrow", () => {
+    const src = [
+      "red: A@1,1 B@2,2 C@3,3",
+      "pass: A->B",
+      "run: C~>28,4",
+      "dribble: B=>32,12",
+      "shot: C->>goal",
+    ].join("\n");
+    const { scene, errors } = parse(src);
+    expect(errors).toEqual([]);
+    expect(scene.actions).toEqual([
+      { kind: "pass", from: "A", to: { ref: "B" }, seq: 1 },
+      { kind: "run", from: "C", to: { x: 28, y: 4 }, seq: 2 },
+      { kind: "dribble", from: "B", to: { x: 32, y: 12 }, seq: 3 },
+      { kind: "shot", from: "C", to: { ref: "goal" }, seq: 4 },
+    ]);
+  });
+
+  it("numbers actions in declaration order across lines and within a line", () => {
+    const src = "red: A@1,1 B@2,2 C@3,3\npass: A->B B->C\nrun: A~>9,9\n";
+    expect(parse(src).scene.actions.map((a) => a.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("rejects a reference to an undeclared player", () => {
+    const { scene, errors } = parse("red: A@1,1\npass: A->Z\n");
+    expect(scene.actions).toEqual([]);
+    expect(errors).toEqual([{ line: 2, message: 'unknown player "Z"' }]);
+  });
+
+  it("rejects an action whose source is not a player", () => {
+    const { errors } = parse("red: A@1,1\npass: 3,3->A\n");
+    expect(errors).toEqual([{ line: 2, message: 'expected a player label as the source, got "3,3"' }]);
+  });
+
+  it("reports a malformed action without dropping the rest of the line", () => {
+    const { scene, errors } = parse("red: A@1,1 B@2,2\npass: A-B A->B\n");
+    expect(scene.actions.map((a) => a.seq)).toEqual([1]);
+    expect(errors).toEqual([{ line: 2, message: 'expected "<from><arrow><to>" but got "A-B"' }]);
+  });
+
+  it("resolves an action whose players are declared on a later line", () => {
+    // Endpoints resolve in a second pass, so directive order in the source is free.
+    const { scene, errors } = parse("pass: A->B\nred: A@1,1 B@2,2\n");
+    expect(errors).toEqual([]);
+    expect(scene.actions).toEqual([{ kind: "pass", from: "A", to: { ref: "B" }, seq: 1 }]);
+  });
+});
