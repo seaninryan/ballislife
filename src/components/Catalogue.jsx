@@ -6,12 +6,17 @@ import Grid from "./Grid.jsx";
 import DrillView from "./DrillView.jsx";
 
 // Raw exception text like "drive 403" tells a coach nothing about what to do next.
-export function friendlyError(message) {
-  const text = String(message ?? "");
-  if (/\b401\b/.test(text)) return "Your Google sign-in expired. Reload to sign in again.";
-  if (/\b403\b/.test(text)) return "Google is rate-limiting requests. Try again in a minute.";
-  if (/\b404\b/.test(text)) return "That drill is no longer in your Drive folder.";
-  if (/\b5\d\d\b/.test(text)) return "Google Drive is having trouble. Try again shortly.";
+// Classify on the numeric code driveApi already attaches; only sniff the text for the
+// network case, which has no code. Regexing the message for digits would misread a drill
+// named "500 Cones" as a server error.
+export function friendlyError(error) {
+  if (!error) return "";
+  const code = typeof error === "object" ? error.code : undefined;
+  const text = String((typeof error === "object" ? error.message : error) ?? "");
+  if (code === 401) return "Your Google sign-in expired. Reload to sign in again.";
+  if (code === 403) return "Google is rate-limiting requests. Try again in a minute.";
+  if (code === 404) return "That drill is no longer in your Drive folder.";
+  if (code >= 500 && code < 600) return "Google Drive is having trouble. Try again shortly.";
   if (/failed to fetch|networkerror|load failed/i.test(text)) {
     return "No connection to Google Drive. Check your signal and try again.";
   }
@@ -19,8 +24,8 @@ export function friendlyError(message) {
 }
 
 export default function Catalogue({
-  status, drills = [], failed = [], message, onSignIn,
-  filter = {}, onFilterChange, selected, drillStatus, drillText, drillMessage,
+  status, drills = [], failed = [], error, onSignIn,
+  filter = {}, onFilterChange, selected, drillStatus, drillText, drillError,
   onOpen, onBack, duplicateFolders,
 }) {
   if (status === "signed-out") {
@@ -35,7 +40,7 @@ export default function Catalogue({
   if (status === "not-owner") {
     return <div className="card banner err">This app is for its owner only. You have been signed out.</div>;
   }
-  if (status === "error") return <div className="card banner err">{friendlyError(message)}</div>;
+  if (status === "error") return <div className="card banner err">{friendlyError(error)}</div>;
 
   if (selected) {
     return (
@@ -43,7 +48,7 @@ export default function Catalogue({
         drill={selected}
         status={drillStatus}
         text={drillText}
-        message={friendlyError(drillMessage)}
+        message={friendlyError(drillError)}
         onBack={onBack}
       />
     );

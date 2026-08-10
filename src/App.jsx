@@ -8,20 +8,18 @@ import { loadCatalogue, readDrill } from "./lib/drive.js";
 export default function App() {
   const [status, setStatus] = useState("starting");
   const [drills, setDrills] = useState([]);
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState(null);
   const [filter, setFilter] = useState({});
   const [selected, setSelected] = useState(null);
   const [drillStatus, setDrillStatus] = useState("loading");
   const [drillText, setDrillText] = useState("");
-  const [drillMessage, setDrillMessage] = useState("");
+  const [drillError, setDrillError] = useState(null);
   const [failed, setFailed] = useState([]);
   const [duplicateFolders, setDuplicateFolders] = useState(false);
   const folderRef = useRef(null);
-  // Which drill's fetch is the most recent one requested. Opening a drill, going back,
-  // and opening a different one quickly starts two overlapping readDrill calls; without
-  // this, whichever resolves last wins even if it is the stale one — showing one drill's
-  // text under another's header. Guard every state update below on still being current.
-  const requestRef = useRef(null);
+  // A monotonic token, not the drill id: reopening the SAME drill starts a second
+  // request that an id check cannot tell from the first, so the slower response won.
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -42,7 +40,7 @@ export default function App() {
       setDuplicateFolders(Boolean(dupes));
       setStatus("ready");
     } catch (e) {
-      setMessage(String(e?.message ?? e));
+      setError(e);
       setStatus("error");
     }
   }, []);
@@ -63,18 +61,18 @@ export default function App() {
   }, [load]);
 
   const openDrill = useCallback(async (drill) => {
-    requestRef.current = drill.id;
+    const mine = ++requestSeq.current;
     setSelected(drill);
     setDrillStatus("loading");
     setDrillText("");
     try {
       const { text } = await readDrill(drill.id, folderRef.current);
-      if (requestRef.current !== drill.id) return; // a newer open superseded this one
+      if (requestSeq.current !== mine) return; // superseded
       setDrillText(text);
       setDrillStatus("ready");
     } catch (e) {
-      if (requestRef.current !== drill.id) return;
-      setDrillMessage(String(e?.message ?? e));
+      if (requestSeq.current !== mine) return;
+      setDrillError(e);
       setDrillStatus("error");
     }
   }, []);
@@ -89,14 +87,14 @@ export default function App() {
         status={status === "starting" ? "loading" : status}
         drills={drills}
         failed={failed}
-        message={message}
+        error={error}
         onSignIn={onSignIn}
         filter={filter}
         onFilterChange={setFilter}
         selected={selected}
         drillStatus={drillStatus}
         drillText={drillText}
-        drillMessage={drillMessage}
+        drillError={drillError}
         onOpen={openDrill}
         onBack={() => setSelected(null)}
         duplicateFolders={duplicateFolders}

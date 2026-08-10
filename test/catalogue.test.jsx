@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
-import Catalogue from "../src/components/Catalogue.jsx";
+import Catalogue, { friendlyError } from "../src/components/Catalogue.jsx";
 
 const render = (props) => renderToStaticMarkup(<Catalogue {...props} />);
 
@@ -35,8 +35,12 @@ describe("Catalogue", () => {
   });
 
   it("surfaces a friendly message for a rate-limited Drive", () => {
-    const html = render({ status: "error", message: "drive 403" });
+    const html = render({ status: "error", error: Object.assign(new Error("drive 403"), { code: 403 }) });
     expect(html).toMatch(/too many requests|try again/i);
+  });
+
+  it("does not mistake a number in a drill name for an http status", () => {
+    expect(friendlyError(new Error("could not parse rondo-500.md"))).toContain("rondo-500.md");
   });
 
   it("flags an invalid drill instead of hiding it", () => {
@@ -60,6 +64,7 @@ describe("Catalogue", () => {
   it("shows an error state", () => {
     // Not in the plan's list either, and it breaks for the same reason Task 7 exists:
     // raw exception text is now passed through friendlyError rather than shown as-is.
-    expect(render({ status: "error", message: "drive 500" })).toMatch(/trouble|try again/i);
+    expect(render({ status: "error", error: Object.assign(new Error("drive 500"), { code: 500 }) }))
+      .toMatch(/trouble|try again/i);
   });
 });
