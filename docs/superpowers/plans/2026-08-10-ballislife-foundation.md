@@ -3162,7 +3162,8 @@ Written after this plan lands, against the real parser:
 
 - `lib/drive.js` — port fancystats' auth, plus `/BallIsLife` folder find-or-create and
   file CRUD, and the owner gate: read the signed-in account via `about.get` and refuse
-  anyone but `OWNER_EMAIL` (value to confirm at build time)
+  anyone whose address does not match `OWNER_EMAIL_SHA256` (hashed rather than stored
+  in the clear, since this repo is public)
 - `lib/index.js` — build, diff and repair `index.json` against a `files.list` of ids
   and `modifiedTime`s
 - `lib/drills.js` — drill model, category and tag filtering, search, slug rules

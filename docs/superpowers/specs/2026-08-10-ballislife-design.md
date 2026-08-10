@@ -93,11 +93,29 @@ permits this, so no extra scope is needed:
 GET https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)
 ```
 
-A mismatch signs the token out and shows "this app is for <owner> only" rather than
-loading anything. The owner's address lives in one exported constant in `drive.js`
-(`OWNER_EMAIL`) — its value is to be confirmed when Plan 2 is built, since it is the
-Google account that owns the Drive folder, which is not necessarily the address used
-elsewhere.
+A mismatch signs the token out and shows "this app is for its owner only" rather than
+loading anything.
+
+**The address is stored as a hash, not in the clear**, because this repo is public and
+a plaintext personal email in a public repo gets harvested by address scrapers. The
+check compares the SHA-256 of the signed-in address, trimmed and lower-cased:
+
+```js
+// sha256("<the owner's gmail address>") — the address itself is deliberately not
+// committed, since this repo is public and scrapers harvest plaintext addresses.
+const OWNER_EMAIL_SHA256 =
+  "9620eb10792df98e40aa9814000f894744e9add26225d3aa834e707c6a6c3596";
+
+const digest = async (email) => {
+  const bytes = new TextEncoder().encode(email.trim().toLowerCase());
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+```
+
+`crypto.subtle` is available in every browser this app targets and needs no dependency.
+Hashing adds no security — a determined person could guess the address — but it removes
+the one concrete downside of committing it, which is automated scraping.
 
 **What this does and does not protect.** The deployed site is publicly readable — that
 is inherent to GitHub Pages on a public repo, and the app's HTML and JS carry nothing
