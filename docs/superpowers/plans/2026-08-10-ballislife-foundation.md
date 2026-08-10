@@ -1409,6 +1409,20 @@ describe("parse: actions", () => {
     expect(errors).toEqual([{ line: 2, message: 'expected "<from><arrow><to>" but got "A-B"' }]);
   });
 
+  it("reports errors in source order across both passes", () => {
+    // Action endpoints resolve in a second pass, so an action error is generated after
+    // every line error even when its line comes first.
+    expect(parse("pass: A->Z\ncone: bad\nred: A@1,1\n").errors).toEqual([
+      { line: 1, message: 'unknown player "Z"' },
+      { line: 2, message: 'expected "<x>,<y>" but got "bad"' },
+    ]);
+    // Two errors on one line keep their original order (the sort is stable).
+    expect(parse("cone: nope alsobad\n").errors).toEqual([
+      { line: 1, message: 'expected "<x>,<y>" but got "nope"' },
+      { line: 1, message: 'expected "<x>,<y>" but got "alsobad"' },
+    ]);
+  });
+
   it("resolves an action whose players are declared on a later line", () => {
     // Endpoints resolve in a second pass, so directive order in the source is free.
     const { scene, errors } = parse("pass: A->B\nred: A@1,1 B@2,2\n");
@@ -1526,6 +1540,11 @@ export function parse(src) {
     });
   }
 
+  // Report in source order. Endpoints resolve in this second pass, so without the sort
+  // an action error on line 1 lands after a mark error on line 2 — and the whole point
+  // of carrying a line number is that a reader can follow the list down the source.
+  // The sort is stable, so multiple errors on one line keep their original order.
+  errors.sort((x, y) => x.line - y.line);
   return { scene, errors };
 }
 ```
@@ -1536,7 +1555,7 @@ export function parse(src) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  26 passed (26)`.
+Expected: `Tests  27 passed (27)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1621,7 +1640,7 @@ describe("parse: robustness", () => {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  30 passed (30)`. If any fail, fix `pitch.js` — do not weaken the
+Expected: `Tests  31 passed (31)`. If any fail, fix `pitch.js` — do not weaken the
 test. A self-referential pass (`A->A`) is legal input and must simply render as a
 degenerate arrow, not error.
 
@@ -1770,7 +1789,11 @@ const quote = (s) => (/\s/.test(s) || s.startsWith(`"`) ? `"${s}"` : s);
 
 // Scene -> canonical source. Inverse of parse() at the MODEL level:
 // parse(serialise(scene)).scene deep-equals scene, and serialise is stable under
-// re-parse. It is NOT byte-identical to arbitrary input source.
+// re-parse. It is NOT byte-identical to arbitrary input source: directives are
+// reordered, multi-action lines are split one per line, and `#` comments are dropped
+// entirely — they are stripped by parse and have no home in the scene model. A future
+// drag-to-edit canvas that writes back through serialise will therefore lose any
+// comments a coach hand-wrote in the block.
 export function serialise(scene) {
   const lines = [];
   const marksOf = (kind) => scene.marks.filter((m) => m.kind === kind);
@@ -1813,7 +1836,7 @@ export function serialise(scene) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  38 passed (38)`.
+Expected: `Tests  39 passed (39)`.
 
 - [ ] **Step 5: Commit**
 
@@ -2259,7 +2282,7 @@ export function actionPath(action, scene) {
 npx vitest run test/pitchSvg.test.js
 ```
 
-Expected: `Tests  24 passed (24)`.
+Expected: `Tests  25 passed (25)`.
 
 - [ ] **Step 5: Commit**
 
@@ -2897,11 +2920,32 @@ to:
 >   parsed scene, so every valid line still draws. A typo must never produce a blank
 >   pane, and a drill that has never parsed cleanly still shows whatever is valid.
 
-- [ ] **Step 6: Commit**
+### Correction 3: what a drag-to-edit canvas must handle
+
+The spec's deferred section says a drag-to-edit canvas is "enabled by `pitch.js`
+round-trip identity; requires no storage change". True, but implementation surfaced two
+constraints it must respect, both worth recording while they are fresh.
+
+- [ ] **Step 7: Find the bullet**
+
+```bash
+node -e 'require("fs").readFileSync("docs/superpowers/specs/2026-08-10-ballislife-design.md","utf8").split("\n").forEach((l,i)=>{if(l.includes("Drag-to-edit"))console.log(i+1,l)})'
+```
+
+- [ ] **Step 8: Append two sentences to that bullet**
+
+After "requires no storage change." add:
+
+> Two constraints it must respect: `serialise` sorts actions by `seq`, so reordering
+> must renumber `seq` or the reorder silently does nothing; and `#` comments in a
+> `pitch` block are stripped by `parse` and have no home in the scene model, so writing
+> back through `serialise` loses any a coach hand-wrote.
+
+- [ ] **Step 9: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-08-10-ballislife-design.md
-git commit -m "docs: correct the round-trip invariant and diagram error behaviour"
+git commit -m "docs: correct the round-trip invariant, error behaviour and editor caveats"
 ```
 
 ---
