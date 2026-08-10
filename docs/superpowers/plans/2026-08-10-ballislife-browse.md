@@ -1136,6 +1136,246 @@ git status --short
 
 ---
 
+## Task 9: Fixes from the final review
+
+**Files:**
+- Modify: `src/App.jsx`, `src/components/Catalogue.jsx`, `test/catalogue.test.jsx`, `src/styles.css`
+- Create: `test/app.test.jsx`
+
+The final review found one real bug, one latent one, a coverage gap where the bug lived,
+and a phone-usability point. All four are cheap.
+
+- [ ] **Step 1: Fix the stale-fetch guard**
+
+The guard keys on the drill id, which distinguishes *which drill* is wanted but not
+*which request*. Open drill A, go back, open A again before the first resolves, and both
+responses pass the check — whichever lands last wins, so a stale body can replace a fresh
+one. Proven with a real jsdom mount, not reasoned about.
+
+In `src/App.jsx`, replace the id-based ref with a monotonic token:
+
+```jsx
+  // A monotonic token, not the drill id: reopening the SAME drill starts a second
+  // request that an id check cannot tell from the first, so the slower response won.
+  const requestSeq = useRef(0);
+
+  const openDrill = useCallback(async (drill) => {
+    const mine = ++requestSeq.current;
+    setSelected(drill);
+    setDrillStatus("loading");
+    setDrillText("");
+    try {
+      const { text } = await readDrill(drill.id, folderRef.current);
+      if (requestSeq.current !== mine) return; // superseded
+      setDrillText(text);
+      setDrillStatus("ready");
+    } catch (e) {
+      if (requestSeq.current !== mine) return;
+      setDrillError(e);
+      setDrillStatus("error");
+    }
+  }, []);
+```
+
+- [ ] **Step 2: Classify errors by code, not by regexing the text**
+
+`friendlyError` pattern-matches three-digit runs in the message, so any future message
+containing a filename like `rondo-500.md` would be reported as a Drive outage. No current
+path feeds user content through it, so this is a landmine rather than a live bug — but it
+costs one change to remove. `driveApi` already puts a numeric `code` on every error.
+
+In `src/components/Catalogue.jsx`:
+
+```jsx
+// Raw exception text like "drive 403" tells a coach nothing about what to do next.
+// Classify on the numeric code driveApi already attaches; only sniff the text for the
+// network case, which has no code. Regexing the message for digits would misread a drill
+// named "500 Cones" as a server error.
+export function friendlyError(error) {
+  if (!error) return "";
+  const code = typeof error === "object" ? error.code : undefined;
+  const text = String((typeof error === "object" ? error.message : error) ?? "");
+  if (code === 401) return "Your Google sign-in expired. Reload to sign in again.";
+  if (code === 403) return "Google is rate-limiting requests. Try again in a minute.";
+  if (code === 404) return "That drill is no longer in your Drive folder.";
+  if (code >= 500 && code < 600) return "Google Drive is having trouble. Try again shortly.";
+  if (/failed to fetch|networkerror|load failed/i.test(text)) {
+    return "No connection to Google Drive. Check your signal and try again.";
+  }
+  return text || "Something went wrong.";
+}
+```
+
+`Catalogue` now takes `error` and `drillError` (Error objects) rather than `message` and
+`drillMessage` strings; update its two call sites in `App.jsx` and the state it keeps.
+
+Update the two tests in `test/catalogue.test.jsx` that pass `message` to pass an error
+object instead, and add:
+
+```jsx
+  it("does not mistake a number in a drill name for an http status", () => {
+    expect(friendlyError(new Error("could not parse rondo-500.md"))).toContain("rondo-500.md");
+  });
+```
+
+importing `friendlyError` alongside the default export.
+
+- [ ] **Step 3: Test `App` for the first time**
+
+`src/App.jsx` has no test file, which is why the guard bug survived. This needs real
+interaction, so it runs under jsdom with `react-dom/client`, unlike the SSR smoke tests
+elsewhere.
+
+Create `test/app.test.jsx`:
+
+```jsx
+// @vitest-environment jsdom
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
+import * as drive from "../src/lib/drive.js";
+import * as auth from "../src/lib/driveAuth.js";
+import * as owner from "../src/lib/owner.js";
+import * as api from "../src/lib/driveApi.js";
+import App from "../src/App.jsx";
+
+vi.mock("../src/lib/drive.js");
+vi.mock("../src/lib/driveAuth.js");
+vi.mock("../src/lib/owner.js");
+vi.mock("../src/lib/driveApi.js");
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+globalThis.__APP_VERSION__ = "test";
+
+const drill = (id, title) => ({
+  id, slug: id, title, category: "skill", minutes: 10, players: null,
+  tags: [], thumb: null, invalid: null,
+});
+
+let container;
+let root;
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  auth.initAuth.mockResolvedValue(true);
+  auth.isSignedIn.mockReturnValue(true);
+  auth.getAccessToken.mockReturnValue("tok");
+  auth.startTokenKeepAlive.mockImplementation(() => {});
+  api.aboutEmail.mockResolvedValue("owner@example.com");
+  owner.isOwner.mockResolvedValue(true);
+  drive.loadCatalogue.mockResolvedValue({
+    drills: [drill("a", "Alpha"), drill("b", "Bravo")],
+    failed: [], folderId: "F1", duplicateFolders: false, index: { version: 1, entries: {} },
+  });
+});
+
+afterEach(() => {
+  act(() => root?.unmount());
+  container.remove();
+});
+
+const mount = async () => {
+  root = createRoot(container);
+  await act(async () => { root.render(<App />); });
+};
+
+const openCard = async (title) => {
+  const button = [...container.querySelectorAll("button")]
+    .find((b) => b.textContent.includes(title));
+  await act(async () => { button.click(); });
+};
+
+describe("App", () => {
+  it("loads and lists the drills", async () => {
+    await mount();
+    expect(container.textContent).toContain("Alpha");
+    expect(container.textContent).toContain("Bravo");
+  });
+
+  it("refuses a non-owner and signs them out", async () => {
+    owner.isOwner.mockResolvedValue(false);
+    await mount();
+    expect(container.textContent).toMatch(/owner only/i);
+    expect(auth.signOut).toHaveBeenCalled();
+    expect(drive.loadCatalogue).not.toHaveBeenCalled();
+  });
+
+  it("opens a drill and shows its text", async () => {
+    drive.readDrill.mockResolvedValue({ text: "---\ntitle: Alpha\n---\n\nAlpha body\n", modifiedTime: "T" });
+    await mount();
+    await openCard("Alpha");
+    expect(container.textContent).toContain("Alpha body");
+  });
+
+  it("drops a superseded response when a different drill is opened", async () => {
+    const resolvers = {};
+    drive.readDrill.mockImplementation((id) =>
+      new Promise((resolve) => { resolvers[id] = resolve; }));
+    await mount();
+    await openCard("Alpha");
+    await openCard("Bravo");
+    await act(async () => {
+      resolvers.b({ text: "BRAVO BODY", modifiedTime: "T" });
+      resolvers.a({ text: "ALPHA BODY", modifiedTime: "T" });
+    });
+    expect(container.textContent).toContain("BRAVO BODY");
+    expect(container.textContent).not.toContain("ALPHA BODY");
+  });
+
+  it("drops a superseded response when the SAME drill is reopened", async () => {
+    // An id-based guard cannot tell two requests for one drill apart, so the slower
+    // response overwrote the newer one.
+    const calls = [];
+    drive.readDrill.mockImplementation(() =>
+      new Promise((resolve) => { calls.push(resolve); }));
+    await mount();
+    await openCard("Alpha");
+    await act(async () => { container.querySelector("button").click(); }); // back
+    await openCard("Alpha");
+    await act(async () => {
+      calls[1]({ text: "FRESH BODY", modifiedTime: "T" });
+      calls[0]({ text: "STALE BODY", modifiedTime: "T" });
+    });
+    expect(container.textContent).toContain("FRESH BODY");
+    expect(container.textContent).not.toContain("STALE BODY");
+  });
+
+  it("shows a friendly message when a drill fails to open", async () => {
+    drive.readDrill.mockRejectedValue(Object.assign(new Error("drive 500"), { code: 500 }));
+    await mount();
+    await openCard("Alpha");
+    expect(container.textContent).toMatch(/having trouble/i);
+  });
+});
+```
+
+If `act` is not exported from `react` in this version, import it from
+`react-dom/test-utils` instead and say so in your report.
+
+- [ ] **Step 4: Make the chips big enough to tap**
+
+The filter chips render about 20px tall, well under the ~44px touch guideline, on the one
+view built for a phone at the side of a pitch. In `src/styles.css`:
+
+```css
+/* Sized for a thumb, not a mouse: this is the view used at the side of a pitch. */
+.chip-button { padding: 8px 14px; border-radius: 99px; font-size: 14px;
+  background: var(--panel); border: 1px solid var(--line); cursor: pointer; }
+.chip-button.small { font-size: 13px; padding: 6px 12px; }
+```
+
+- [ ] **Step 5: Run everything and commit**
+
+```bash
+npm test && npm run build
+git add -A
+git commit -m "fix: guard reopening the same drill, classify errors by code, tappable chips"
+```
+
+---
+
 ## Done when
 
 - `npm test` passes and `npm run build` is clean
