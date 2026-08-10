@@ -84,3 +84,75 @@ export function markings(area) {
   }
   return out;
 }
+
+export const MARKER_GAP = 11; // px: stop the arrow short of the target marker
+
+// A target -> { x, y } in metres, or null if it cannot be resolved.
+// "goal" prefers a declared goal mark and otherwise falls back to the left-centre
+// of the area, so a drill that says `shot: A->>goal` without declaring a goal still
+// renders something sensible instead of vanishing.
+export function resolvePoint(target, scene) {
+  if (target.ref === undefined) return { x: target.x, y: target.y };
+  if (target.ref === "goal") {
+    const g = scene.marks.find((m) => m.kind === "goal");
+    return g ? { x: g.x, y: g.y } : { x: 0, y: scene.area.h / 2 };
+  }
+  const p = scene.players.find((pl) => pl.label === target.ref);
+  return p ? { x: p.x, y: p.y } : null;
+}
+
+// Action -> { kind, d, seq, badge } in pixels, or null if unrenderable.
+export function actionPath(action, scene) {
+  const from = resolvePoint({ ref: action.from }, scene);
+  const to = resolvePoint(action.to, scene);
+  if (!from || !to) return null;
+
+  const a = toPx(from.x, from.y);
+  const b = toPx(to.x, to.y);
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return null; // genuinely coincident, and would divide by zero
+
+  const ux = dx / len, uy = dy / len;
+  // Shrink the gap for short actions rather than dropping them. A fixed gap silently
+  // erased any action between close-together players — realistic in a small rondo —
+  // leaving neither an arrow nor an error to explain where it went.
+  const gap = Math.min(MARKER_GAP, len * 0.35);
+  const start = { x: a.x + ux * gap, y: a.y + uy * gap };
+  const end = { x: b.x - ux * gap, y: b.y - uy * gap };
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const r2 = (v) => Math.round(v * 100) / 100;
+
+  let d;
+  if (action.kind === "dribble") {
+    // Perpendicular zig-zag along the line: a series of quadratic wiggles.
+    const span = Math.hypot(end.x - start.x, end.y - start.y);
+    const steps = Math.max(3, Math.round(span / 14));
+    const seg = span / steps;
+    const amp = 5;
+    d = `M ${r2(start.x)} ${r2(start.y)}`;
+    for (let i = 0; i < steps; i++) {
+      const sign = i % 2 === 0 ? 1 : -1;
+      const cx = start.x + ux * seg * (i + 0.5) + -uy * amp * sign;
+      const cy = start.y + uy * seg * (i + 0.5) + ux * amp * sign;
+      const px = start.x + ux * seg * (i + 1);
+      const py = start.y + uy * seg * (i + 1);
+      d += ` q ${r2(cx - (start.x + ux * seg * i))} ${r2(cy - (start.y + uy * seg * i))} ${r2(px - (start.x + ux * seg * i))} ${r2(py - (start.y + uy * seg * i))}`;
+    }
+  } else if (action.kind === "run") {
+    // Single gentle bow, so a run reads differently from a pass even when parallel.
+    const bow = Math.min(len * 0.18, 26);
+    const cx = mid.x + -uy * bow;
+    const cy = mid.y + ux * bow;
+    d = `M ${r2(start.x)} ${r2(start.y)} Q ${r2(cx)} ${r2(cy)} ${r2(end.x)} ${r2(end.y)}`;
+  } else {
+    d = `M ${r2(start.x)} ${r2(start.y)} L ${r2(end.x)} ${r2(end.y)}`;
+  }
+
+  return {
+    kind: action.kind,
+    d,
+    seq: action.seq,
+    badge: { x: mid.x + -uy * 9, y: mid.y + ux * 9 },
+  };
+}
