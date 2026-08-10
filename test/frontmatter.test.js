@@ -48,7 +48,14 @@ describe("parseDoc", () => {
       meta: { title: "T" },
       body: "Body.\n",
       error: null,
+      front: "title: T",
     });
+  });
+
+  it("exposes the raw frontmatter source, and null when there is no fence", () => {
+    expect(parseDoc("---\ntitle: T\n---\nBody.\n").front).toBe("title: T");
+    expect(parseDoc("Body only.\n").front).toBe(null);
+    expect(parseDoc("---\ntags: [unclosed\n---\nBody.\n").front).toBe("tags: [unclosed");
   });
 
   it("rejects frontmatter that is not a mapping, keeping the body", () => {
@@ -64,7 +71,9 @@ describe("parseDoc", () => {
   });
 
   it("reports a non-string argument instead of coercing it", () => {
-    expect(parseDoc({ foo: 1 })).toEqual({ meta: {}, body: "", error: "expected a string" });
+    expect(parseDoc({ foo: 1 })).toEqual({
+      meta: {}, body: "", error: "expected a string", front: null,
+    });
     expect(parseDoc(123).error).toBe("expected a string");
   });
 
@@ -105,5 +114,26 @@ describe("serialiseDoc", () => {
     const once = serialiseDoc(parseDoc(src));
     expect(serialiseDoc(parseDoc(once))).toBe(once);
     expect(parseDoc(once).meta).toEqual({ title: "Rondo 4v2", minutes: 10, tags: ["possession"] });
+  });
+
+  it("preserves unparseable frontmatter so the user can still repair it", () => {
+    const src = "---\ntitle: 3v2\ntags: [transition\n---\n\nReds attack.\n";
+    const doc = parseDoc(src);
+    expect(doc.error).toMatch(/yaml/i);
+    expect(doc.meta).toEqual({});
+
+    const out = serialiseDoc(doc);
+    expect(out).toContain("title: 3v2");
+    expect(out).toContain("tags: [transition");
+    expect(out).toContain("Reds attack.");
+    expect(serialiseDoc(parseDoc(out))).toBe(out); // and it is stable
+  });
+
+  it("lets replacement metadata win over the unparseable original", () => {
+    const doc = parseDoc("---\ntags: [transition\n---\n\nBody.\n");
+    const fixed = serialiseDoc({ ...doc, meta: { tags: ["transition"] } });
+    expect(fixed).toContain("- transition");
+    expect(fixed).not.toContain("[transition");
+    expect(parseDoc(fixed).error).toBe(null);
   });
 });
