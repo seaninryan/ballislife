@@ -30,8 +30,30 @@ describe("markings", () => {
     expect(shapes("half")).toEqual(["rect", "rect", "rect", "arc"]);
   });
 
-  it("draws boundary, halfway line, centre circle and two boxes for full", () => {
-    expect(shapes("full")).toEqual(["rect", "line", "circle", "rect", "rect"]);
+  it("draws boundary, halfway line, centre circle and both boxes at both ends for full", () => {
+    expect(shapes("full")).toEqual(["rect", "line", "circle", "rect", "rect", "rect", "rect"]);
+  });
+
+  it("keeps real regulation box dimensions at full-pitch scale", () => {
+    // Every cap resolves to the true FIFA dimension at this size, so the six-yard box is
+    // a proper box rather than the sliver an earlier comment claimed.
+    const [, penalty, six] = markings({ w: 100, h: 64, markings: "full" }).filter(
+      (s) => s.type === "rect",
+    );
+    expect(penalty.w).toBeCloseTo(16.5 * S);
+    expect(penalty.h).toBeCloseTo(40.3 * S);
+    expect(six.w).toBeCloseTo(5.5 * S);
+    expect(six.h).toBeCloseTo(18.3 * S);
+  });
+
+  it("stops the penalty arc outgrowing a shallow pitch", () => {
+    // On a 12m-deep area, capping the arc on height alone bulged the D to 11.8m —
+    // further from goal than the box, and almost off the far end.
+    const arc = markings({ w: 12, h: 40, markings: "half" }).find((s) => s.type === "arc");
+    const t = arc.d.split(/\s+/); // M x y A rx ry rot laf sf x y
+    const rMetres = Number(t[4]) / S;
+    const bulge = Math.min(11, 12 * 0.22) + rMetres;
+    expect(bulge).toBeLessThan(12 * 0.7);
   });
 
   it("draws boundary and one box for box", () => {
@@ -128,6 +150,24 @@ describe("actionPath", () => {
     const p = actionPath(byKind("pass"), scene);
     expect(p.seq).toBe(1);
     expect(p.badge.x).toBeCloseTo((toPx(0, 0).x + toPx(20, 0).x) / 2, 0);
+  });
+
+  it("keeps a run's badge clear of the run's own curve", () => {
+    // The badge is 6.5px in radius; a quadratic deviates half its control offset at the
+    // midpoint, so a fixed 9px offset from the chord landed inside the curve for almost
+    // every run drawn.
+    const runScene = parse("area: 40x25 plain\nred: A@2,20 B@36,6\nrun: A~>36,6\n").scene;
+    const p = actionPath(runScene.actions[0], runScene);
+    const a = toPx(2, 20);
+    const b = toPx(36, 6);
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const bow = Math.min(len * 0.18, 26);
+    const ux = (b.x - a.x) / len;
+    const uy = (b.y - a.y) / len;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const curveAtMid = { x: mid.x + -uy * (bow / 2), y: mid.y + ux * (bow / 2) };
+    const gap = Math.hypot(p.badge.x - curveAtMid.x, p.badge.y - curveAtMid.y);
+    expect(gap).toBeGreaterThan(6.5);
   });
 
   it("returns null when an endpoint cannot be resolved", () => {

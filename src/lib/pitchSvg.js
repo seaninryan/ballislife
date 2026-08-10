@@ -15,8 +15,11 @@ const BOX_WIDTH = (h) => Math.min(40.3, h * 0.7);
 const SIX_DEPTH = (w) => Math.min(5.5, w * 0.12);
 const SIX_WIDTH = (h) => Math.min(18.3, h * 0.35);
 const CIRCLE_R = (h) => Math.min(9.15, h * 0.3);
-const ARC_R = (h) => Math.min(9.15, h * 0.25);
 const SPOT_X = (w) => Math.min(11, w * 0.22);
+// The arc is capped against the pitch DEPTH as well as its width. Capping on `h` alone
+// let the D outgrow the pitch: on a 12m-deep, 40m-wide area it bulged to 11.8m, further
+// from goal than the penalty box itself and within 0.2m of the far edge.
+const ARC_R = (w, h) => Math.min(9.15, h * 0.25, (w - SPOT_X(w)) * 0.5);
 
 const rect = (x, y, w, h) => {
   const a = toPx(x, y);
@@ -54,7 +57,7 @@ export function markings(area) {
       // penalty box, which reads as wrong to anyone who knows a pitch. Omitted entirely
       // when the caps put the whole circle inside the box.
       const bd = BOX_DEPTH(w);
-      const r = ARC_R(h);
+      const r = ARC_R(w, h);
       const dx = bd - SPOT_X(w);
       if (Math.abs(dx) < r) {
         const dy = Math.sqrt(r * r - dx * dx);
@@ -67,9 +70,11 @@ export function markings(area) {
     case "full": {
       out.push(line(w / 2, 0, w / 2, h));
       out.push(circle(w / 2, h / 2, CIRCLE_R(h)));
-      // Penalty box at each end; the six-yard boxes are dropped at full-pitch
-      // scale because they render as unreadable slivers.
-      out.push(boxesAt(w, h)[0], boxesAt(w, h, true)[0]);
+      // Both boxes at both ends. An earlier version dropped the six-yard boxes here on
+      // the grounds that they were unreadable slivers at full-pitch scale, which is
+      // simply false: at 100x64 the caps resolve to the real 5.5x18.3m box, rendered at
+      // the same scale as everything else. Verified by rendering.
+      out.push(...boxesAt(w, h), ...boxesAt(w, h, true));
       break;
     }
     case "box":
@@ -124,12 +129,17 @@ export function actionPath(action, scene) {
   const r2 = (v) => Math.round(v * 100) / 100;
 
   let d;
+  // How far the drawn path deviates from the straight chord at its midpoint. The badge
+  // is offset by this plus a clearance, so it never sits on the line it labels — a fixed
+  // offset from the chord put the badge inside its own run curve for almost every run.
+  let curveOffset = 0;
   if (action.kind === "dribble") {
     // Perpendicular zig-zag along the line: a series of quadratic wiggles.
     const span = Math.hypot(end.x - start.x, end.y - start.y);
     const steps = Math.max(3, Math.round(span / 14));
     const seg = span / steps;
     const amp = 5;
+    curveOffset = amp;
     d = `M ${r2(start.x)} ${r2(start.y)}`;
     for (let i = 0; i < steps; i++) {
       const sign = i % 2 === 0 ? 1 : -1;
@@ -142,6 +152,7 @@ export function actionPath(action, scene) {
   } else if (action.kind === "run") {
     // Single gentle bow, so a run reads differently from a pass even when parallel.
     const bow = Math.min(len * 0.18, 26);
+    curveOffset = bow / 2; // a quadratic deviates half its control offset at t=0.5
     const cx = mid.x + -uy * bow;
     const cy = mid.y + ux * bow;
     d = `M ${r2(start.x)} ${r2(start.y)} Q ${r2(cx)} ${r2(cy)} ${r2(end.x)} ${r2(end.y)}`;
@@ -153,6 +164,6 @@ export function actionPath(action, scene) {
     kind: action.kind,
     d,
     seq: action.seq,
-    badge: { x: mid.x + -uy * 9, y: mid.y + ux * 9 },
+    badge: { x: mid.x + -uy * (curveOffset + 9), y: mid.y + ux * (curveOffset + 9) },
   };
 }
