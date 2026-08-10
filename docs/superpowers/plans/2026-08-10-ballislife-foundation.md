@@ -1083,6 +1083,16 @@ describe("parse: players", () => {
     expect(scene.players.map((p) => p.team)).toEqual(["red"]);
     expect(errors).toEqual([{ line: 2, message: 'duplicate player label "A"' }]);
   });
+
+  it("says so when a label is too long, rather than blaming the syntax", () => {
+    expect(parse("red: STRIKER@1,1\n").errors).toEqual([
+      { line: 1, message: 'player label "STRIKER" is too long (max 4 characters)' },
+    ]);
+    // A genuinely malformed token still gets the syntax message.
+    expect(parse("red: B@oops\n").errors).toEqual([
+      { line: 1, message: 'expected "<label>@<x>,<y>" but got "B@oops"' },
+    ]);
+  });
 });
 ```
 
@@ -1107,7 +1117,13 @@ function parsePlayers(team) {
     for (const token of rest.split(/\s+/).filter(Boolean)) {
       const m = token.match(/^([A-Za-z][A-Za-z0-9]{0,3})@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
       if (!m) {
-        ctx.fail(`expected "<label>@<x>,<y>" but got "${token}"`);
+        // Name the real problem when the label is simply too long. Drills get pasted
+        // from an LLM, which reaches for words like STRIKER, and "expected
+        // <label>@<x>,<y>" gives no clue what is actually wrong with that.
+        const long = token.match(/^([A-Za-z][A-Za-z0-9]{4,})@/);
+        ctx.fail(long
+          ? `player label "${long[1]}" is too long (max 4 characters)`
+          : `expected "<label>@<x>,<y>" but got "${token}"`);
         continue;
       }
       const label = m[1];
@@ -1134,7 +1150,7 @@ for (const team of TEAMS) DIRECTIVES[team] = parsePlayers(team);
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  10 passed (10)`.
+Expected: `Tests  11 passed (11)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1300,7 +1316,7 @@ for (const kind of POINT_MARKS) DIRECTIVES[kind] = parsePointMarks(kind);
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  17 passed (17)`.
+Expected: `Tests  18 passed (18)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1367,6 +1383,13 @@ describe("parse: actions", () => {
     const { scene, errors } = parse("red: A@1,1 B@2,2\npass: A-B A->B\n");
     expect(scene.actions.map((a) => a.seq)).toEqual([1]);
     expect(errors).toEqual([{ line: 2, message: 'expected "<from><arrow><to>" but got "A-B"' }]);
+  });
+
+  it("resolves an action whose players are declared on a later line", () => {
+    // Endpoints resolve in a second pass, so directive order in the source is free.
+    const { scene, errors } = parse("pass: A->B\nred: A@1,1 B@2,2\n");
+    expect(errors).toEqual([]);
+    expect(scene.actions).toEqual([{ kind: "pass", from: "A", to: { ref: "B" }, seq: 1 }]);
   });
 });
 ```
@@ -1489,7 +1512,7 @@ export function parse(src) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  23 passed (23)`.
+Expected: `Tests  25 passed (25)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1574,7 +1597,7 @@ describe("parse: robustness", () => {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  27 passed (27)`. If any fail, fix `pitch.js` — do not weaken the
+Expected: `Tests  29 passed (29)`. If any fail, fix `pitch.js` — do not weaken the
 test. A self-referential pass (`A->A`) is legal input and must simply render as a
 degenerate arrow, not error.
 
@@ -1676,6 +1699,14 @@ describe("serialise", () => {
     const { scene } = parse("");
     expect(parse(serialise(scene)).scene).toEqual(scene);
   });
+
+  it("omits an empty label, which would not round-trip", () => {
+    const { scene } = parse("");
+    scene.label = "";
+    expect(serialise(scene)).toBe("area: 40x25\n");
+    expect(parse(serialise(scene)).scene.label).toBe(null);
+  });
+
 });
 ```
 
@@ -1727,7 +1758,9 @@ export function serialise(scene) {
     const to = a.to.ref !== undefined ? a.to.ref : pt(a.to);
     lines.push(`${a.kind}: ${a.from}${ARROWS[a.kind]}${to}`);
   }
-  if (scene.label !== null && scene.label !== undefined) {
+  // Truthiness rather than a null check: an empty label serialises to `label: ` which
+  // parses back as null, so emitting it would break round-trip stability.
+  if (scene.label) {
     lines.push(`label: ${quote(scene.label)}`);
   }
 
@@ -1741,7 +1774,7 @@ export function serialise(scene) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  33 passed (33)`.
+Expected: `Tests  36 passed (36)`.
 
 - [ ] **Step 5: Commit**
 
