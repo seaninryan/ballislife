@@ -2394,6 +2394,13 @@ describe("PitchDiagram", () => {
     expect(render('label: "3v2 to end line"\n')).toContain("3v2 to end line");
   });
 
+  it("gives the diagram an accessible name", () => {
+    // role="img" with no name announces only "image" to a screen reader, and Plan 2
+    // wants printable session plans where a title survives export.
+    expect(render('label: "3v2 to end line"\n')).toContain('aria-label="3v2 to end line"');
+    expect(render("area: 40x25\n")).toContain('aria-label="Pitch diagram"');
+  });
+
   it("gives arrowheads a fixed size independent of stroke width", () => {
     // Without markerUnits="userSpaceOnUse", SVG scales markers by stroke-width and the
     // 4px shot gets a ~28px arrowhead that swamps a 7px player. Caught by rendering.
@@ -2551,7 +2558,10 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
 
   return (
     <div>
-      <svg className="pitch" viewBox={viewBox(scene.area)} role="img">
+      <svg
+        className="pitch" viewBox={viewBox(scene.area)}
+        role="img" aria-label={scene.label || "Pitch diagram"}
+      >
         <defs>
           {/* markerUnits="userSpaceOnUse" is essential: SVG markers scale with
               stroke-width by default, so the 4px-wide shot would get a ~28px arrowhead
@@ -2578,7 +2588,9 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
             markerEnd={`url(#arrow-${p.kind})`}
           />
         ))}
-        {scene.players.map((p) => <Player key={p.label} player={p} />)}
+        {/* Badges before players, so a crowded drill hides a sequence number rather
+            than a player. A missing player is a missing entity; a missing ordinal is
+            recoverable from the source. */}
         {paths.map((p, i) => (
           <g key={`b${i}`}>
             <circle cx={p.badge.x} cy={p.badge.y} r="6.5" fill="#000" fillOpacity="0.55" />
@@ -2587,6 +2599,7 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
             </text>
           </g>
         ))}
+        {scene.players.map((p) => <Player key={p.label} player={p} />)}
         {scene.label ? (
           <text x={labelAt.x} y={labelAt.y + 14} fontSize="10" fill="#fff" fillOpacity="0.85" textAnchor="middle">
             {scene.label}
@@ -2612,7 +2625,7 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
 npx vitest run test/pitchDiagram.test.jsx
 ```
 
-Expected: `Tests  10 passed (10)`.
+Expected: `Tests  11 passed (11)`.
 
 - [ ] **Step 5: Verify the build still succeeds**
 
@@ -2750,6 +2763,16 @@ describe("DrillPreview", () => {
     expect(render(src)).toContain("line 8");
   });
 
+  it("keeps single line breaks so a written list stays readable", () => {
+    // Coaches write checklists one item per line. Rendering the paragraph as a single
+    // text node folded them into one run-on sentence.
+    const html = render("---\ntitle: T\n---\n\nWarm-up:\n- jog\n- stretches\n\nThen play.\n");
+    expect(html).toContain("<br");
+    expect(html).toContain("- jog");
+    expect(html).toContain("- stretches");
+    expect(html).toContain("Then play.");
+  });
+
   it("does not throw on empty input", () => {
     expect(() => render("")).not.toThrow();
   });
@@ -2811,7 +2834,20 @@ export default function DrillPreview({ source = "" }) {
         ) : (
           <div key={i}>
             {seg.text.split(/\n{2,}/).map((para, j) =>
-              para.trim() ? <p key={j}>{para.trim()}</p> : null,
+              para.trim() ? (
+                <p key={j}>
+                  {/* Single newlines become line breaks. Without this, a checklist
+                      written one item per line collapses into a single run-on
+                      sentence, because HTML folds internal newlines to spaces —
+                      worse than no formatting at all. */}
+                  {para.trim().split("\n").map((line, k) => (
+                    <React.Fragment key={k}>
+                      {k > 0 ? <br /> : null}
+                      {line}
+                    </React.Fragment>
+                  ))}
+                </p>
+              ) : null,
             )}
           </div>
         ),
@@ -2827,7 +2863,7 @@ export default function DrillPreview({ source = "" }) {
 npx vitest run test/drillPreview.test.jsx
 ```
 
-Expected: `Tests  7 passed (7)`.
+Expected: `Tests  8 passed (8)`.
 
 - [ ] **Step 7: Replace `src/App.jsx` with the preview harness**
 
@@ -3036,6 +3072,14 @@ Written after this plan lands, against the real parser:
 - `lib/index.js` — build, diff and repair `index.json` against a `files.list` of ids
   and `modifiedTime`s
 - `lib/drills.js` — drill model, category and tag filtering, search, slug rules
-- `marked` + `DOMPurify` for prose rendering
+- `marked` + `DOMPurify` for prose rendering, replacing the interim
+  line-breaks-only paragraph rendering
+- **Move mark geometry out of `PitchDiagram.jsx` into `pitchSvg.js`.** The cone, ball
+  and flag path strings and the goal half-height map (`full: 3.66, small: 2, mini: 1.2`
+  — real-world metres) are domain geometry sitting in a component with no test
+  coverage, which drifts from the "pure logic in lib" rule. Follow the `markings()`
+  pattern: a lib function returning pixel shape descriptors the component just draws.
+  Raised by code review of Task 14 and deliberately deferred rather than expanding
+  Plan 1's scope
 - The card grid browse view and the three-pane editor, with the mobile collapse
 - Per-file debounced saving with conflict detection on `modifiedTime`
