@@ -1724,6 +1724,19 @@ describe("serialise", () => {
     expect(parse(serialise(scene)).scene).toEqual(scene);
   });
 
+  it("round-trips a label that is itself quoted", () => {
+    // `"a"` has no whitespace, so a whitespace-only quoting rule would emit it bare and
+    // it would parse back as `a`. Applies to zone labels too, which share the helper.
+    const label = parse('label: ""a""').scene.label;
+    expect(label).toBe('"a"');
+    const once = serialise(parse('label: ""a""').scene);
+    expect(parse(once).scene.label).toBe('"a"');
+    expect(serialise(parse(once).scene)).toBe(once);
+
+    const zone = parse('zone: 1,2 3x4 ""z""').scene;
+    expect(parse(serialise(zone)).scene).toEqual(zone);
+  });
+
   it("omits an empty label, which would not round-trip", () => {
     const { scene } = parse("");
     scene.label = "";
@@ -1750,8 +1763,10 @@ Append to `src/lib/pitch.js`:
 // Trims trailing zeros so 10 serialises as "10", not "10.0".
 const n = (v) => String(Number(v));
 const pt = (o) => `${n(o.x)},${n(o.y)}`;
-// Quote only when the value contains whitespace, so short labels stay unquoted.
-const quote = (s) => (/\s/.test(s) ? `"${s}"` : s);
+// Quote when the value contains whitespace, so short labels stay unquoted — and also
+// when it already starts with a quote, or the round trip breaks: `"a"` would serialise
+// unquoted as `label: "a"`, which parses back as the bare string `a`.
+const quote = (s) => (/\s/.test(s) || s.startsWith(`"`) ? `"${s}"` : s);
 
 // Scene -> canonical source. Inverse of parse() at the MODEL level:
 // parse(serialise(scene)).scene deep-equals scene, and serialise is stable under
@@ -1798,7 +1813,7 @@ export function serialise(scene) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  37 passed (37)`.
+Expected: `Tests  38 passed (38)`.
 
 - [ ] **Step 5: Commit**
 
