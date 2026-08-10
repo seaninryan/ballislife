@@ -767,9 +767,29 @@ describe("splitSegments", () => {
   });
 
   it("records the source line of each block so errors can be located", () => {
+    // Lines: 1 "a", 2 fence, 3 "x", 4 fence, 5 "b", 6 fence, 7 "y", 8 fence.
     const body = "a\n```pitch\nx\n```\nb\n```pitch\ny\n```\n";
     const pitches = splitSegments(body).filter((s) => s.kind === "pitch");
-    expect(pitches.map((p) => p.line)).toEqual([3, 8]);
+    expect(pitches.map((p) => p.line)).toEqual([3, 7]);
+  });
+
+  it("reproduces the body exactly when its segments are concatenated", () => {
+    // The property that matters: splitting is lossless. Any newline dropped here
+    // silently corrupts a drill when the editor writes the document back.
+    // An unterminated fence is excluded: rebuilding it would invent a closing fence
+    // that was never in the source, so losslessness cannot hold for that input.
+    for (const body of [
+      "Hello\n\nWorld\n",
+      "Before\n\n```pitch\narea: 40x25 half\n```\n\nAfter\n",
+      "a\n```pitch\nx\n```\nb\n```pitch\ny\n```\n",
+      "```pitch\narea: 10x10\n```\n",
+      "",
+    ]) {
+      const rebuilt = splitSegments(body)
+        .map((s) => (s.kind === "prose" ? s.text : "```pitch\n" + s.text + "```\n"))
+        .join("");
+      expect(rebuilt).toBe(body);
+    }
   });
 
   it("leaves other fenced languages as prose", () => {
@@ -806,37 +826,48 @@ Expected: FAIL — `Failed to resolve import "../src/lib/markdown.js"`.
 const OPEN = /^```pitch\s*$/;
 const CLOSE = /^```\s*$/;
 
+// Segments are cut by character offset rather than rebuilt by joining lines. Joining
+// loses the newline that separated the last prose line from the fence, and getting it
+// back by appending "\n" is wrong for the final segment — slicing the original string
+// cannot drop or invent a character, so the split is lossless by construction.
 export function splitSegments(body) {
   const text = String(body ?? "");
   const lines = text.split("\n");
   const segments = [];
-  let prose = [];
 
-  const flushProse = () => {
-    if (prose.length === 0) return;
-    segments.push({ kind: "prose", text: prose.join("\n") });
-    prose = [];
+  // Character offset where each line begins.
+  const offsets = [];
+  let at = 0;
+  for (const line of lines) {
+    offsets.push(at);
+    at += line.length + 1; // + the "\n" that split consumed
+  }
+
+  let proseStart = 0;
+  const pushProse = (end) => {
+    if (end > proseStart) segments.push({ kind: "prose", text: text.slice(proseStart, end) });
   };
 
   for (let i = 0; i < lines.length; i++) {
-    if (!OPEN.test(lines[i])) {
-      prose.push(lines[i]);
-      continue;
-    }
-    flushProse();
+    if (!OPEN.test(lines[i])) continue;
+
+    pushProse(offsets[i]);
+
     const contentStart = i + 1;
-    const content = [];
     let j = contentStart;
-    while (j < lines.length && !CLOSE.test(lines[j])) content.push(lines[j++]);
-    segments.push({
-      kind: "pitch",
-      text: content.length ? content.join("\n") + "\n" : "",
-      line: contentStart + 1, // 1-based
-    });
+    while (j < lines.length && !CLOSE.test(lines[j])) j++;
+
+    // An unterminated fence runs to the end of the body rather than being discarded,
+    // so a half-typed diagram still renders while the user is mid-edit.
+    const from = contentStart < lines.length ? offsets[contentStart] : text.length;
+    const to = j < lines.length ? offsets[j] : text.length;
+    segments.push({ kind: "pitch", text: text.slice(from, to), line: contentStart + 1 });
+
     i = j; // skip the closing fence; if absent, j === lines.length and the loop ends
+    proseStart = j < lines.length ? offsets[j] + lines[j].length + 1 : text.length;
   }
 
-  flushProse();
+  pushProse(text.length);
   return segments;
 }
 ```
@@ -847,7 +878,7 @@ export function splitSegments(body) {
 npx vitest run test/markdown.test.js
 ```
 
-Expected: `Tests  5 passed (5)`.
+Expected: `Tests  6 passed (6)`.
 
 - [ ] **Step 5: Commit**
 
