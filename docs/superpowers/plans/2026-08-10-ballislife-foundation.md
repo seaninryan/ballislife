@@ -797,6 +797,21 @@ describe("splitSegments", () => {
     expect(splitSegments(body)).toEqual([{ kind: "prose", text: body }]);
   });
 
+  it("closes a fence written with a longer backtick run", () => {
+    // An LLM pasting a drill sometimes emits four backticks. With a fixed run of three
+    // this never closed, and the whole rest of the drill was swallowed as pitch source.
+    expect(splitSegments("````pitch\narea: 10x10\n````\n\nAfter\n")).toEqual([
+      { kind: "pitch", text: "area: 10x10\n", line: 2 },
+      { kind: "prose", text: "\nAfter\n" },
+    ]);
+  });
+
+  it("recognises fences in a CRLF file", () => {
+    const segments = splitSegments("intro\r\n```pitch\r\narea: 10x10\r\n```\r\nAfter\r\n");
+    expect(segments.map((s) => s.kind)).toEqual(["prose", "pitch", "prose"]);
+    expect(segments[1]).toEqual({ kind: "pitch", text: "area: 10x10\r\n", line: 3 });
+  });
+
   it("treats an unterminated pitch fence as a pitch block to the end of the body", () => {
     const body = "intro\n```pitch\narea: 40x25\n";
     expect(splitSegments(body)).toEqual([
@@ -823,13 +838,24 @@ Expected: FAIL — `Failed to resolve import "../src/lib/markdown.js"`.
 // `line` is the 1-based line of the body where the block's CONTENT starts, so a
 // parse error at pitch-line N can be reported as body-line (line + N - 1).
 
-const OPEN = /^```pitch\s*$/;
-const CLOSE = /^```\s*$/;
+// Three or more backticks, because CommonMark allows a longer run and an LLM pasting
+// a drill sometimes emits four when it thinks it needs to nest. With a fixed run of
+// exactly three, a four-backtick close never matches and the unterminated-fence path
+// silently swallows the rest of the drill as diagram source.
+// `\r` is matched explicitly so a CRLF file's fence lines still close: lines come from
+// splitting on "\n", so each one retains its trailing carriage return.
+const OPEN = /^`{3,}pitch[ \t\r]*$/;
+const CLOSE = /^`{3,}[ \t\r]*$/;
 
 // Segments are cut by character offset rather than rebuilt by joining lines. Joining
 // loses the newline that separated the last prose line from the fence, and getting it
-// back by appending "\n" is wrong for the final segment — slicing the original string
-// cannot drop or invent a character, so the split is lossless by construction.
+// back by appending "\n" is wrong for the final segment.
+//
+// Slicing preserves prose and pitch *content* exactly, including CRLF. The fence
+// delimiter lines themselves are discarded rather than preserved, so a caller that
+// rebuilds a document from segments must re-emit them and cannot recover non-canonical
+// fence formatting (trailing whitespace, CRLF, a longer backtick run). Nothing
+// reconstructs documents this way today — the editor holds the raw text.
 export function splitSegments(body) {
   const text = String(body ?? "");
   const lines = text.split("\n");
@@ -878,7 +904,7 @@ export function splitSegments(body) {
 npx vitest run test/markdown.test.js
 ```
 
-Expected: `Tests  6 passed (6)`.
+Expected: `Tests  8 passed (8)`.
 
 - [ ] **Step 5: Commit**
 
