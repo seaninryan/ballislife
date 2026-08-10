@@ -44,4 +44,12 @@ describe("DrillCard", () => {
     expect(html).not.toContain("′");
     expect(html).toContain("Rondo 4v2");
   });
+
+  it("does not let a long unbroken title escape the card", () => {
+    // A long title ran past the card edge and pushed the whole page sideways on a
+    // phone. The fix is CSS, so assert the class that carries it is present.
+    const html = render({ ...drill, title: "A".repeat(90) });
+    expect(html).toContain("drill-card-title");
+    expect(html).toContain("A".repeat(90));
+  });
 });

@@ -63,7 +63,9 @@ textarea, input, select {
   aspect-ratio: 44 / 29; display: flex; align-items: center; justify-content: center;
   background: var(--bg); border-radius: 8px; font-size: 13px;
 }
-.drill-card-title { font-weight: 700; margin: 8px 0 4px; }
+/* overflow-wrap because a long unbroken title ran past the card edge and pushed the
+   whole page sideways on a phone, which is the device this view exists for. */
+.drill-card-title { font-weight: 700; margin: 8px 0 4px; overflow-wrap: anywhere; }
 .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 .filters { margin: 8px 0 12px; }
 .chip-button {
