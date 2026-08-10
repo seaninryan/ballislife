@@ -189,6 +189,20 @@ describe("parse: actions", () => {
     expect(errors).toEqual([{ line: 2, message: 'expected "<from><arrow><to>" but got "A-B"' }]);
   });
 
+  it("reports errors in source order across both passes", () => {
+    // Action endpoints resolve in a second pass, so an action error is generated after
+    // every line error even when its line comes first.
+    expect(parse("pass: A->Z\ncone: bad\nred: A@1,1\n").errors).toEqual([
+      { line: 1, message: 'unknown player "Z"' },
+      { line: 2, message: 'expected "<x>,<y>" but got "bad"' },
+    ]);
+    // Two errors on one line keep their original order (the sort is stable).
+    expect(parse("cone: nope alsobad\n").errors).toEqual([
+      { line: 1, message: 'expected "<x>,<y>" but got "nope"' },
+      { line: 1, message: 'expected "<x>,<y>" but got "alsobad"' },
+    ]);
+  });
+
   it("resolves an action whose players are declared on a later line", () => {
     // Endpoints resolve in a second pass, so directive order in the source is free.
     const { scene, errors } = parse("pass: A->B\nred: A@1,1 B@2,2\n");

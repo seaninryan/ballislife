@@ -201,6 +201,11 @@ export function parse(src) {
     });
   }
 
+  // Report in source order. Endpoints resolve in this second pass, so without the sort
+  // an action error on line 1 lands after a mark error on line 2 — and the whole point
+  // of carrying a line number is that a reader can follow the list down the source.
+  // The sort is stable, so multiple errors on one line keep their original order.
+  errors.sort((x, y) => x.line - y.line);
   return { scene, errors };
 }
 
@@ -214,7 +219,11 @@ const quote = (s) => (/\s/.test(s) || s.startsWith(`"`) ? `"${s}"` : s);
 
 // Scene -> canonical source. Inverse of parse() at the MODEL level:
 // parse(serialise(scene)).scene deep-equals scene, and serialise is stable under
-// re-parse. It is NOT byte-identical to arbitrary input source.
+// re-parse. It is NOT byte-identical to arbitrary input source: directives are
+// reordered, multi-action lines are split one per line, and `#` comments are dropped
+// entirely — they are stripped by parse and have no home in the scene model. A future
+// drag-to-edit canvas that writes back through serialise will therefore lose any
+// comments a coach hand-wrote in the block.
 export function serialise(scene) {
   const lines = [];
   const marksOf = (kind) => scene.marks.filter((m) => m.kind === kind);
