@@ -1613,7 +1613,7 @@ export async function saveDrill({ id, text, baseModifiedTime }) {
 npx vitest run test/drive.test.js
 ```
 
-Expected: `Tests  17 passed (17)`.
+Expected: `Tests  16 passed (16)`.
 
 If the collapsing test fails, the queue's latest-wins logic is wrong — fix `drive.js`,
 not the test. That behaviour is what stops a burst of keystrokes issuing a write per
