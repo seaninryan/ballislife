@@ -48,6 +48,21 @@ describe("splitSegments", () => {
     expect(splitSegments(body)).toEqual([{ kind: "prose", text: body }]);
   });
 
+  it("closes a fence written with a longer backtick run", () => {
+    // An LLM pasting a drill sometimes emits four backticks. With a fixed run of three
+    // this never closed, and the whole rest of the drill was swallowed as pitch source.
+    expect(splitSegments("````pitch\narea: 10x10\n````\n\nAfter\n")).toEqual([
+      { kind: "pitch", text: "area: 10x10\n", line: 2 },
+      { kind: "prose", text: "\nAfter\n" },
+    ]);
+  });
+
+  it("recognises fences in a CRLF file", () => {
+    const segments = splitSegments("intro\r\n```pitch\r\narea: 10x10\r\n```\r\nAfter\r\n");
+    expect(segments.map((s) => s.kind)).toEqual(["prose", "pitch", "prose"]);
+    expect(segments[1]).toEqual({ kind: "pitch", text: "area: 10x10\r\n", line: 3 });
+  });
+
   it("treats an unterminated pitch fence as a pitch block to the end of the body", () => {
     const body = "intro\n```pitch\narea: 40x25\n";
     expect(splitSegments(body)).toEqual([
