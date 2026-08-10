@@ -451,6 +451,17 @@ describe("parseDoc", () => {
     expect(doc.meta.tags).toEqual(["transition", "finishing"]);
     expect(doc.meta.players).toBe("8-12");
   });
+
+  it("handles a document that ends at the closing fence", () => {
+    const doc = parseDoc("---\ntitle: Stub\n---");
+    expect(doc.meta).toEqual({ title: "Stub" });
+    expect(doc.body).toBe("");
+    expect(doc.error).toBe(null);
+  });
+
+  it("consumes every blank line between the fence and the body", () => {
+    expect(parseDoc("---\ntitle: T\n---\n\n\n\nBody.\n").body).toBe("Body.\n");
+  });
 });
 ```
 
@@ -470,7 +481,10 @@ Expected: FAIL — `Failed to resolve import "../src/lib/frontmatter.js"`.
 // Knows nothing about drills.
 import yaml from "js-yaml";
 
-const FENCE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+// Consumes the blank line(s) between the closing fence and the body, so the body
+// starts at real content. `*` rather than `+` so a document that ends at the closing
+// fence with no body still matches.
+const FENCE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)*/;
 
 // -> { meta, body, error }. Never throws: a document with broken frontmatter still
 // returns its body so it can be opened and repaired in the editor.
@@ -499,7 +513,7 @@ export function parseDoc(src) {
 npx vitest run test/frontmatter.test.js
 ```
 
-Expected: `Tests  4 passed (4)`.
+Expected: `Tests  6 passed (6)`.
 
 - [ ] **Step 5: Commit**
 
@@ -570,7 +584,7 @@ export function serialiseDoc({ meta, body }) {
 npx vitest run test/frontmatter.test.js
 ```
 
-Expected: `Tests  7 passed (7)`.
+Expected: `Tests  9 passed (9)`.
 
 - [ ] **Step 5: Commit**
 
