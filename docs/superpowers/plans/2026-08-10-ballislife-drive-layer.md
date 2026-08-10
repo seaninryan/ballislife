@@ -1214,7 +1214,9 @@ catalogue load, and the per-file debounced save queue with conflict detection.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as api from "../src/lib/driveApi.js";
 import * as auth from "../src/lib/driveAuth.js";
-import { loadCatalogue, saveDrill, FOLDER_NAME, INDEX_NAME } from "../src/lib/drive.js";
+import {
+  loadCatalogue, saveDrill, noteModifiedTime, knownModifiedTime, FOLDER_NAME, INDEX_NAME,
+} from "../src/lib/drive.js";
 
 vi.mock("../src/lib/driveApi.js");
 vi.mock("../src/lib/driveAuth.js");
@@ -1282,6 +1284,65 @@ describe("loadCatalogue", () => {
     expect(drills).toHaveLength(1);
   });
 
+  it("keeps the rest of the catalogue when one drill fails to download", async () => {
+    // One flaky read on a phone must not cost every drill.
+    api.findFolder.mockResolvedValue("F1");
+    api.listFiles.mockResolvedValue([
+      { id: "good1", name: "good1.md", modifiedTime: "T1" },
+      { id: "bad", name: "bad.md", modifiedTime: "T1" },
+      { id: "good2", name: "good2.md", modifiedTime: "T1" },
+    ]);
+    api.readFile.mockImplementation(async (_t, id) => {
+      if (id === "bad") throw Object.assign(new Error("flaky"), { code: 500 });
+      return DRILL;
+    });
+    api.writeFile.mockResolvedValue("T");
+    api.createFile.mockResolvedValue({ id: "idx", modifiedTime: "T" });
+
+    const { drills, failed } = await loadCatalogue();
+    expect(drills.map((d) => d.id).sort()).toEqual(["good1", "good2"]);
+    expect(failed.map((f) => f.id)).toEqual(["bad"]);
+  });
+
+  it("keeps a stale cached entry when its refetch fails, and retries next load", async () => {
+    api.findFolder.mockResolvedValue("F1");
+    api.listFiles.mockResolvedValue([
+      { id: "idx", name: INDEX_NAME, modifiedTime: "T" },
+      { id: "a", name: "a.md", modifiedTime: "T2" },
+    ]);
+    const cached = {
+      version: 1,
+      entries: { a: { name: "a.md", modifiedTime: "T1", meta: { title: "Old" }, thumb: null, invalid: null } },
+    };
+    api.readFile.mockImplementation(async (_t, id) => {
+      if (id === "idx") return JSON.stringify(cached);
+      throw Object.assign(new Error("flaky"), { code: 500 });
+    });
+    api.writeFile.mockResolvedValue("T");
+
+    const { drills, index } = await loadCatalogue();
+    expect(drills.map((d) => d.title)).toEqual(["Old"]);
+    // The OLD modifiedTime is kept, so the next load notices the mismatch and retries.
+    expect(index.entries.a.modifiedTime).toBe("T1");
+  });
+
+  it("lets a 401 during a drill read reach the retry rather than failing that drill", async () => {
+    api.findFolder.mockResolvedValue("F1");
+    api.listFiles.mockResolvedValue([{ id: "a", name: "a.md", modifiedTime: "T1" }]);
+    let reads = 0;
+    api.readFile.mockImplementation(async () => {
+      reads += 1;
+      if (reads === 1) throw Object.assign(new Error("auth"), { code: 401 });
+      return DRILL;
+    });
+    api.writeFile.mockResolvedValue("T");
+    api.createFile.mockResolvedValue({ id: "idx", modifiedTime: "T" });
+
+    const { drills, failed } = await loadCatalogue();
+    expect(drills).toHaveLength(1);
+    expect(failed).toEqual([]);
+  });
+
   it("retries once after a 401, then succeeds", async () => {
     api.findFolder
       .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
@@ -1303,28 +1364,35 @@ describe("loadCatalogue", () => {
 
 describe("saveDrill", () => {
   it("writes the file and returns the new modifiedTime", async () => {
+    noteModifiedTime("a", "T1");
     api.writeFile.mockResolvedValue("T9");
-    const r = await saveDrill({ id: "a", text: "x", baseModifiedTime: "T1", currentModifiedTime: "T1" });
+    const r = await saveDrill({ id: "a", text: "x", baseModifiedTime: "T1" });
     expect(r).toEqual({ ok: true, modifiedTime: "T9" });
     expect(api.writeFile).toHaveBeenCalledWith("tok", "a", "x");
+    // drive.js now knows the new value, so the next save can use it as its baseline.
+    expect(knownModifiedTime("a")).toBe("T9");
   });
 
   it("refuses to overwrite when the file moved underneath it", async () => {
-    const r = await saveDrill({ id: "a", text: "x", baseModifiedTime: "T1", currentModifiedTime: "T2" });
-    expect(r.ok).toBe(false);
-    expect(r.conflict).toBe(true);
+    noteModifiedTime("a", "T2");
+    const r = await saveDrill({ id: "a", text: "x", baseModifiedTime: "T1" });
+    expect(r).toMatchObject({ ok: false, conflict: true, modifiedTime: "T2" });
     expect(api.writeFile).not.toHaveBeenCalled();
   });
 
+  it("saves a file it has never seen, having no baseline to contradict", async () => {
+    api.writeFile.mockResolvedValue("T1");
+    const r = await saveDrill({ id: "brand-new", text: "x", baseModifiedTime: undefined });
+    expect(r).toMatchObject({ ok: true, modifiedTime: "T1" });
+  });
+
   it("collapses rapid saves of one file, writing the newest text last", async () => {
-    // A burst of keystrokes must not issue one write per character. Exactly how many
-    // writes happen depends on timing — in practice a tight burst collapses to a single
-    // write — so assert what actually matters rather than a fragile call count.
+    noteModifiedTime("a", "T1");
     api.writeFile.mockResolvedValue("T2");
     const results = await Promise.all([
-      saveDrill({ id: "a", text: "one", baseModifiedTime: "T1", currentModifiedTime: "T1" }),
-      saveDrill({ id: "a", text: "two", baseModifiedTime: "T1", currentModifiedTime: "T1" }),
-      saveDrill({ id: "a", text: "three", baseModifiedTime: "T1", currentModifiedTime: "T1" }),
+      saveDrill({ id: "a", text: "one", baseModifiedTime: "T1" }),
+      saveDrill({ id: "a", text: "two", baseModifiedTime: "T1" }),
+      saveDrill({ id: "a", text: "three", baseModifiedTime: "T1" }),
     ]);
     const written = api.writeFile.mock.calls.map((c) => c[2]);
     expect(written.length).toBeLessThan(3);
@@ -1332,22 +1400,49 @@ describe("saveDrill", () => {
     expect(results.every((r) => r.ok)).toBe(true);
   });
 
+  it("tells every caller in a burst which modifiedTime actually landed", async () => {
+    // The caller whose text won the burst previously got no modifiedTime at all, so it
+    // could not refresh its baseline and its next save conflicted against itself.
+    noteModifiedTime("a", "T0");
+    let release;
+    let n = 0;
+    api.writeFile.mockImplementation(async (_t, _id, text) => {
+      n += 1;
+      if (n === 1) { await new Promise((r) => { release = r; }); return "T-first"; }
+      return `T-${text}`;
+    });
+    const first = saveDrill({ id: "a", text: "first", baseModifiedTime: "T0" });
+    await new Promise((r) => setTimeout(r, 0));
+    const second = saveDrill({ id: "a", text: "second", baseModifiedTime: "T0" });
+    const third = saveDrill({ id: "a", text: "third", baseModifiedTime: "T0" });
+    release();
+    const results = await Promise.all([first, second, third]);
+    for (const r of results) {
+      expect(r.ok).toBe(true);
+      expect(typeof r.modifiedTime).toBe("string");
+    }
+    expect(knownModifiedTime("a")).toBe("T-third");
+  });
+
   it("recovers after a failed write instead of wedging the queue", async () => {
+    noteModifiedTime("a", "T");
     api.writeFile
       .mockRejectedValueOnce(Object.assign(new Error("boom"), { code: 500 }))
       .mockResolvedValue("T5");
-    const first = await saveDrill({ id: "a", text: "x", baseModifiedTime: "T", currentModifiedTime: "T" });
+    const first = await saveDrill({ id: "a", text: "x", baseModifiedTime: "T" });
     expect(first.ok).toBe(false);
     expect(first.error.code).toBe(500);
-    const second = await saveDrill({ id: "a", text: "y", baseModifiedTime: "T", currentModifiedTime: "T" });
+    const second = await saveDrill({ id: "a", text: "y", baseModifiedTime: "T" });
     expect(second).toMatchObject({ ok: true, modifiedTime: "T5" });
   });
 
   it("queues per file, so two files do not block each other", async () => {
+    noteModifiedTime("a", "T");
+    noteModifiedTime("b", "T");
     api.writeFile.mockResolvedValue("T2");
     await Promise.all([
-      saveDrill({ id: "a", text: "x", baseModifiedTime: "T", currentModifiedTime: "T" }),
-      saveDrill({ id: "b", text: "y", baseModifiedTime: "T", currentModifiedTime: "T" }),
+      saveDrill({ id: "a", text: "x", baseModifiedTime: "T" }),
+      saveDrill({ id: "b", text: "y", baseModifiedTime: "T" }),
     ]);
     expect(api.writeFile.mock.calls.map((c) => c[1]).sort()).toEqual(["a", "b"]);
   });
@@ -1393,7 +1488,7 @@ async function folderId(token) {
 }
 
 // Loads the whole catalogue, revalidating the cache against Drive.
-// -> { folderId, indexFileId, index, drills, fetched }
+// -> { folderId, indexFileId, index, drills, fetched, failed }
 export async function loadCatalogue() {
   return withRetry(async () => {
     const token = getAccessToken();
@@ -1406,9 +1501,25 @@ export async function loadCatalogue() {
     const { keep, refetch, dropped } = diffIndex(cached, files);
 
     const built = {};
+    const failed = [];
     for (const file of refetch) {
-      const text = await api.readFile(token, file.id);
-      built[file.id] = entryFor(file.name, file.modifiedTime, text);
+      try {
+        const text = await api.readFile(token, file.id);
+        built[file.id] = entryFor(file.name, file.modifiedTime, text);
+      } catch (error) {
+        // A 401 must still bubble to withRetry, which reauths and retries the whole
+        // load — swallowing it here would turn an expired token into "every drill
+        // failed".
+        if (error?.code === 401) throw error;
+        // Any other failure costs one drill, not the catalogue. This app is used on a
+        // phone at the side of a pitch, where one flaky read is ordinary. Keep the
+        // previous cached entry if there is one, so the drill still shows: its OLD
+        // modifiedTime stays in the index, so the next load sees the mismatch and
+        // retries by itself.
+        failed.push({ id: file.id, name: file.name, error });
+        const previous = cached.entries[file.id];
+        if (previous) built[file.id] = previous;
+      }
     }
 
     const index = applyDiff(keep, built);
@@ -1421,12 +1532,17 @@ export async function loadCatalogue() {
       else await api.createFile(token, folder, INDEX_NAME, body);
     }
 
+    // Seed the conflict baseline from what Drive just reported, so saveDrill can be
+    // the authority on it rather than trusting the caller.
+    for (const [id, entry] of Object.entries(index.entries)) known.set(id, entry.modifiedTime);
+
     return {
       folderId: folder,
       indexFileId: indexFile?.id ?? null,
       index,
       drills: drillsFromIndex(index),
       fetched: refetch.length,
+      failed,
     };
   });
 }
@@ -1448,23 +1564,41 @@ function enqueue(id, run) {
 
 const pending = new Map();
 
-// -> { ok: true, modifiedTime } | { ok: false, conflict: true } | { ok: false, error }
+// What Drive last reported for each file. drive.js is the authority on this rather than
+// the caller: an earlier design took BOTH the loaded and the current modifiedTime as
+// arguments, which meant `saveDrill({ base: x, current: x })` — passing one variable
+// twice, the easiest possible mistake — silently disabled the conflict guard entirely.
+const known = new Map();
+
+export function noteModifiedTime(id, modifiedTime) { known.set(id, modifiedTime); }
+export function knownModifiedTime(id) { return known.get(id) ?? null; }
+
+// -> { ok: true, modifiedTime } | { ok: false, conflict: true, modifiedTime }
+//    | { ok: false, error }
 //
-// `baseModifiedTime` is what the editor loaded; `currentModifiedTime` is what Drive
-// last reported. A mismatch means the file changed underneath us — from the Drive web
-// UI, or another device — so we refuse rather than clobber.
-export async function saveDrill({ id, text, baseModifiedTime, currentModifiedTime }) {
-  if (baseModifiedTime !== currentModifiedTime) {
-    return { ok: false, conflict: true };
+// `baseModifiedTime` is what the caller loaded. If Drive has since reported something
+// different — an edit from the Drive web UI, or another device — we refuse rather than
+// clobber, and hand back the current value so the caller can offer to reload.
+export async function saveDrill({ id, text, baseModifiedTime }) {
+  const current = known.get(id);
+  if (current !== undefined && baseModifiedTime !== current) {
+    return { ok: false, conflict: true, modifiedTime: current };
   }
   pending.set(id, text);
   return enqueue(id, async () => {
     const latest = pending.get(id);
-    if (latest === undefined) return { ok: true, skipped: true };
+    if (latest === undefined) {
+      // A later save in this burst already wrote the newest text. Report the
+      // modifiedTime that actually landed: returning nothing here left the newest edit
+      // unable to refresh its own baseline, so its next save spuriously conflicted
+      // against the user's own previous keystroke.
+      return { ok: true, coalesced: true, modifiedTime: known.get(id) ?? null };
+    }
     pending.delete(id);
     try {
       await ensureFreshToken();
       const modifiedTime = await withRetry(() => api.writeFile(getAccessToken(), id, latest));
+      known.set(id, modifiedTime);
       return { ok: true, modifiedTime };
     } catch (error) {
       return { ok: false, error };
@@ -1479,7 +1613,7 @@ export async function saveDrill({ id, text, baseModifiedTime, currentModifiedTim
 npx vitest run test/drive.test.js
 ```
 
-Expected: `Tests  11 passed (11)`.
+Expected: `Tests  17 passed (17)`.
 
 If the collapsing test fails, the queue's latest-wins logic is wrong — fix `drive.js`,
 not the test. That behaviour is what stops a burst of keystrokes issuing a write per
@@ -1966,5 +2100,12 @@ suite being green.
 - The three-pane editor: drill list, markdown source, live preview, with the mobile
   collapse to list → read-only preview
 - Create, rename and delete drills (`fileNameFor` and `trashFile` already exist)
-- Debounced saving wired to `saveDrill`, with the conflict warning surfaced in the UI
+- Debounced saving wired to `saveDrill`, with the conflict warning surfaced in the UI.
+  Note the contract: the caller passes only `baseModifiedTime` (what it loaded) and must
+  adopt the `modifiedTime` from every successful result, including a `coalesced` one
+- Friendlier error text. `App.jsx` currently surfaces raw exceptions like `drive 403`,
+  which tells a coach nothing about what to do next
+- A guard against duplicate `BallIsLife` folders. `findFolder` takes the first match with
+  no ordering guarantee, so two near-simultaneous first-runs on different devices could
+  create two folders and split drills silently. Invisible to any mock
 - `marked` + `DOMPurify` for prose, replacing the line-breaks-only rendering
