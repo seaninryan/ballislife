@@ -1555,7 +1555,7 @@ export function parse(src) {
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  27 passed (27)`.
+Expected: `Tests  28 passed (28)`.
 
 - [ ] **Step 5: Commit**
 
