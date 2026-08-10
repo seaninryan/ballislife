@@ -54,9 +54,12 @@ Two deliberate dependency calls:
 
 - **js-yaml rather than a hand-rolled frontmatter parser.** Hand-rolled YAML subsets
   are a reliable source of silent bugs; ~10kB gzipped is a fair price.
-- **`pitch.js` parses to a model that serialises back to byte-identical text.** This
-  is what makes a drag-to-edit canvas addable later without changing a single stored
-  file. Round-trip identity is a tested invariant, not an aspiration.
+- **`pitch.js` parses to a model that serialises back to canonical text.** The tested
+  invariant is model-level: `parse(serialise(scene)).scene` deep-equals `scene`, and
+  `serialise` is stable under re-parse. It is deliberately *not* byte-identical to
+  arbitrary source — canonicalisation reorders directives and splits multi-action
+  lines. Model-level identity is what makes a drag-to-edit canvas addable later
+  without changing a single stored file.
 
 ## Authentication
 
@@ -258,8 +261,9 @@ Three failure modes, each with an explicit answer, all chosen so that no state i
 silently hidden:
 
 - **Malformed `pitch` block** — the preview shows the parse error inline with a line
-  number and what was expected (`line 4: expected x,y`) and keeps the last good
-  render. A typo must never produce a blank pane.
+  number and what was expected (`line 4: expected x,y`) and renders the partially
+  parsed scene, so every valid line still draws. A typo must never produce a blank
+  pane, and a drill that has never parsed cleanly still shows whatever is valid.
 - **Drive save failure** — surfaces in the header status and retries via the ported
   `saveWithRetry`; auth expiry raises the reconnect banner.
 - **Invalid frontmatter** — the drill still appears in the grid, flagged, and opens in
@@ -294,6 +298,10 @@ Vitest in the node environment, no jsdom — the same split as fancystats.
   field.
 - **Drag-to-edit diagrams.** A canvas that manipulates the `pitch` scene model
   directly. Enabled by `pitch.js` round-trip identity; requires no storage change.
+  Two constraints it must respect: `serialise` sorts actions by `seq`, so reordering
+  must renumber `seq` or the reorder silently does nothing; and `#` comments in a
+  `pitch` block are stripped by `parse` and have no home in the scene model, so writing
+  back through `serialise` loses any a coach hand-wrote.
 
 ## Deploy
 
