@@ -53,3 +53,15 @@ textarea, input, select {
 .prose img { max-width: 100%; }
 .prose table { border-collapse: collapse; }
 .prose th, .prose td { border: 1px solid var(--line); padding: 4px 8px; }
+.drill-card {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  padding: 8px; border-radius: 10px;
+}
+.drill-card:hover { border-color: var(--accent); }
+.drill-card-thumb { border-radius: 8px; overflow: hidden; }
+.drill-card-empty {
+  aspect-ratio: 44 / 29; display: flex; align-items: center; justify-content: center;
+  background: var(--bg); border-radius: 8px; font-size: 13px;
+}
+.drill-card-title { font-weight: 700; margin: 8px 0 4px; }
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
