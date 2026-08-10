@@ -46,7 +46,7 @@ export function entryFor(name, modifiedTime, text) {
 // always bump modifiedTime on a rename, and the entry caches the name.
 export function diffIndex(index, files) {
   const entries = index?.entries ?? {};
-  const drills = (files ?? []).filter((f) => isDrill(f.name));
+  const drills = (files ?? []).filter((f) => f && isDrill(f.name));
   const keep = {};
   const refetch = [];
 

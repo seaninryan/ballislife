@@ -106,6 +106,12 @@ describe("diffIndex", () => {
     expect(Object.keys(d.keep)).toEqual(["keep"]);
   });
 
+  it("skips a null file rather than throwing", () => {
+    const files = [null, { id: "a", name: "a.md", modifiedTime: "T" }];
+    expect(() => diffIndex(EMPTY_INDEX, files)).not.toThrow();
+    expect(diffIndex(EMPTY_INDEX, files).refetch.map((f) => f.id)).toEqual(["a"]);
+  });
+
   it("treats an empty index as everything needing a fetch", () => {
     const d = diffIndex(EMPTY_INDEX, files);
     expect(d.refetch.map((f) => f.id).sort()).toEqual(["keep", "new", "stale"]);

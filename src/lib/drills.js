@@ -30,13 +30,18 @@ export function fileNameFor(title, taken = []) {
 export function drillsFromIndex(index) {
   const entries = index?.entries ?? {};
   return Object.entries(entries)
+    .filter(([, e]) => e && typeof e === "object")
     .map(([id, e]) => {
       const slug = stripExt(e.name);
       const meta = e.meta ?? {};
+      // YAML types `title: 2024` as a number and `title: true` as a boolean, so coerce
+      // before the value reaches localeCompare or toLowerCase. Without this a single
+      // numerically-titled drill threw and took the whole catalogue AND its search down
+      // with it — and a numeric title is not even invalid, just a season or a year.
       return {
         id,
         slug,
-        title: meta.title || slug,
+        title: meta.title ? String(meta.title) : slug,
         category: meta.category ?? null,
         minutes: meta.minutes ?? null,
         players: meta.players ?? null,

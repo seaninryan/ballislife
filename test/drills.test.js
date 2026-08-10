@@ -51,6 +51,31 @@ describe("drillsFromIndex", () => {
     expect(drillsFromIndex({ version: 1, entries: {} })).toEqual([]);
     expect(drillsFromIndex(null)).toEqual([]);
   });
+
+  it("coerces a non-string title instead of crashing the catalogue", () => {
+    // A drill titled 2024 is legitimate YAML, not a broken file, but a number reaching
+    // localeCompare threw and took down the whole list — and toLowerCase did the same
+    // to search. Both must survive it.
+    const idx = { version: 1, entries: {
+      a: { name: "a.md", meta: { title: "Alpha" }, thumb: null, invalid: null },
+      b: { name: "b.md", meta: { title: 2024 }, thumb: null, invalid: null },
+      c: { name: "c.md", meta: { title: true }, thumb: null, invalid: null },
+      d: { name: "d.md", meta: { title: "Delta" }, thumb: null, invalid: null },
+    } };
+    const drills = drillsFromIndex(idx);
+    expect(drills.map((d) => d.title)).toEqual(["2024", "Alpha", "Delta", "true"]);
+    expect(filterDrills(drills, { query: "20" }).map((d) => d.id)).toEqual(["b"]);
+  });
+
+  it("still falls back to the slug for a falsy title", () => {
+    const entry = (id, title) => [id, { name: `${id}.md`, meta: { title }, thumb: null, invalid: null }];
+    const idx = { version: 1, entries: Object.fromEntries([entry("x", ""), entry("y", false), entry("z", 0)]) };
+    expect(drillsFromIndex(idx).map((d) => d.title)).toEqual(["x", "y", "z"]);
+  });
+
+  it("skips a null entry rather than throwing", () => {
+    expect(drillsFromIndex({ version: 1, entries: { a: null } })).toEqual([]);
+  });
 });
 
 describe("slugify", () => {
