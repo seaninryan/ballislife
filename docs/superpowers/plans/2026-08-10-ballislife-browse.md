@@ -189,6 +189,15 @@ npx vitest run test/prose.test.js
 
 Expected: `Tests  7 passed (7)`.
 
+**Verified sanitiser behaviour** (probed beyond the tests above, recorded so it is not
+rediscovered): `<iframe>`, `<style>`, `<script>` — including inside `<svg>` — `onclick`
+and other event handlers, and `javascript:` hrefs are all removed, while ordinary
+`https:` links survive intact. Two things DOMPurify allows by default and we accept: a
+`<form>` element, and a `data:` URI as an image `src`. Neither can execute, and with
+scripting blocked nothing can read the access token from `sessionStorage`, so the
+realistic risk on the owner’s own content is nil. If the Drive folder is ever shared
+with someone who can write to it, revisit with `FORBID_TAGS: ["form", "input"]`.
+
 - [ ] **Step 6: Commit**
 
 ```bash
