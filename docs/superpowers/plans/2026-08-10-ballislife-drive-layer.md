@@ -250,7 +250,7 @@ export async function isOwner(email, expected = OWNER_EMAIL_SHA256) {
 npx vitest run test/owner.test.js
 ```
 
-Expected: `Tests  8 passed (8)`.
+Expected: `Tests  7 passed (7)`.
 
 - [ ] **Step 5: Commit**
 
@@ -298,7 +298,7 @@ describe("aboutEmail", () => {
     expect(await aboutEmail("tok")).toBe("a@b.com");
     const [url, opts] = lastCall();
     expect(url).toContain("/drive/v3/about");
-    expect(url).toContain("fields=user%28emailAddress%29");
+    expect(url).toContain("fields=user(emailAddress)");
     expect(opts.headers.Authorization).toBe("Bearer tok");
   });
 
@@ -457,7 +457,9 @@ const json = async (token, url, opts) => (await call(token, url, opts)).json();
 
 // -> the signed-in account's email, or null if Drive did not report one.
 export async function aboutEmail(token) {
-  const url = `https://www.googleapis.com/drive/v3/about?fields=${encodeURIComponent("user(emailAddress)")}`;
+  // Parentheses are legal unencoded in a query value, and encodeURIComponent leaves
+  // them alone anyway, so spell the fixed value out rather than pretending to encode it.
+  const url = "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)";
   const body = await json(token, url);
   return body?.user?.emailAddress ?? null;
 }
@@ -620,16 +622,16 @@ describe("entryFor", () => {
     expect(e.modifiedTime).toBe("T1");
     expect(e.meta.title).toBe("3v2 to end line");
     expect(e.meta.tags).toEqual(["transition"]);
-    expect(e.thumb).toBe("area: 40x25 half\\nred: A@10,20\\n");
+    expect(e.thumb).toBe("area: 40x25 half\nred: A@10,20\n");
     expect(e.invalid).toBe(null);
   });
 
   it("records a null thumb when the drill has no diagram", () => {
-    expect(entryFor("x.md", "T", "---\\ntitle: T\\n---\\n\\njust prose\\n").thumb).toBe(null);
+    expect(entryFor("x.md", "T", "---\ntitle: T\n---\n\njust prose\n").thumb).toBe(null);
   });
 
   it("flags broken frontmatter but still builds an entry", () => {
-    const e = entryFor("x.md", "T", "---\\ntitle: [oops\\n---\\n\\nbody\\n");
+    const e = entryFor("x.md", "T", "---\ntitle: [oops\n---\n\nbody\n");
     expect(e.invalid).toMatch(/yaml/i);
     expect(e.meta).toEqual({});
   });
@@ -689,7 +691,7 @@ describe("diffIndex", () => {
 describe("applyDiff", () => {
   it("merges kept entries with freshly built ones", () => {
     const keep = { k: { name: "k.md", modifiedTime: "T", meta: {}, thumb: null, invalid: null } };
-    const fetched = { n: entryFor("n.md", "T", "---\\ntitle: N\\n---\\n") };
+    const fetched = { n: entryFor("n.md", "T", "---\ntitle: N\n---\n") };
     const next = applyDiff(keep, fetched);
     expect(Object.keys(next.entries).sort()).toEqual(["k", "n"]);
     expect(next.version).toBe(1);
@@ -1181,7 +1183,7 @@ import { loadCatalogue, saveDrill, FOLDER_NAME, INDEX_NAME } from "../src/lib/dr
 vi.mock("../src/lib/driveApi.js");
 vi.mock("../src/lib/driveAuth.js");
 
-const DRILL = "---\\ntitle: A\\n---\\n\\nbody\\n";
+const DRILL = "---\ntitle: A\n---\n\nbody\n";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -1655,7 +1657,7 @@ describe("Catalogue", () => {
   it("lists drills with their metadata", () => {
     const drills = [
       { id: "a", slug: "rondo-4v2", title: "Rondo 4v2", category: "warmup", minutes: 10,
-        players: "6-8", tags: ["possession"], thumb: "area: 20x20 plain\\nred: A@5,5\\n", invalid: null },
+        players: "6-8", tags: ["possession"], thumb: "area: 20x20 plain\nred: A@5,5\n", invalid: null },
     ];
     const html = render({ status: "ready", drills });
     expect(html).toContain("Rondo 4v2");
