@@ -1,29 +1,28 @@
 // src/components/Catalogue.jsx
-// Presentational: given a status and a list of drills, render them. No Drive calls —
-// App owns the async wiring, which is what lets this be tested without mocks.
+// Presentational: given a status, render sign-in, the grid, or one drill. No Drive
+// calls — App owns the async wiring, which is what lets this be tested without mocks.
 import React from "react";
-import PitchDiagram from "./PitchDiagram.jsx";
+import Grid from "./Grid.jsx";
+import DrillView from "./DrillView.jsx";
 
-function DrillRow({ drill }) {
-  const chips = [drill.category, drill.minutes ? `${drill.minutes}′` : null, drill.players]
-    .filter(Boolean)
-    .concat(drill.tags);
-  return (
-    <div className="card">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <strong>{drill.title}</strong>
-        <span className="dim mono">{drill.slug}.md</span>
-      </div>
-      <div className="row" style={{ margin: "6px 0" }}>
-        {chips.map((c, i) => <span className="chip" key={i}>{c}</span>)}
-      </div>
-      {drill.invalid ? <div className="banner warn mono">{drill.invalid}</div> : null}
-      {drill.thumb ? <PitchDiagram source={drill.thumb} /> : null}
-    </div>
-  );
+// Raw exception text like "drive 403" tells a coach nothing about what to do next.
+export function friendlyError(message) {
+  const text = String(message ?? "");
+  if (/\b401\b/.test(text)) return "Your Google sign-in expired. Reload to sign in again.";
+  if (/\b403\b/.test(text)) return "Google is rate-limiting requests. Try again in a minute.";
+  if (/\b404\b/.test(text)) return "That drill is no longer in your Drive folder.";
+  if (/\b5\d\d\b/.test(text)) return "Google Drive is having trouble. Try again shortly.";
+  if (/failed to fetch|networkerror|load failed/i.test(text)) {
+    return "No connection to Google Drive. Check your signal and try again.";
+  }
+  return text || "Something went wrong.";
 }
 
-export default function Catalogue({ status, drills = [], message, onSignIn }) {
+export default function Catalogue({
+  status, drills = [], failed = [], message, onSignIn,
+  filter = {}, onFilterChange, selected, drillStatus, drillText, drillMessage,
+  onOpen, onBack, duplicateFolders,
+}) {
   if (status === "signed-out") {
     return (
       <div className="card">
@@ -36,17 +35,35 @@ export default function Catalogue({ status, drills = [], message, onSignIn }) {
   if (status === "not-owner") {
     return <div className="card banner err">This app is for its owner only. You have been signed out.</div>;
   }
-  if (status === "error") return <div className="card banner err mono">{message}</div>;
-  if (!drills.length) {
+  if (status === "error") return <div className="card banner err">{friendlyError(message)}</div>;
+
+  if (selected) {
     return (
-      <div className="card">
-        <p>No drills yet.</p>
-        <p className="dim">
-          Add markdown files to the <strong>BallIsLife</strong> folder in your Google Drive
-          and reload.
-        </p>
-      </div>
+      <DrillView
+        drill={selected}
+        status={drillStatus}
+        text={drillText}
+        message={friendlyError(drillMessage)}
+        onBack={onBack}
+      />
     );
   }
-  return <div>{drills.map((d) => <DrillRow key={d.id} drill={d} />)}</div>;
+
+  return (
+    <>
+      {duplicateFolders ? (
+        <div className="banner warn">
+          There is more than one <strong>BallIsLife</strong> folder in your Drive. Drills
+          may be split between them — merge them in Drive to be safe.
+        </div>
+      ) : null}
+      <Grid
+        drills={drills}
+        failed={failed}
+        filter={filter}
+        onFilterChange={onFilterChange}
+        onOpen={onOpen}
+      />
+    </>
+  );
 }
