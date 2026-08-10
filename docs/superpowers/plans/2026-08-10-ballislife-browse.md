@@ -344,6 +344,14 @@ describe("DrillCard", () => {
     expect(render(drill)).toContain("possession");
   });
 
+  it("does not let a long unbroken title escape the card", () => {
+    // A long title ran past the card edge and pushed the whole page sideways on a
+    // phone. The fix is CSS, so assert the class that carries it is present.
+    const html = render({ ...drill, title: "A".repeat(90) });
+    expect(html).toContain("drill-card-title");
+    expect(html).toContain("A".repeat(90));
+  });
+
   it("omits chips for absent fields rather than showing blanks", () => {
     const html = render({ ...drill, minutes: null, players: null, category: null, tags: [] });
     expect(html).not.toContain("′");
@@ -408,7 +416,9 @@ export default function DrillCard({ drill, onOpen }) {
   aspect-ratio: 44 / 29; display: flex; align-items: center; justify-content: center;
   background: var(--bg); border-radius: 8px; font-size: 13px;
 }
-.drill-card-title { font-weight: 700; margin: 8px 0 4px; }
+/* overflow-wrap because a long unbroken title ran past the card edge and pushed the
+   whole page sideways on a phone, which is the device this view exists for. */
+.drill-card-title { font-weight: 700; margin: 8px 0 4px; overflow-wrap: anywhere; }
 .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 ```
 
@@ -417,7 +427,7 @@ The card is a `<button>` so it is keyboard reachable and announced as clickable 
 - [ ] **Step 5: Run the tests, then commit**
 
 ```bash
-npx vitest run test/drillCard.test.jsx    # expect 6 passed
+npx vitest run test/drillCard.test.jsx    # expect 7 passed
 git add -A
 git commit -m "feat: drill card with the pitch diagram as its thumbnail"
 ```
