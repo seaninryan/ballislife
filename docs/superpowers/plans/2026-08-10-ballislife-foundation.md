@@ -563,7 +563,10 @@ export function parseDoc(src) {
     }
     return { meta, body, error: null };
   } catch (e) {
-    // mark.line is 0-based within the frontmatter block, not the file.
+    // mark.line is 0-based within the frontmatter block, not the file. For
+    // unterminated-flow-collection errors js-yaml reports where the parser gave up,
+    // which is one line past the offending construct — a known cosmetic off-by-one
+    // for that error class only, relevant if Plan 2's editor adds jump-to-line.
     const where = e.mark ? ` (line ${e.mark.line + 1})` : "";
     return { meta: {}, body, error: `yaml: ${e.reason || e.message}${where}` };
   }
