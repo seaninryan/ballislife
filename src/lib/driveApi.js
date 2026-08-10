@@ -26,11 +26,17 @@ export async function aboutEmail(token) {
   return body?.user?.emailAddress ?? null;
 }
 
-// -> folder id, or null when it does not exist.
-export async function findFolder(token, name) {
+// -> every non-trashed folder with this name. More than one means the owner ended up
+// with duplicates — possible if two devices ran a first-time load at the same moment,
+// since Drive's search index lags folder creation. Callers warn rather than guess.
+export async function findAllFolders(token, name) {
   const q = encodeURIComponent(`name='${name}' and mimeType='${FOLDER_MIME}' and trashed=false`);
   const body = await json(token, `${FILES}?q=${q}&fields=files(id)`);
-  return body.files?.[0]?.id ?? null;
+  return (body.files ?? []).map((f) => f.id);
+}
+
+export async function findFolder(token, name) {
+  return (await findAllFolders(token, name))[0] ?? null;
 }
 
 export async function createFolder(token, name) {

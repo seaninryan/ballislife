@@ -21,16 +21,18 @@ async function withRetry(run) {
   }
 }
 
-async function folderId(token) {
-  return (await api.findFolder(token, FOLDER_NAME)) ?? api.createFolder(token, FOLDER_NAME);
+async function folders(token) {
+  const found = await api.findAllFolders(token, FOLDER_NAME);
+  if (found.length) return { folder: found[0], duplicateFolders: found.length > 1 };
+  return { folder: await api.createFolder(token, FOLDER_NAME), duplicateFolders: false };
 }
 
 // Loads the whole catalogue, revalidating the cache against Drive.
-// -> { folderId, indexFileId, index, drills, fetched, failed }
+// -> { folderId, indexFileId, index, drills, fetched, failed, duplicateFolders }
 export async function loadCatalogue() {
   return withRetry(async () => {
     const token = getAccessToken();
-    const folder = await folderId(token);
+    const { folder, duplicateFolders } = await folders(token);
     const files = await api.listFiles(token, folder);
 
     const indexFile = files.find((f) => f.name === INDEX_NAME) ?? null;
@@ -81,7 +83,22 @@ export async function loadCatalogue() {
       drills: drillsFromIndex(index),
       fetched: refetch.length,
       failed,
+      duplicateFolders,
     };
+  });
+}
+
+// Full text of one drill, plus the modifiedTime the editor will need as its save
+// baseline. The grid renders a cached thumbnail; this is what opening a drill fetches.
+export async function readDrill(id, folder) {
+  return withRetry(async () => {
+    const token = getAccessToken();
+    const files = await api.listFiles(token, folder);
+    const file = files.find((f) => f.id === id) ?? null;
+    const text = await api.readFile(token, id);
+    const modifiedTime = file?.modifiedTime ?? null;
+    if (modifiedTime) known.set(id, modifiedTime);
+    return { text, modifiedTime };
   });
 }
 

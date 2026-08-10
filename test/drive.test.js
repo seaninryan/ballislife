@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as api from "../src/lib/driveApi.js";
 import * as auth from "../src/lib/driveAuth.js";
 import {
-  loadCatalogue, saveDrill, noteModifiedTime, knownModifiedTime, FOLDER_NAME, INDEX_NAME,
+  loadCatalogue, saveDrill, noteModifiedTime, knownModifiedTime, readDrill, FOLDER_NAME, INDEX_NAME,
 } from "../src/lib/drive.js";
 
 vi.mock("../src/lib/driveApi.js");
@@ -19,7 +19,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("loadCatalogue", () => {
   it("creates the folder when it does not exist", async () => {
-    api.findFolder.mockResolvedValue(null);
+    api.findAllFolders.mockResolvedValue([]);
     api.createFolder.mockResolvedValue("F1");
     api.listFiles.mockResolvedValue([]);
     api.readFile.mockResolvedValue("");
@@ -29,7 +29,7 @@ describe("loadCatalogue", () => {
   });
 
   it("reads only the files whose modifiedTime moved", async () => {
-    api.findFolder.mockResolvedValue("F1");
+    api.findAllFolders.mockResolvedValue(["F1"]);
     api.listFiles.mockResolvedValue([
       { id: "idx", name: INDEX_NAME, modifiedTime: "T" },
       { id: "a", name: "a.md", modifiedTime: "T1" },
@@ -50,7 +50,7 @@ describe("loadCatalogue", () => {
   });
 
   it("rebuilds from scratch when the index is unreadable", async () => {
-    api.findFolder.mockResolvedValue("F1");
+    api.findAllFolders.mockResolvedValue(["F1"]);
     api.listFiles.mockResolvedValue([
       { id: "idx", name: INDEX_NAME, modifiedTime: "T" },
       { id: "a", name: "a.md", modifiedTime: "T1" },
@@ -62,7 +62,7 @@ describe("loadCatalogue", () => {
   });
 
   it("tolerates a missing index file", async () => {
-    api.findFolder.mockResolvedValue("F1");
+    api.findAllFolders.mockResolvedValue(["F1"]);
     api.listFiles.mockResolvedValue([{ id: "a", name: "a.md", modifiedTime: "T1" }]);
     api.readFile.mockResolvedValue(DRILL);
     api.writeFile.mockResolvedValue("T");
@@ -73,7 +73,7 @@ describe("loadCatalogue", () => {
 
   it("keeps the rest of the catalogue when one drill fails to download", async () => {
     // One flaky read on a phone must not cost every drill.
-    api.findFolder.mockResolvedValue("F1");
+    api.findAllFolders.mockResolvedValue(["F1"]);
     api.listFiles.mockResolvedValue([
       { id: "good1", name: "good1.md", modifiedTime: "T1" },
       { id: "bad", name: "bad.md", modifiedTime: "T1" },
@@ -92,7 +92,7 @@ describe("loadCatalogue", () => {
   });
 
   it("keeps a stale cached entry when its refetch fails, and retries next load", async () => {
-    api.findFolder.mockResolvedValue("F1");
+    api.findAllFolders.mockResolvedValue(["F1"]);
     api.listFiles.mockResolvedValue([
       { id: "idx", name: INDEX_NAME, modifiedTime: "T" },
       { id: "a", name: "a.md", modifiedTime: "T2" },
@@ -114,7 +114,7 @@ describe("loadCatalogue", () => {
   });
 
   it("lets a 401 during a drill read reach the retry rather than failing that drill", async () => {
-    api.findFolder.mockResolvedValue("F1");
+    api.findAllFolders.mockResolvedValue(["F1"]);
     api.listFiles.mockResolvedValue([{ id: "a", name: "a.md", modifiedTime: "T1" }]);
     let reads = 0;
     api.readFile.mockImplementation(async () => {
@@ -131,21 +131,61 @@ describe("loadCatalogue", () => {
   });
 
   it("retries once after a 401, then succeeds", async () => {
-    api.findFolder
+    api.findAllFolders
       .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
-      .mockResolvedValue("F1");
+      .mockResolvedValue(["F1"]);
     api.listFiles.mockResolvedValue([]);
     api.readFile.mockResolvedValue("");
     api.writeFile.mockResolvedValue("T");
     api.createFile.mockResolvedValue({ id: "idx", modifiedTime: "T" });
     await expect(loadCatalogue()).resolves.toBeTruthy();
-    expect(api.findFolder).toHaveBeenCalledTimes(2);
+    expect(api.findAllFolders).toHaveBeenCalledTimes(2);
   });
 
   it("does not retry a non-auth failure", async () => {
-    api.findFolder.mockRejectedValue(Object.assign(new Error("boom"), { code: 500 }));
+    api.findAllFolders.mockRejectedValue(Object.assign(new Error("boom"), { code: 500 }));
     await expect(loadCatalogue()).rejects.toMatchObject({ code: 500 });
-    expect(api.findFolder).toHaveBeenCalledTimes(1);
+    expect(api.findAllFolders).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("readDrill", () => {
+  it("fetches the file text and records its modifiedTime", async () => {
+    api.readFile.mockResolvedValue("---\ntitle: A\n---\n\nbody\n");
+    api.listFiles.mockResolvedValue([{ id: "a", name: "a.md", modifiedTime: "T7" }]);
+    api.findFolder.mockResolvedValue("F1");
+    const r = await readDrill("a", "F1");
+    expect(r.text).toContain("title: A");
+    expect(r.modifiedTime).toBe("T7");
+    expect(knownModifiedTime("a")).toBe("T7");
+  });
+
+  it("retries once on a 401", async () => {
+    api.findFolder.mockResolvedValue("F1");
+    api.listFiles.mockResolvedValue([{ id: "a", name: "a.md", modifiedTime: "T1" }]);
+    api.readFile
+      .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
+      .mockResolvedValue("text");
+    await expect(readDrill("a", "F1")).resolves.toBeTruthy();
+  });
+});
+
+describe("duplicate folders", () => {
+  it("warns when more than one BallIsLife folder exists", async () => {
+    api.findAllFolders.mockResolvedValue(["F1", "F2"]);
+    api.listFiles.mockResolvedValue([]);
+    api.readFile.mockResolvedValue("");
+    api.createFile.mockResolvedValue({ id: "idx", modifiedTime: "T" });
+    const { duplicateFolders } = await loadCatalogue();
+    expect(duplicateFolders).toBe(true);
+  });
+
+  it("reports no duplicates in the normal case", async () => {
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([]);
+    api.readFile.mockResolvedValue("");
+    api.createFile.mockResolvedValue({ id: "idx", modifiedTime: "T" });
+    expect((await loadCatalogue()).duplicateFolders).toBe(false);
   });
 });
 

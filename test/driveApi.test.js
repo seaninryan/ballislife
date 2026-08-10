@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  aboutEmail, findFolder, createFolder, listFiles,
+  aboutEmail, findFolder, findAllFolders, createFolder, listFiles,
   readFile, writeFile, createFile, renameFile, trashFile,
 } from "../src/lib/driveApi.js";
 
@@ -45,6 +45,18 @@ describe("findFolder", () => {
   it("returns null when the folder does not exist", async () => {
     fetchMock.mockResolvedValue(ok({ files: [] }));
     expect(await findFolder("tok", "BallIsLife")).toBe(null);
+  });
+});
+
+describe("findAllFolders", () => {
+  it("returns every matching folder id", async () => {
+    fetchMock.mockResolvedValue(ok({ files: [{ id: "F1" }, { id: "F2" }] }));
+    expect(await findAllFolders("tok", "BallIsLife")).toEqual(["F1", "F2"]);
+  });
+
+  it("returns an empty array when there are none", async () => {
+    fetchMock.mockResolvedValue(ok({ files: [] }));
+    expect(await findAllFolders("tok", "BallIsLife")).toEqual([]);
   });
 });
 
