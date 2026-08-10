@@ -43,3 +43,12 @@ export function parseDoc(src) {
     return { meta: {}, body, error: `yaml: ${e.reason || e.message}${where}` };
   }
 }
+
+// { meta, body } -> markdown text. Inverse of parseDoc at the model level.
+export function serialiseDoc({ meta, body }) {
+  const text = body ?? "";
+  const keys = Object.keys(meta ?? {});
+  if (keys.length === 0) return text;
+  const front = yaml.dump(meta, { lineWidth: 0, noRefs: true, flowLevel: -1 });
+  return `---\n${front}---\n\n${text.replace(/^\n+/, "")}`;
+}

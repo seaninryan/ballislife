@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseDoc } from "../src/lib/frontmatter.js";
+import { parseDoc, serialiseDoc } from "../src/lib/frontmatter.js";
 
 describe("parseDoc", () => {
   it("splits frontmatter from body", () => {
@@ -87,5 +87,23 @@ describe("parseDoc", () => {
     const doc = parseDoc("---\n\nkey: value\n\n---\n\nMore text.\n");
     expect(doc.meta).toEqual({ key: "value" });
     expect(doc.body).toBe("More text.\n");
+  });
+});
+
+describe("serialiseDoc", () => {
+  it("writes frontmatter then body", () => {
+    const out = serialiseDoc({ meta: { title: "Rondo 4v2", minutes: 10 }, body: "Keep the ball.\n" });
+    expect(out).toBe("---\ntitle: Rondo 4v2\nminutes: 10\n---\n\nKeep the ball.\n");
+  });
+
+  it("omits the fence when there is no metadata", () => {
+    expect(serialiseDoc({ meta: {}, body: "notes\n" })).toBe("notes\n");
+  });
+
+  it("round-trips a document through parse and serialise", () => {
+    const src = "---\ntitle: Rondo 4v2\nminutes: 10\ntags:\n  - possession\n---\n\nKeep the ball.\n";
+    const once = serialiseDoc(parseDoc(src));
+    expect(serialiseDoc(parseDoc(once))).toBe(once);
+    expect(parseDoc(once).meta).toEqual({ title: "Rondo 4v2", minutes: 10, tags: ["possession"] });
   });
 });
