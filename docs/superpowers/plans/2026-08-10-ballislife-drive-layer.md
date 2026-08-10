@@ -680,6 +680,12 @@ describe("diffIndex", () => {
     expect(Object.keys(d.keep)).toEqual(["keep"]);
   });
 
+  it("skips a null file rather than throwing", () => {
+    const files = [null, { id: "a", name: "a.md", modifiedTime: "T" }];
+    expect(() => diffIndex(EMPTY_INDEX, files)).not.toThrow();
+    expect(diffIndex(EMPTY_INDEX, files).refetch.map((f) => f.id)).toEqual(["a"]);
+  });
+
   it("treats an empty index as everything needing a fetch", () => {
     const d = diffIndex(EMPTY_INDEX, files);
     expect(d.refetch.map((f) => f.id).sort()).toEqual(["keep", "new", "stale"]);
@@ -758,7 +764,7 @@ export function entryFor(name, modifiedTime, text) {
 // always bump modifiedTime on a rename, and the entry caches the name.
 export function diffIndex(index, files) {
   const entries = index?.entries ?? {};
-  const drills = (files ?? []).filter((f) => isDrill(f.name));
+  const drills = (files ?? []).filter((f) => f && isDrill(f.name));
   const keep = {};
   const refetch = [];
 
@@ -788,7 +794,7 @@ export function applyDiff(keep, fetched) {
 npx vitest run test/driveIndex.test.js
 ```
 
-Expected: `Tests  13 passed (13)`.
+Expected: `Tests  14 passed (14)`.
 
 - [ ] **Step 5: Commit**
 
@@ -863,6 +869,31 @@ describe("drillsFromIndex", () => {
   it("returns an empty array for an empty index", () => {
     expect(drillsFromIndex({ version: 1, entries: {} })).toEqual([]);
     expect(drillsFromIndex(null)).toEqual([]);
+  });
+
+  it("coerces a non-string title instead of crashing the catalogue", () => {
+    // A drill titled 2024 is legitimate YAML, not a broken file, but a number reaching
+    // localeCompare threw and took down the whole list — and toLowerCase did the same
+    // to search. Both must survive it.
+    const idx = { version: 1, entries: {
+      a: { name: "a.md", meta: { title: "Alpha" }, thumb: null, invalid: null },
+      b: { name: "b.md", meta: { title: 2024 }, thumb: null, invalid: null },
+      c: { name: "c.md", meta: { title: true }, thumb: null, invalid: null },
+      d: { name: "d.md", meta: { title: "Delta" }, thumb: null, invalid: null },
+    } };
+    const drills = drillsFromIndex(idx);
+    expect(drills.map((d) => d.title)).toEqual(["2024", "Alpha", "Delta", "true"]);
+    expect(filterDrills(drills, { query: "20" }).map((d) => d.id)).toEqual(["b"]);
+  });
+
+  it("still falls back to the slug for a falsy title", () => {
+    const entry = (id, title) => [id, { name: `${id}.md`, meta: { title }, thumb: null, invalid: null }];
+    const idx = { version: 1, entries: Object.fromEntries([entry("x", ""), entry("y", false), entry("z", 0)]) };
+    expect(drillsFromIndex(idx).map((d) => d.title)).toEqual(["x", "y", "z"]);
+  });
+
+  it("skips a null entry rather than throwing", () => {
+    expect(drillsFromIndex({ version: 1, entries: { a: null } })).toEqual([]);
   });
 });
 
@@ -972,13 +1003,18 @@ export function fileNameFor(title, taken = []) {
 export function drillsFromIndex(index) {
   const entries = index?.entries ?? {};
   return Object.entries(entries)
+    .filter(([, e]) => e && typeof e === "object")
     .map(([id, e]) => {
       const slug = stripExt(e.name);
       const meta = e.meta ?? {};
+      // YAML types `title: 2024` as a number and `title: true` as a boolean, so coerce
+      // before the value reaches localeCompare or toLowerCase. Without this a single
+      // numerically-titled drill threw and took the whole catalogue AND its search down
+      // with it — and a numeric title is not even invalid, just a season or a year.
       return {
         id,
         slug,
-        title: meta.title || slug,
+        title: meta.title ? String(meta.title) : slug,
         category: meta.category ?? null,
         minutes: meta.minutes ?? null,
         players: meta.players ?? null,
@@ -1013,7 +1049,7 @@ export function filterDrills(drills, { category, tag, query } = {}) {
 npx vitest run test/drills.test.js
 ```
 
-Expected: `Tests  18 passed (18)`.
+Expected: `Tests  21 passed (21)`.
 
 - [ ] **Step 5: Commit**
 
