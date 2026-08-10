@@ -203,3 +203,47 @@ export function parse(src) {
 
   return { scene, errors };
 }
+
+// Trims trailing zeros so 10 serialises as "10", not "10.0".
+const n = (v) => String(Number(v));
+const pt = (o) => `${n(o.x)},${n(o.y)}`;
+// Quote only when the value contains whitespace, so short labels stay unquoted.
+const quote = (s) => (/\s/.test(s) ? `"${s}"` : s);
+
+// Scene -> canonical source. Inverse of parse() at the MODEL level:
+// parse(serialise(scene)).scene deep-equals scene, and serialise is stable under
+// re-parse. It is NOT byte-identical to arbitrary input source.
+export function serialise(scene) {
+  const lines = [];
+  const marksOf = (kind) => scene.marks.filter((m) => m.kind === kind);
+
+  const { w, h, markings } = scene.area;
+  lines.push(`area: ${n(w)}x${n(h)}${markings === "plain" ? "" : ` ${markings}`}`);
+
+  for (const z of marksOf("zone")) {
+    const label = z.label ? ` ${quote(z.label)}` : "";
+    lines.push(`zone: ${pt(z)} ${n(z.w)}x${n(z.h)}${label}`);
+  }
+  for (const g of marksOf("goal")) {
+    lines.push(`goal: ${pt(g)}${g.size === "full" ? "" : ` ${g.size}`}`);
+  }
+  for (const kind of ["cone", "ball", "flag"]) {
+    const ms = marksOf(kind);
+    if (ms.length) lines.push(`${kind}: ${ms.map(pt).join(" ")}`);
+  }
+  for (const team of TEAMS) {
+    const ps = scene.players.filter((p) => p.team === team);
+    if (ps.length) lines.push(`${team}: ${ps.map((p) => `${p.label}@${pt(p)}`).join(" ")}`);
+  }
+  for (const a of [...scene.actions].sort((x, y) => x.seq - y.seq)) {
+    const to = a.to.ref !== undefined ? a.to.ref : pt(a.to);
+    lines.push(`${a.kind}: ${a.from}${ARROWS[a.kind]}${to}`);
+  }
+  // Truthiness rather than a null check: an empty label serialises to `label: ` which
+  // parses back as null, so emitting it would break round-trip stability.
+  if (scene.label) {
+    lines.push(`label: ${quote(scene.label)}`);
+  }
+
+  return lines.join("\n") + "\n";
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parse } from "../src/lib/pitch.js";
+import { parse, serialise } from "../src/lib/pitch.js";
 
 describe("parse: area", () => {
   it("reads dimensions and a markings preset", () => {
@@ -248,4 +248,85 @@ describe("parse: robustness", () => {
       expect(e.message.length).toBeGreaterThan(0);
     }
   });
+});
+
+describe("serialise", () => {
+  it("writes directives in canonical order", () => {
+    const src = [
+      "label: Test",
+      "pass: A->B",
+      "red: A@1,1 B@2,2",
+      "cone: 5,5",
+      "area: 40x25 half",
+    ].join("\n");
+    const { scene } = parse(src);
+    expect(serialise(scene)).toBe(
+      [
+        "area: 40x25 half",
+        "cone: 5,5",
+        "red: A@1,1 B@2,2",
+        "pass: A->B",
+        "label: Test",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("omits the markings word when the area is plain", () => {
+    expect(serialise(parse("area: 30x20\n").scene)).toBe("area: 30x20\n");
+  });
+
+  it("writes one action per line, in sequence order", () => {
+    const { scene } = parse("red: A@1,1 B@2,2\npass: A->B B->A\nrun: A~>9,9\n");
+    expect(serialise(scene)).toBe(
+      ["area: 40x25", "red: A@1,1 B@2,2", "pass: A->B", "pass: B->A", "run: A~>9,9", ""].join("\n"),
+    );
+  });
+
+  it("quotes labels and zone labels", () => {
+    const { scene } = parse('zone: 1,2 3x4 "press here"\nlabel: 3v2 to end line\n');
+    const out = serialise(scene);
+    expect(out).toContain('zone: 1,2 3x4 "press here"');
+    expect(out).toContain('label: "3v2 to end line"');
+  });
+
+  it("round-trips a scene through serialise and parse unchanged", () => {
+    const src = [
+      "area: 40x25 half",
+      'zone: 12,0 16x25 "press here"',
+      "goal: 0,12 small",
+      "cone: 5,5 5,20 35,5",
+      "ball: 10,12",
+      "flag: 36,4",
+      "red: A@10,20 B@25,14 C@34,20",
+      "blue: X@18,8 Y@30,7",
+      "gk: K@1,12",
+      "pass: A->B",
+      "run: C~>28,4",
+      "dribble: B=>32,12",
+      "shot: C->>goal",
+      'label: "3v2 to end line"',
+    ].join("\n");
+    const { scene, errors } = parse(src);
+    expect(errors).toEqual([]);
+
+    const once = serialise(scene);
+    const again = parse(once);
+    expect(again.errors).toEqual([]);
+    expect(again.scene).toEqual(scene);
+    expect(serialise(again.scene)).toBe(once);
+  });
+
+  it("survives a round trip for an empty scene", () => {
+    const { scene } = parse("");
+    expect(parse(serialise(scene)).scene).toEqual(scene);
+  });
+
+  it("omits an empty label, which would not round-trip", () => {
+    const { scene } = parse("");
+    scene.label = "";
+    expect(serialise(scene)).toBe("area: 40x25\n");
+    expect(parse(serialise(scene)).scene.label).toBe(null);
+  });
+
 });
