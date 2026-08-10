@@ -83,8 +83,29 @@ creates outside it — dropped into the folder from the Drive web UI or pasted f
 claude.ai. `drive.file` scope only exposes files the app itself created, and was
 rejected for that reason. The token never leaves the browser; there is no server.
 
-Only the owner signs in. There is no sharing, no multi-user model, and no
-authorisation logic beyond "you are signed into your own Drive".
+Only the owner signs in. There is no sharing and no multi-user model.
+
+**Owner gate.** After a successful sign-in the app reads the authenticated account's
+email and refuses to proceed unless it matches the owner. The `drive` scope already
+permits this, so no extra scope is needed:
+
+```js
+GET https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)
+```
+
+A mismatch signs the token out and shows "this app is for <owner> only" rather than
+loading anything. The owner's address lives in one exported constant in `drive.js`
+(`OWNER_EMAIL`) — its value is to be confirmed when Plan 2 is built, since it is the
+Google account that owns the Drive folder, which is not necessarily the address used
+elsewhere.
+
+**What this does and does not protect.** The deployed site is publicly readable — that
+is inherent to GitHub Pages on a public repo, and the app's HTML and JS carry nothing
+sensitive. The gate stops a stranger who finds the URL from *using this deployment*
+against their own Drive. It is deliberately **not** a security boundary: the repo is
+public, so anyone can fork it, delete the check and run their own copy. Nothing is lost
+if they do, because the drills live in the owner's Drive and are protected by Google's
+authentication, not by this check. The gate buys tidiness, not secrecy.
 
 **Dev port caveat:** the reused client ID authorises `localhost:5173`. Running the
 fancystats and ballislife dev servers simultaneously pushes the second onto 5174,

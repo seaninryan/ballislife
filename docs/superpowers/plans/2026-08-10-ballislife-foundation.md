@@ -3161,7 +3161,8 @@ git commit -m "docs: correct the round-trip invariant, error behaviour and edito
 Written after this plan lands, against the real parser:
 
 - `lib/drive.js` — port fancystats' auth, plus `/BallIsLife` folder find-or-create and
-  file CRUD
+  file CRUD, and the owner gate: read the signed-in account via `about.get` and refuse
+  anyone but `OWNER_EMAIL` (value to confirm at build time)
 - `lib/index.js` — build, diff and repair `index.json` against a `files.list` of ids
   and `modifiedTime`s
 - `lib/drills.js` — drill model, category and tag filtering, search, slug rules
