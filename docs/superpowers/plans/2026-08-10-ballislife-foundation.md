@@ -1171,7 +1171,7 @@ for (const team of TEAMS) DIRECTIVES[team] = parsePlayers(team);
 npx vitest run test/pitch.test.js
 ```
 
-Expected: `Tests  12 passed (12)`.
+Expected: `Tests  14 passed (14)`.
 
 - [ ] **Step 5: Commit**
 
@@ -1942,8 +1942,30 @@ describe("markings", () => {
     expect(shapes("half")).toEqual(["rect", "rect", "rect", "arc"]);
   });
 
-  it("draws boundary, halfway line, centre circle and two boxes for full", () => {
-    expect(shapes("full")).toEqual(["rect", "line", "circle", "rect", "rect"]);
+  it("draws boundary, halfway line, centre circle and both boxes at both ends for full", () => {
+    expect(shapes("full")).toEqual(["rect", "line", "circle", "rect", "rect", "rect", "rect"]);
+  });
+
+  it("keeps real regulation box dimensions at full-pitch scale", () => {
+    // Every cap resolves to the true FIFA dimension at this size, so the six-yard box is
+    // a proper box rather than the sliver an earlier comment claimed.
+    const [, penalty, six] = markings({ w: 100, h: 64, markings: "full" }).filter(
+      (s) => s.type === "rect",
+    );
+    expect(penalty.w).toBeCloseTo(16.5 * S);
+    expect(penalty.h).toBeCloseTo(40.3 * S);
+    expect(six.w).toBeCloseTo(5.5 * S);
+    expect(six.h).toBeCloseTo(18.3 * S);
+  });
+
+  it("stops the penalty arc outgrowing a shallow pitch", () => {
+    // On a 12m-deep area, capping the arc on height alone bulged the D to 11.8m —
+    // further from goal than the box, and almost off the far end.
+    const arc = markings({ w: 12, h: 40, markings: "half" }).find((s) => s.type === "arc");
+    const t = arc.d.split(/\s+/); // M x y A rx ry rot laf sf x y
+    const rMetres = Number(t[4]) / S;
+    const bulge = Math.min(11, 12 * 0.22) + rMetres;
+    expect(bulge).toBeLessThan(12 * 0.7);
   });
 
   it("draws boundary and one box for box", () => {
@@ -2006,8 +2028,11 @@ const BOX_WIDTH = (h) => Math.min(40.3, h * 0.7);
 const SIX_DEPTH = (w) => Math.min(5.5, w * 0.12);
 const SIX_WIDTH = (h) => Math.min(18.3, h * 0.35);
 const CIRCLE_R = (h) => Math.min(9.15, h * 0.3);
-const ARC_R = (h) => Math.min(9.15, h * 0.25);
 const SPOT_X = (w) => Math.min(11, w * 0.22);
+// The arc is capped against the pitch DEPTH as well as its width. Capping on `h` alone
+// let the D outgrow the pitch: on a 12m-deep, 40m-wide area it bulged to 11.8m, further
+// from goal than the penalty box itself and within 0.2m of the far edge.
+const ARC_R = (w, h) => Math.min(9.15, h * 0.25, (w - SPOT_X(w)) * 0.5);
 
 const rect = (x, y, w, h) => {
   const a = toPx(x, y);
@@ -2045,7 +2070,7 @@ export function markings(area) {
       // penalty box, which reads as wrong to anyone who knows a pitch. Omitted entirely
       // when the caps put the whole circle inside the box.
       const bd = BOX_DEPTH(w);
-      const r = ARC_R(h);
+      const r = ARC_R(w, h);
       const dx = bd - SPOT_X(w);
       if (Math.abs(dx) < r) {
         const dy = Math.sqrt(r * r - dx * dx);
@@ -2058,9 +2083,11 @@ export function markings(area) {
     case "full": {
       out.push(line(w / 2, 0, w / 2, h));
       out.push(circle(w / 2, h / 2, CIRCLE_R(h)));
-      // Penalty box at each end; the six-yard boxes are dropped at full-pitch
-      // scale because they render as unreadable slivers.
-      out.push(boxesAt(w, h)[0], boxesAt(w, h, true)[0]);
+      // Both boxes at both ends. An earlier version dropped the six-yard boxes here on
+      // the grounds that they were unreadable slivers at full-pitch scale, which is
+      // simply false: at 100x64 the caps resolve to the real 5.5x18.3m box, rendered at
+      // the same scale as everything else. Verified by rendering.
+      out.push(...boxesAt(w, h), ...boxesAt(w, h, true));
       break;
     }
     case "box":
@@ -2169,6 +2196,24 @@ describe("actionPath", () => {
     expect(p.badge.x).toBeCloseTo((toPx(0, 0).x + toPx(20, 0).x) / 2, 0);
   });
 
+  it("keeps a run's badge clear of the run's own curve", () => {
+    // The badge is 6.5px in radius; a quadratic deviates half its control offset at the
+    // midpoint, so a fixed 9px offset from the chord landed inside the curve for almost
+    // every run drawn.
+    const runScene = parse("area: 40x25 plain\nred: A@2,20 B@36,6\nrun: A~>36,6\n").scene;
+    const p = actionPath(runScene.actions[0], runScene);
+    const a = toPx(2, 20);
+    const b = toPx(36, 6);
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const bow = Math.min(len * 0.18, 26);
+    const ux = (b.x - a.x) / len;
+    const uy = (b.y - a.y) / len;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const curveAtMid = { x: mid.x + -uy * (bow / 2), y: mid.y + ux * (bow / 2) };
+    const gap = Math.hypot(p.badge.x - curveAtMid.x, p.badge.y - curveAtMid.y);
+    expect(gap).toBeGreaterThan(6.5);
+  });
+
   it("returns null when an endpoint cannot be resolved", () => {
     const broken = { kind: "pass", from: "Z", to: { ref: "B" }, seq: 1 };
     expect(actionPath(broken, scene)).toBe(null);
@@ -2242,12 +2287,17 @@ export function actionPath(action, scene) {
   const r2 = (v) => Math.round(v * 100) / 100;
 
   let d;
+  // How far the drawn path deviates from the straight chord at its midpoint. The badge
+  // is offset by this plus a clearance, so it never sits on the line it labels — a fixed
+  // offset from the chord put the badge inside its own run curve for almost every run.
+  let curveOffset = 0;
   if (action.kind === "dribble") {
     // Perpendicular zig-zag along the line: a series of quadratic wiggles.
     const span = Math.hypot(end.x - start.x, end.y - start.y);
     const steps = Math.max(3, Math.round(span / 14));
     const seg = span / steps;
     const amp = 5;
+    curveOffset = amp;
     d = `M ${r2(start.x)} ${r2(start.y)}`;
     for (let i = 0; i < steps; i++) {
       const sign = i % 2 === 0 ? 1 : -1;
@@ -2260,6 +2310,7 @@ export function actionPath(action, scene) {
   } else if (action.kind === "run") {
     // Single gentle bow, so a run reads differently from a pass even when parallel.
     const bow = Math.min(len * 0.18, 26);
+    curveOffset = bow / 2; // a quadratic deviates half its control offset at t=0.5
     const cx = mid.x + -uy * bow;
     const cy = mid.y + ux * bow;
     d = `M ${r2(start.x)} ${r2(start.y)} Q ${r2(cx)} ${r2(cy)} ${r2(end.x)} ${r2(end.y)}`;
@@ -2271,7 +2322,7 @@ export function actionPath(action, scene) {
     kind: action.kind,
     d,
     seq: action.seq,
-    badge: { x: mid.x + -uy * 9, y: mid.y + ux * 9 },
+    badge: { x: mid.x + -uy * (curveOffset + 9), y: mid.y + ux * (curveOffset + 9) },
   };
 }
 ```
@@ -2282,7 +2333,7 @@ export function actionPath(action, scene) {
 npx vitest run test/pitchSvg.test.js
 ```
 
-Expected: `Tests  25 passed (25)`.
+Expected: `Tests  27 passed (27)`.
 
 - [ ] **Step 5: Commit**
 
