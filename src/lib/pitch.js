@@ -207,8 +207,10 @@ export function parse(src) {
 // Trims trailing zeros so 10 serialises as "10", not "10.0".
 const n = (v) => String(Number(v));
 const pt = (o) => `${n(o.x)},${n(o.y)}`;
-// Quote only when the value contains whitespace, so short labels stay unquoted.
-const quote = (s) => (/\s/.test(s) ? `"${s}"` : s);
+// Quote when the value contains whitespace, so short labels stay unquoted — and also
+// when it already starts with a quote, or the round trip breaks: `"a"` would serialise
+// unquoted as `label: "a"`, which parses back as the bare string `a`.
+const quote = (s) => (/\s/.test(s) || s.startsWith(`"`) ? `"${s}"` : s);
 
 // Scene -> canonical source. Inverse of parse() at the MODEL level:
 // parse(serialise(scene)).scene deep-equals scene, and serialise is stable under

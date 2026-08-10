@@ -322,6 +322,19 @@ describe("serialise", () => {
     expect(parse(serialise(scene)).scene).toEqual(scene);
   });
 
+  it("round-trips a label that is itself quoted", () => {
+    // `"a"` has no whitespace, so a whitespace-only quoting rule would emit it bare and
+    // it would parse back as `a`. Applies to zone labels too, which share the helper.
+    const label = parse('label: ""a""').scene.label;
+    expect(label).toBe('"a"');
+    const once = serialise(parse('label: ""a""').scene);
+    expect(parse(once).scene.label).toBe('"a"');
+    expect(serialise(parse(once).scene)).toBe(once);
+
+    const zone = parse('zone: 1,2 3x4 ""z""').scene;
+    expect(parse(serialise(zone)).scene).toEqual(zone);
+  });
+
   it("omits an empty label, which would not round-trip", () => {
     const { scene } = parse("");
     scene.label = "";
