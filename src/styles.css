@@ -99,8 +99,48 @@ textarea, input, select {
 }
 
 .session-row { display: block; width: 100%; text-align: left; cursor: pointer; }
-.session-block { display: block; }
+/* A session is meant to be read as a whole night's shape in one glance, so on desktop
+   each block collapses to a single row — slot, then drill (or picker), then minutes,
+   then the reorder/remove controls — so five blocks fit on one screen instead of one.
+   Below 780px there isn't width for that row, so it reverts to the original stacked
+   card, which already reads well at a glance on a phone; this is a media-query
+   addition on top of the existing markup, not a DOM restructure. */
+.session-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.session-block .block-slot {
+  display: block;
+  flex: 0 0 72px;
+}
+.session-block .block-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.session-block .block-title { font-weight: 600; overflow-wrap: anywhere; }
+.session-block .block-controls {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
 .session-block select { max-width: 100%; }
+@media (max-width: 780px) {
+  .session-block {
+    display: block;
+  }
+  .session-block .block-slot {
+    margin-bottom: 6px;
+  }
+  .session-block .block-controls {
+    justify-content: flex-end;
+    margin-top: 6px;
+  }
+}
 
 /* The editor reference card. Collapsed by default, so it costs nothing until wanted. */
 .help > summary { cursor: pointer; font-weight: 700; }

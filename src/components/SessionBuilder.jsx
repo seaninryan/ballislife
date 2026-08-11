@@ -20,32 +20,20 @@ function BlockRow({ block, index, count, drills, turnout, onChange, onMove }) {
 
   return (
     <div className="card session-block">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <strong>{block.slot}</strong>
-        <div className="row">
-          {index > 0 ? (
-            <button type="button" aria-label="Move up" onClick={() => onMove(index, index - 1)}>↑</button>
-          ) : null}
-          {index < count - 1 ? (
-            <button type="button" aria-label="Move down" onClick={() => onMove(index, index + 1)}>↓</button>
-          ) : null}
-        </div>
-      </div>
+      <strong className="block-slot">{block.slot}</strong>
 
-      {block.missing ? (
-        <div className="banner err">
-          Drill "{block.drillRef}" is missing — it may have been deleted.{" "}
-          <button type="button" onClick={() => onChange(index, { drill: null, minutes: null })}>
-            Clear
-          </button>
-        </div>
-      ) : block.drill ? (
-        <div>
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <span>{block.drill.title}</span>
-            <span className="chip">{block.minutes}′</span>
+      <div className="block-body">
+        {block.missing ? (
+          <div className="banner err">
+            Drill "{block.drillRef}" is missing — it may have been deleted.{" "}
+            <button type="button" onClick={() => onChange(index, { drill: null, minutes: null })}>
+              Clear
+            </button>
           </div>
-          <div className="row" style={{ marginTop: 6 }}>
+        ) : block.drill ? (
+          <>
+            <span className="block-title">{block.drill.title}</span>
+            <span className="chip">{block.minutes}′</span>
             <label className="dim">
               Minutes:{" "}
               <input
@@ -63,27 +51,36 @@ function BlockRow({ block, index, count, drills, turnout, onChange, onMove }) {
             <button type="button" onClick={() => onChange(index, { drill: null, minutes: null })}>
               Remove
             </button>
-          </div>
-        </div>
-      ) : (
-        <div>
-          <select
-            value=""
-            onChange={(e) => e.target.value && onChange(index, { drill: e.target.value, minutes: null })}
-          >
-            <option value="" disabled>Choose a drill…</option>
-            {candidates.map((d) => (
-              <option key={d.slug} value={d.slug}>
-                {d.title} ({d.minutes ? `${d.minutes}′` : "no duration"})
-              </option>
-            ))}
-          </select>
-          <label className="dim" style={{ marginLeft: 10 }}>
-            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
-            {" "}show all drills
-          </label>
-        </div>
-      )}
+          </>
+        ) : (
+          <>
+            <select
+              value=""
+              onChange={(e) => e.target.value && onChange(index, { drill: e.target.value, minutes: null })}
+            >
+              <option value="" disabled>Choose a drill…</option>
+              {candidates.map((d) => (
+                <option key={d.slug} value={d.slug}>
+                  {d.title} ({d.minutes ? `${d.minutes}′` : "no duration"})
+                </option>
+              ))}
+            </select>
+            <label className="dim">
+              <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+              {" "}show all drills
+            </label>
+          </>
+        )}
+      </div>
+
+      <div className="block-controls">
+        {index > 0 ? (
+          <button type="button" aria-label="Move up" onClick={() => onMove(index, index - 1)}>↑</button>
+        ) : null}
+        {index < count - 1 ? (
+          <button type="button" aria-label="Move down" onClick={() => onMove(index, index + 1)}>↓</button>
+        ) : null}
+      </div>
     </div>
   );
 }
