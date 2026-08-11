@@ -26,6 +26,10 @@ let root;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // jsdom shares one `location` across every test in this file: without resetting it,
+  // a hash left over from a previous test (e.g. "#/drill/a") makes the next mount
+  // auto-navigate to that route before the test's own clicks run.
+  location.hash = "";
   container = document.createElement("div");
   document.body.appendChild(container);
   auth.initAuth.mockResolvedValue(true);

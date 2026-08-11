@@ -4,6 +4,7 @@
 import React from "react";
 import Grid from "./Grid.jsx";
 import DrillView from "./DrillView.jsx";
+import Editor from "./Editor.jsx";
 import { friendlyError } from "../lib/errors.js";
 
 // Re-exported for backward compatibility: existing tests and callers import
@@ -15,6 +16,8 @@ export default function Catalogue({
   status, drills = [], failed = [], error, onSignIn,
   filter = {}, onFilterChange, selected, drillStatus, drillText, drillError,
   onOpen, onBack, duplicateFolders,
+  editor, onEdit, onEditBack, onDelete, onKeepMine, onReload,
+  onStartEdit, onCreate,
 }) {
   if (status === "signed-out") {
     return (
@@ -30,15 +33,38 @@ export default function Catalogue({
   }
   if (status === "error") return <div className="card banner err">{friendlyError(error)}</div>;
 
+  // The editor takes over the whole view when open — it is not a peer of the grid or
+  // the read view, and rendering both at once would mean two sources of truth for the
+  // same drill's text.
+  if (editor) {
+    return (
+      <Editor
+        state={editor}
+        onEdit={onEdit}
+        onBack={onEditBack}
+        onDelete={onDelete}
+        onKeepMine={onKeepMine}
+        onReload={onReload}
+      />
+    );
+  }
+
   if (selected) {
     return (
-      <DrillView
-        drill={selected}
-        status={drillStatus}
-        text={drillText}
-        message={friendlyError(drillError)}
-        onBack={onBack}
-      />
+      <div>
+        <DrillView
+          drill={selected}
+          status={drillStatus}
+          text={drillText}
+          message={friendlyError(drillError)}
+          onBack={onBack}
+        />
+        {drillStatus === "ready" ? (
+          <div className="row">
+            <button type="button" onClick={() => onStartEdit?.(selected)}>Edit</button>
+          </div>
+        ) : null}
+      </div>
     );
   }
 
@@ -50,6 +76,9 @@ export default function Catalogue({
           may be split between them — merge them in Drive to be safe.
         </div>
       ) : null}
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button type="button" className="primary" onClick={onCreate}>New drill</button>
+      </div>
       <Grid
         drills={drills}
         failed={failed}

@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
 import Catalogue, { friendlyError } from "../src/components/Catalogue.jsx";
+import { openEditor } from "../src/lib/editor.js";
 
 const render = (props) => renderToStaticMarkup(<Catalogue {...props} />);
 
@@ -53,6 +54,24 @@ describe("Catalogue", () => {
     const html = render({ status: "ready", drills });
     expect(html).toContain("broken");
     expect(html).toMatch(/needs fixing/i);
+  });
+
+  it("renders the editor instead of the grid when an editor state is present", () => {
+    const state = openEditor("a", "---\ntitle: T\n---\n\nBody.\n", "T1");
+    const drills = [
+      { id: "a", slug: "rondo-4v2", title: "Rondo 4v2", category: "warmup", minutes: 10,
+        players: "6-8", tags: ["possession"], thumb: null, invalid: null },
+    ];
+    const html = render({ status: "ready", drills, editor: state });
+    expect(html).toContain("<textarea");
+    expect(html).toContain("Body.");
+    // The grid must not also be showing.
+    expect(html).not.toContain("Rondo 4v2");
+  });
+
+  it("offers a new drill control in the grid", () => {
+    const html = render({ status: "ready", drills: [] });
+    expect(html).toMatch(/new drill/i);
   });
 
   it("explains an empty folder rather than showing nothing", () => {
