@@ -159,3 +159,15 @@ textarea, input, select {
   background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
   padding: 8px; overflow-x: auto; font-size: 12.5px; margin: 4px 0 0;
 }
+
+/* Run view: a header (date/squad/total + back control) then one card per block. */
+.run-block { break-inside: avoid; }
+.run-block-header { margin-bottom: 8px; }
+
+/* Carried on paper at the side of a pitch: the back button and any other on-screen-
+   only chrome are useless there, and a block split across a page break is worse than
+   a blank inch at the bottom of one. */
+@media print {
+  .run-controls button { display: none; }
+  .run-block { break-inside: avoid; page-break-inside: avoid; }
+}
