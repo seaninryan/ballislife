@@ -330,6 +330,15 @@ export default function App() {
     setSelectedSessionId(null);
   }, [flushSessionsSave]);
 
+  // Leaving the builder must move the URL too, not just the state. closeSessionBuilder
+  // is also a helper for openRun and onModeChange, which write their own hash, so the
+  // navigation lives here rather than inside it: without this the route resolver re-read
+  // the unchanged #/session/<id> and re-opened the builder that had just been closed.
+  const onSessionBack = useCallback(() => {
+    closeSessionBuilder();
+    location.hash = formatHash({ view: "sessions" });
+  }, [closeSessionBuilder]);
+
   const onOpenSession = useCallback((sess) => {
     setRunSessionId(null);
     setSelectedSessionId(sess.id);
@@ -554,7 +563,7 @@ export default function App() {
         onOpenSession={onOpenSession}
         onCreateSession={onCreateSession}
         onSessionChange={onSessionChange}
-        onSessionBack={closeSessionBuilder}
+        onSessionBack={onSessionBack}
         onDeleteSession={onDeleteSession}
         sessionsStatus={sessionsState.status}
         sessionsError={sessionsState.error}
