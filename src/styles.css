@@ -97,3 +97,21 @@ textarea, input, select {
      shrink it rather than stacking two full-height panes. */
   .editor-source { min-height: 30vh; }
 }
+
+/* The editor reference card. Collapsed by default, so it costs nothing until wanted. */
+.help > summary { cursor: pointer; font-weight: 700; }
+.help h4 { margin: 14px 0 4px; font-size: 14px; }
+.help ul { margin: 4px 0 0; padding-left: 20px; }
+.help li { margin: 4px 0; }
+.help-list { margin: 2px 0 6px; }
+.help-list dt { margin: 6px 0 1px; }
+.help-list dd { margin: 0 0 0 14px; color: var(--dim); font-size: 14px; }
+.help code, .help-list code {
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+  padding: 1px 5px; overflow-wrap: anywhere;
+}
+.help-example {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px; overflow-x: auto; font-size: 12.5px; margin: 4px 0 0;
+}

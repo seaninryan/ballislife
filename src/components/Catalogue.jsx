@@ -22,7 +22,6 @@ export default function Catalogue({
   if (status === "signed-out") {
     return (
       <div className="card">
-        <p>Your drills live in your own Google Drive. Nothing is stored on this site.</p>
         <button className="primary" onClick={onSignIn}>Sign in with Google</button>
       </div>
     );

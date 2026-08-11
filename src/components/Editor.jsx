@@ -3,6 +3,7 @@
 // rules about when to save — App owns those.
 import React from "react";
 import DrillPreview from "./DrillPreview.jsx";
+import PitchHelp from "./PitchHelp.jsx";
 import { DIRTY, SAVING, CONFLICT, FAILED } from "../lib/editor.js";
 import { friendlyError } from "../lib/errors.js";
 
@@ -41,6 +42,8 @@ export default function Editor({ state, onEdit, onBack, onDelete, onKeepMine, on
           retried when you type again.
         </div>
       ) : null}
+
+      <PitchHelp />
 
       <div className="split">
         <textarea

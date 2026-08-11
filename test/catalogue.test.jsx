@@ -65,8 +65,10 @@ describe("Catalogue", () => {
     const html = render({ status: "ready", drills, editor: state });
     expect(html).toContain("<textarea");
     expect(html).toContain("Body.");
-    // The grid must not also be showing.
-    expect(html).not.toContain("Rondo 4v2");
+    // The grid must not also be showing. Assert on its markup rather than on a drill
+    // title: the editor's reference card contains example titles, so a string check
+    // here fails for the wrong reason.
+    expect(html).not.toContain("drill-card");
   });
 
   it("offers a new drill control in the grid", () => {
