@@ -24,19 +24,24 @@ export function renderProse(markdown, options = {}) {
   // The old second parameter was a window, but nothing ever passed one — every call site
   // relies on globalThis.window — so it becomes a named option rather than a positional
   // one, with no compatibility shim to maintain.
-  const { interactive = false, win } = options;
+  const { interactive = false, win, tickOffset = 0 } = options;
 
   // `async: false` keeps this synchronous — marked can return a promise otherwise, and
   // a component cannot render one.
   const html = marked.parse(String(markdown ?? ""), { async: false });
   const clean = purifier(win).sanitize(html);
-  return interactive ? makeTickable(clean) : clean;
+  return interactive ? makeTickable(clean, tickOffset) : clean;
 }
 
 // Runs AFTER sanitising, and only removes an attribute and adds a data- one, so it
 // cannot reintroduce anything DOMPurify stripped.
-function makeTickable(html) {
-  let n = 0;
+//
+// `start` lets a caller that renders one drill as SEVERAL separate renderProse calls
+// (DrillPreview splits a body into prose segments interleaved with pitch diagrams) keep
+// numbering continuous across all of them, rather than every segment restarting at 0 and
+// colliding with an earlier one's indices.
+function makeTickable(html, start = 0) {
+  let n = start;
   return html.replace(/<input([^>]*?)type="checkbox"([^>]*?)>/g, (match, before, after) => {
     const attrs = `${before}${after}`.replace(/\sdisabled(?:=""|='')?/g, "");
     return `<input${attrs} type="checkbox" data-tick="${n++}">`;

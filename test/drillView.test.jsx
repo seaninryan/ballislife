@@ -32,4 +32,11 @@ describe("DrillView", () => {
   it("shows the title from the drill while loading, so the header does not jump", () => {
     expect(render({ status: "loading" })).toContain("Rondo 4v2");
   });
+
+  it("renders checklists as interactive, keyed by the drill's slug and today", () => {
+    const text = "---\ntitle: Rondo 4v2\n---\n\n- [ ] cones\n";
+    const html = render({ status: "ready", text, today: "2026-08-11" });
+    expect(html).not.toContain("disabled");
+    expect(html).toContain('data-tick="0"');
+  });
 });

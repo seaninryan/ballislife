@@ -71,4 +71,14 @@ describe("interactive checklists", () => {
     const html = renderProse("- [ ] ok <script>alert(1)</script>", { interactive: true });
     expect(html).not.toContain("<script");
   });
+
+  it("continues numbering from a given offset", () => {
+    // DrillPreview renders a drill's body as several SEPARATE renderProse calls (prose
+    // segments interleaved with pitch diagrams), so without an offset every segment's
+    // checkboxes would restart at 0 and collide with an earlier segment's.
+    const html = renderProse("- [ ] c\n- [ ] d\n", { interactive: true, tickOffset: 2 });
+    expect(html).toContain('data-tick="2"');
+    expect(html).toContain('data-tick="3"');
+    expect(html).not.toContain('data-tick="0"');
+  });
 });
