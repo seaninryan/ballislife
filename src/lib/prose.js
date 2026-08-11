@@ -20,9 +20,25 @@ function purifier(win) {
   return cached;
 }
 
-export function renderProse(markdown, win) {
+export function renderProse(markdown, options = {}) {
+  // The old second parameter was a window, but nothing ever passed one — every call site
+  // relies on globalThis.window — so it becomes a named option rather than a positional
+  // one, with no compatibility shim to maintain.
+  const { interactive = false, win } = options;
+
   // `async: false` keeps this synchronous — marked can return a promise otherwise, and
   // a component cannot render one.
   const html = marked.parse(String(markdown ?? ""), { async: false });
-  return purifier(win).sanitize(html);
+  const clean = purifier(win).sanitize(html);
+  return interactive ? makeTickable(clean) : clean;
+}
+
+// Runs AFTER sanitising, and only removes an attribute and adds a data- one, so it
+// cannot reintroduce anything DOMPurify stripped.
+function makeTickable(html) {
+  let n = 0;
+  return html.replace(/<input([^>]*?)type="checkbox"([^>]*?)>/g, (match, before, after) => {
+    const attrs = `${before}${after}`.replace(/\sdisabled(?:=""|='')?/g, "");
+    return `<input${attrs} type="checkbox" data-tick="${n++}">`;
+  });
 }

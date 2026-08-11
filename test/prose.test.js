@@ -40,3 +40,35 @@ describe("renderProse", () => {
     expect(renderProse("4 & 5")).toContain("4 &amp; 5");
   });
 });
+
+describe("interactive checklists", () => {
+  const md = "- [ ] cones\n- [x] bibs\n- [ ] balls\n";
+
+  it("renders task items as disabled checkboxes by default", () => {
+    const html = renderProse(md);
+    expect(html).toContain("disabled");
+    expect(html).not.toContain("data-tick");
+  });
+
+  it("removes disabled and numbers each box when asked", () => {
+    const html = renderProse(md, { interactive: true });
+    expect(html).not.toContain("disabled");
+    expect(html).toContain('data-tick="0"');
+    expect(html).toContain('data-tick="1"');
+    expect(html).toContain('data-tick="2"');
+  });
+
+  it("numbers boxes in document order across separate lists", () => {
+    const html = renderProse("- [ ] a\n\ntext\n\n- [ ] b\n", { interactive: true });
+    expect(html.indexOf('data-tick="0"')).toBeLessThan(html.indexOf('data-tick="1"'));
+  });
+
+  it("leaves prose with no checkboxes untouched", () => {
+    expect(renderProse("just words", { interactive: true })).toBe(renderProse("just words"));
+  });
+
+  it("still sanitises when interactive", () => {
+    const html = renderProse("- [ ] ok <script>alert(1)</script>", { interactive: true });
+    expect(html).not.toContain("<script");
+  });
+});
