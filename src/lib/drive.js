@@ -5,9 +5,11 @@ import * as api from "./driveApi.js";
 import { getAccessToken, ensureFreshToken } from "./driveAuth.js";
 import { readIndex, entryFor, diffIndex, applyDiff } from "./driveIndex.js";
 import { drillsFromIndex, fileNameFor } from "./drills.js";
+import { readSessions } from "./sessions.js";
 
 export const FOLDER_NAME = "BallIsLife";
 export const INDEX_NAME = "index.json";
+export const SESSIONS_NAME = "sessions.json";
 
 // One silent-reauth retry, then give up. Ported from fancystats' saveWithRetry: an
 // expired token is the common failure and is invisible to the user when it works.
@@ -198,4 +200,44 @@ export async function createDrill(folder, title, taken = []) {
 export async function deleteDrill(id) {
   await withRetry(async () => api.trashFile(getAccessToken(), id));
   known.delete(id);
+}
+
+// -> { fileId, data, modifiedTime }. Unlike the drill index this file is AUTHORITATIVE:
+// it is the only copy of the session plans, so it is never rebuilt from anything and a
+// save is conflict-checked before it overwrites.
+export async function loadSessions(folder) {
+  return withRetry(async () => {
+    const token = getAccessToken();
+    const files = await api.listFiles(token, folder);
+    const file = files.find((f) => f.name === SESSIONS_NAME) ?? null;
+    if (!file) return { fileId: null, data: readSessions(null), modifiedTime: null };
+    const text = await api.readFile(token, file.id);
+    known.set(file.id, file.modifiedTime);
+    return { fileId: file.id, data: readSessions(text), modifiedTime: file.modifiedTime };
+  });
+}
+
+// -> { ok: true, fileId, modifiedTime } | { ok: false, conflict: true, modifiedTime }
+//    | { ok: false, error }
+export async function saveSessions({ folder, fileId, data, baseModifiedTime }) {
+  const current = fileId ? known.get(fileId) : undefined;
+  if (current !== undefined && baseModifiedTime !== current) {
+    return { ok: false, conflict: true, modifiedTime: current };
+  }
+  try {
+    const body = JSON.stringify(data, null, 2);
+    return await withRetry(async () => {
+      const token = getAccessToken();
+      if (!fileId) {
+        const created = await api.createFile(token, folder, SESSIONS_NAME, body);
+        known.set(created.id, created.modifiedTime);
+        return { ok: true, fileId: created.id, modifiedTime: created.modifiedTime };
+      }
+      const modifiedTime = await api.writeFile(token, fileId, body);
+      known.set(fileId, modifiedTime);
+      return { ok: true, fileId, modifiedTime };
+    });
+  } catch (error) {
+    return { ok: false, error };
+  }
 }

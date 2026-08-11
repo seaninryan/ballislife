@@ -3,7 +3,7 @@ import * as api from "../src/lib/driveApi.js";
 import * as auth from "../src/lib/driveAuth.js";
 import {
   loadCatalogue, saveDrill, noteModifiedTime, knownModifiedTime, readDrill, FOLDER_NAME, INDEX_NAME,
-  createDrill, deleteDrill,
+  createDrill, deleteDrill, loadSessions, saveSessions, SESSIONS_NAME,
 } from "../src/lib/drive.js";
 
 vi.mock("../src/lib/driveApi.js");
@@ -318,6 +318,70 @@ describe("createDrill", () => {
     expect(doc.error).toBe(null);
     const block = splitSegments(doc.body).find((s) => s.kind === "pitch");
     expect(parse(block.text).errors).toEqual([]);
+  });
+});
+
+describe("sessions storage", () => {
+  it("reads sessions.json and remembers its modifiedTime", async () => {
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([{ id: "sess", name: SESSIONS_NAME, modifiedTime: "T5" }]);
+    api.readFile.mockResolvedValue(JSON.stringify({ version: 1, sessions: { a: { id: "a" } } }));
+    const r = await loadSessions("F1");
+    expect(r.data.sessions.a.id).toBe("a");
+    expect(r.modifiedTime).toBe("T5");
+    expect(r.fileId).toBe("sess");
+  });
+
+  it("reports an empty set when the file does not exist yet", async () => {
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([]);
+    const r = await loadSessions("F1");
+    expect(r.data).toEqual({ version: 1, sessions: {} });
+    expect(r.fileId).toBe(null);
+    expect(api.readFile).not.toHaveBeenCalled();
+  });
+
+  it("falls back to empty rather than throwing on a corrupt file", async () => {
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([{ id: "sess", name: SESSIONS_NAME, modifiedTime: "T5" }]);
+    api.readFile.mockResolvedValue("{{{ not json");
+    expect((await loadSessions("F1")).data).toEqual({ version: 1, sessions: {} });
+  });
+
+  it("creates the file on first save", async () => {
+    api.createFile.mockResolvedValue({ id: "sess", modifiedTime: "T1" });
+    const r = await saveSessions({ folder: "F1", fileId: null, data: { version: 1, sessions: {} }, baseModifiedTime: null });
+    expect(r).toMatchObject({ ok: true, fileId: "sess", modifiedTime: "T1" });
+    expect(api.createFile.mock.calls[0][2]).toBe(SESSIONS_NAME);
+  });
+
+  it("writes an existing file and returns the new modifiedTime", async () => {
+    noteModifiedTime("sess", "T5"); // seed the baseline; without it, leftover state from
+    // an earlier test in this file ("creates the file on first save" sets known="T1" for
+    // this same literal id) makes this test spuriously conflict.
+    api.writeFile.mockResolvedValue("T6");
+    const r = await saveSessions({ folder: "F1", fileId: "sess", data: { version: 1, sessions: {} }, baseModifiedTime: "T5" });
+    expect(r).toMatchObject({ ok: true, modifiedTime: "T6" });
+    expect(api.writeFile).toHaveBeenCalledWith("tok", "sess", expect.any(String));
+  });
+
+  it("refuses to overwrite when the file moved underneath it", async () => {
+    // sessions.json is the only copy of the plans, so a blind overwrite would destroy
+    // work done on another device.
+    noteModifiedTime("sess", "T9");
+    const r = await saveSessions({ folder: "F1", fileId: "sess", data: { version: 1, sessions: {} }, baseModifiedTime: "T5" });
+    expect(r).toMatchObject({ ok: false, conflict: true, modifiedTime: "T9" });
+    expect(api.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("retries once on a 401", async () => {
+    api.writeFile
+      .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
+      .mockResolvedValue("T7");
+    noteModifiedTime("sess", "T5");
+    const r = await saveSessions({ folder: "F1", fileId: "sess", data: { version: 1, sessions: {} }, baseModifiedTime: "T5" });
+    expect(r.ok).toBe(true);
+    expect(api.writeFile).toHaveBeenCalledTimes(2);
   });
 });
 
