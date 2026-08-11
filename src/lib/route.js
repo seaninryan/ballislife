@@ -6,7 +6,9 @@ const BROWSE = { view: "browse", slug: null };
 const decode = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
 
 export function parseHash(hash) {
-  const parts = String(hash ?? "").replace(/^#/, "").split("/").filter(Boolean);
+  // Deliberately NOT .filter(Boolean): collapsing empty segments made "#/drill//edit"
+  // parse as a drill named "edit" rather than a malformed URL. Position matters here.
+  const parts = String(hash ?? "").replace(/^#\/?/, "").split("/");
   if (parts[0] !== "drill" || !parts[1]) return { ...BROWSE };
   return { view: parts[2] === "edit" ? "edit" : "read", slug: decode(parts[1]) };
 }

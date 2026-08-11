@@ -28,6 +28,12 @@ describe("parseHash", () => {
   it("ignores a trailing slash", () => {
     expect(parseHash("#/drill/x/")).toEqual({ view: "read", slug: "x" });
   });
+
+  it("treats an empty slug as browse, not as a drill named edit", () => {
+    // filter(Boolean) collapsed the empty segment and read "edit" as the slug.
+    expect(parseHash("#/drill//edit")).toEqual({ view: "browse", slug: null });
+    expect(parseHash("#/drill/")).toEqual({ view: "browse", slug: null });
+  });
 });
 
 describe("formatHash", () => {
