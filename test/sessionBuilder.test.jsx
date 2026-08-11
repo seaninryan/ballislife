@@ -176,4 +176,13 @@ describe("SessionBuilder", () => {
     const updated = onChange.mock.calls[0][0];
     expect(updated.blocks.map((b) => b.slot)).toEqual(["skill", "warmup", "tactical", "match", "fun"]);
   });
+
+  it("offers a Run this session control that calls onRun", () => {
+    const onRun = vi.fn();
+    mount({ session: baseSession(), drills, onRun });
+    const runBtn = [...container.querySelectorAll("button")].find((b) => /run this session/i.test(b.textContent));
+    expect(runBtn).toBeTruthy();
+    act(() => { runBtn.click(); });
+    expect(onRun).toHaveBeenCalled();
+  });
 });

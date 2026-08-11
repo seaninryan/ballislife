@@ -58,4 +58,39 @@ describe("SessionList", () => {
     const html = render({ sessions: [], drills });
     expect(html).toMatch(/no sessions/i);
   });
+
+  it("offers a Run this session control on each row", () => {
+    const sessions = [emptySession("s1", "2026-08-12", "U12s")];
+    const html = render({ sessions, drills, onRun: () => {} });
+    expect(html).toMatch(/run this session/i);
+  });
+});
+
+describe("SessionList run control (interaction)", () => {
+  it("calls onRun with the session, not onOpen", async () => {
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    const s = emptySession("s1", "2026-08-12", "U12s");
+    let opened = null, ran = null;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <SessionList
+          sessions={[s]}
+          drills={drills}
+          onOpen={(sess) => { opened = sess; }}
+          onRun={(sess) => { ran = sess; }}
+        />,
+      );
+    });
+    const runButton = [...container.querySelectorAll("button")].find((b) => /run this session/i.test(b.textContent));
+    act(() => { runButton.click(); });
+    expect(ran?.id).toBe("s1");
+    expect(opened).toBe(null);
+    act(() => root.unmount());
+    container.remove();
+  });
 });

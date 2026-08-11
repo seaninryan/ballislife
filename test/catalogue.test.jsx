@@ -119,6 +119,47 @@ describe("Catalogue sessions switch", () => {
     expect(html).toContain("warmup");
   });
 
+  it("shows the run view when a runSession is present, taking priority over everything else", () => {
+    const session = { id: "s1", date: "2026-08-12", squad: "U12s", theme: "", length: 75,
+      blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },
+        { slot: "skill", drill: null, minutes: null, note: "" },
+        { slot: "tactical", drill: null, minutes: null, note: "" },
+        { slot: "match", drill: null, minutes: null, note: "" },
+        { slot: "fun", drill: null, minutes: null, note: "" }] };
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", runSession: session, runTexts: {},
+    });
+    expect(html).toContain("2026-08-12");
+    expect(html).toMatch(/back to plan/i);
+  });
+
+  it("offers Run this session on the builder, calling onOpenRun with the session", () => {
+    const session = { id: "s1", date: "2026-08-12", squad: "", theme: "", length: 75,
+      blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },
+        { slot: "skill", drill: null, minutes: null, note: "" },
+        { slot: "tactical", drill: null, minutes: null, note: "" },
+        { slot: "match", drill: null, minutes: null, note: "" },
+        { slot: "fun", drill: null, minutes: null, note: "" }] };
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", selectedSession: session, onOpenRun: () => {},
+    });
+    expect(html).toMatch(/run this session/i);
+  });
+
+  it("offers Run this session on each session list row", () => {
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", sessions: [
+        { id: "s1", date: "2026-08-12", squad: "", theme: "", length: 75,
+          blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },
+            { slot: "skill", drill: null, minutes: null, note: "" },
+            { slot: "tactical", drill: null, minutes: null, note: "" },
+            { slot: "match", drill: null, minutes: null, note: "" },
+            { slot: "fun", drill: null, minutes: null, note: "" }] },
+      ], onOpenRun: () => {},
+    });
+    expect(html).toMatch(/run this session/i);
+  });
+
   it("surfaces a sessions save conflict the way the editor does", () => {
     const session = { id: "s1", date: "2026-08-12", squad: "", theme: "", length: 75,
       blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },

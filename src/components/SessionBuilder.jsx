@@ -85,7 +85,7 @@ function BlockRow({ block, index, count, drills, turnout, onChange, onMove }) {
   );
 }
 
-export default function SessionBuilder({ session, drills = [], onChange, onBack, onDelete }) {
+export default function SessionBuilder({ session, drills = [], onChange, onBack, onDelete, onRun }) {
   const turnout = session.turnout ?? "";
   const turnoutNumber = session.turnout ?? undefined;
 
@@ -108,7 +108,12 @@ export default function SessionBuilder({ session, drills = [], onChange, onBack,
     <div>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <button type="button" onClick={onBack}>← Back</button>
-        {onDelete ? <button type="button" onClick={onDelete}>Delete</button> : null}
+        <div className="row">
+          {onRun ? (
+            <button type="button" className="primary" onClick={() => onRun(session)}>Run this session</button>
+          ) : null}
+          {onDelete ? <button type="button" onClick={onDelete}>Delete</button> : null}
+        </div>
       </div>
 
       <div className="card">

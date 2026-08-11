@@ -14,7 +14,7 @@ export function parseHash(hash) {
   if (parts[0] === "sessions") return { ...SESSIONS };
   if (parts[0] === "session") {
     if (!parts[1]) return { ...SESSIONS };
-    return { view: "session", slug: decode(parts[1]) };
+    return { view: parts[2] === "run" ? "run" : "session", slug: decode(parts[1]) };
   }
   if (parts[0] !== "drill" || !parts[1]) return { ...BROWSE };
   return { view: parts[2] === "edit" ? "edit" : "read", slug: decode(parts[1]) };
@@ -22,6 +22,8 @@ export function parseHash(hash) {
 
 export function formatHash({ view, slug }) {
   if (view === "sessions") return "#/sessions";
+  if (view === "run" && slug) return `#/session/${encodeURIComponent(slug)}/run`;
+  if (view === "run") return "#/sessions";
   if (view === "session" && slug) return `#/session/${encodeURIComponent(slug)}`;
   if (!slug || view === "browse") return "#/";
   const base = `#/drill/${encodeURIComponent(slug)}`;

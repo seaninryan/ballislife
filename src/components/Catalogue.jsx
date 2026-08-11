@@ -7,6 +7,7 @@ import DrillView from "./DrillView.jsx";
 import Editor from "./Editor.jsx";
 import SessionList from "./SessionList.jsx";
 import SessionBuilder from "./SessionBuilder.jsx";
+import SessionRun from "./SessionRun.jsx";
 import { friendlyError } from "../lib/errors.js";
 
 // Re-exported for backward compatibility: existing tests and callers import
@@ -24,6 +25,7 @@ export default function Catalogue({
   sessions = [], selectedSession, onOpenSession, onCreateSession,
   onSessionChange, onSessionBack, onDeleteSession,
   sessionsStatus, sessionsError, onKeepMineSessions, onReloadSessions,
+  runSession, runTexts, onOpenRun, onRunBack,
 }) {
   if (status === "signed-out") {
     return (
@@ -54,6 +56,12 @@ export default function Catalogue({
     );
   }
 
+  // The run view takes over the whole view too, and wins over the builder below: once
+  // a session is opened to run, that is the only thing on screen until "Back to plan".
+  if (runSession) {
+    return <SessionRun session={runSession} drills={drills} texts={runTexts} onBack={onRunBack} />;
+  }
+
   // The session builder takes over the whole view, the same way the drill editor does,
   // and wins regardless of the Drills/Sessions switch: opening a session (e.g. via its
   // URL) should show it even if `mode` has not caught up yet.
@@ -82,6 +90,7 @@ export default function Catalogue({
           onChange={onSessionChange}
           onBack={onSessionBack}
           onDelete={onDeleteSession}
+          onRun={onOpenRun}
         />
       </div>
     );
@@ -138,6 +147,7 @@ export default function Catalogue({
           drills={drills}
           onOpen={onOpenSession}
           onCreate={onCreateSession}
+          onRun={onOpenRun}
         />
       ) : (
         <>

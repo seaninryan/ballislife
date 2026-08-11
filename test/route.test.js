@@ -27,6 +27,20 @@ describe("parseHash", () => {
     expect(parseHash("#/session/a%20b")).toEqual({ view: "session", slug: "a b" });
   });
 
+  it("reads a session's run view", () => {
+    expect(parseHash("#/session/2026-08-12-pressing/run")).toEqual({
+      view: "run", slug: "2026-08-12-pressing",
+    });
+  });
+
+  it("decodes a percent-encoded run slug", () => {
+    expect(parseHash("#/session/a%20b/run")).toEqual({ view: "run", slug: "a b" });
+  });
+
+  it("treats an unrecognised third segment as the plain session view, not run", () => {
+    expect(parseHash("#/session/x/nonsense")).toEqual({ view: "session", slug: "x" });
+  });
+
   it("reads a drill to read", () => {
     expect(parseHash("#/drill/rondo-4v2")).toEqual({ view: "read", slug: "rondo-4v2" });
   });
@@ -63,6 +77,12 @@ describe("formatHash", () => {
     expect(formatHash({ view: "sessions" })).toBe("#/sessions");
     expect(formatHash({ view: "session", slug: "2026-08-12-pressing" }))
       .toBe("#/session/2026-08-12-pressing");
+    expect(formatHash({ view: "run", slug: "2026-08-12-pressing" }))
+      .toBe("#/session/2026-08-12-pressing/run");
+  });
+
+  it("falls back to the session list for a run view without a slug", () => {
+    expect(formatHash({ view: "run", slug: null })).toBe("#/sessions");
   });
 
   it("encodes a slug that needs it", () => {
@@ -81,6 +101,8 @@ describe("formatHash", () => {
       { view: "sessions", slug: null },
       { view: "session", slug: "2026-08-12-pressing" },
       { view: "session", slug: "a b" },
+      { view: "run", slug: "2026-08-12-pressing" },
+      { view: "run", slug: "a b" },
     ]) {
       expect(parseHash(formatHash(route))).toEqual(route);
     }

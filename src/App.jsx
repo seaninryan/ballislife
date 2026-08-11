@@ -8,7 +8,7 @@ import {
   loadSessions, saveSessions,
 } from "./lib/drive.js";
 import { openEditor, reduce, shouldSave } from "./lib/editor.js";
-import { emptySession } from "./lib/sessions.js";
+import { emptySession, resolveBlocks } from "./lib/sessions.js";
 import { parseHash, formatHash } from "./lib/route.js";
 
 const SAVE_DEBOUNCE_MS = 900;
@@ -43,6 +43,19 @@ export default function App() {
   // A monotonic token, not the drill id: reopening the SAME drill starts a second
   // request that an id check cannot tell from the first, so the slower response won.
   const requestSeq = useRef(0);
+
+  // Run mode: which session is being run, and each referenced drill's full text.
+  const [runSessionId, setRunSessionId] = useState(null);
+  const [runTexts, setRunTexts] = useState({});
+  // Same stale-request problem as requestSeq, applied to a whole batch of parallel
+  // fetches: leaving the run view and reopening it (the same session or a different
+  // one) must not let an in-flight fetch from the abandoned visit land here.
+  const runRequestSeq = useRef(0);
+  // Keyed by drill slug rather than by session, so two sessions sharing a drill also
+  // benefit — but the guarantee the plan asks for is narrower: reopening the SAME
+  // session's run view within this app session must not refetch anything it already
+  // has. Only successes are cached; a failed fetch is retried on the next visit.
+  const drillTextCache = useRef(new Map());
 
   // Kept alongside the state so the debounce callback and the flush-on-close path read
   // the latest editor state without being re-created on every keystroke.
@@ -318,11 +331,73 @@ export default function App() {
   }, [flushSessionsSave]);
 
   const onOpenSession = useCallback((sess) => {
+    setRunSessionId(null);
     setSelectedSessionId(sess.id);
     location.hash = formatHash({ view: "session", slug: sess.id });
   }, []);
 
+  // Opens run mode for a session: fetches each referenced drill's full text ONCE, in
+  // parallel, reusing whatever this app session already fetched for it. Mirrors
+  // openDrill's stale-request guard, but the token guards a whole batch rather than
+  // one request, since running a session issues one fetch per block.
+  const openRun = useCallback((sess) => {
+    closeEditor();
+    closeSessionBuilder();
+    setSelected(null);
+    setRunSessionId(sess.id);
+    location.hash = formatHash({ view: "run", slug: sess.id });
+    const mine = ++runRequestSeq.current;
+
+    const wanted = new Map();
+    for (const block of resolveBlocks(sess, drills)) {
+      if (block.drill) wanted.set(block.drill.slug, block.drill);
+    }
+
+    const seeded = {};
+    const toFetch = [];
+    for (const drill of wanted.values()) {
+      const cached = drillTextCache.current.get(drill.slug);
+      if (cached) seeded[drill.slug] = cached;
+      else { seeded[drill.slug] = { status: "loading" }; toFetch.push(drill); }
+    }
+    setRunTexts(seeded);
+
+    for (const drill of toFetch) {
+      readDrill(drill.id, folderRef.current).then(
+        ({ text }) => {
+          const entry = { status: "ready", text };
+          drillTextCache.current.set(drill.slug, entry);
+          if (runRequestSeq.current !== mine) return; // this run view has been left
+          setRunTexts((prev) => ({ ...prev, [drill.slug]: entry }));
+        },
+        (error) => {
+          // Deliberately not cached: a flaky read is ordinary on a phone at the side
+          // of a pitch (same reasoning as loadCatalogue's per-drill failure), and the
+          // next visit should try again rather than remembering the failure forever.
+          if (runRequestSeq.current !== mine) return;
+          setRunTexts((prev) => ({ ...prev, [drill.slug]: { status: "error", error } }));
+        },
+      );
+    }
+  }, [drills, closeEditor, closeSessionBuilder]);
+
+  // Back to the plan = the builder for the session that was just being run, not the
+  // session list — running is a detour from editing, not a replacement for it.
+  const onRunBack = useCallback(() => {
+    const id = runSessionId;
+    runRequestSeq.current++; // any fetch still in flight for this visit is now stale
+    setRunSessionId(null);
+    if (id) {
+      setSelectedSessionId(id);
+      location.hash = formatHash({ view: "session", slug: id });
+    } else {
+      location.hash = formatHash({ view: "sessions" });
+    }
+  }, [runSessionId]);
+
   const onModeChange = useCallback((next) => {
+    runRequestSeq.current++; // leaving run mode, if it was open, stales any in-flight fetch
+    setRunSessionId(null);
     if (next === "sessions") {
       closeEditor();
       setSelected(null);
@@ -379,6 +454,11 @@ export default function App() {
     if (status !== "ready") return;
     const route = routeRef.current;
 
+    // Every branch below is a route that is NOT run mode, so leaving one stale
+    // runSessionId behind (e.g. the URL was hand-edited away from #/session/x/run)
+    // must not leave the run view showing regardless of what Catalogue would render.
+    if (route.view !== "run" && runSessionId) { runRequestSeq.current++; setRunSessionId(null); }
+
     if (route.view === "sessions") {
       closeEditor();
       setSelected(null);
@@ -395,6 +475,13 @@ export default function App() {
       if (selectedSessionId !== sess.id) setSelectedSessionId(sess.id);
       return;
     }
+    if (route.view === "run") {
+      const sess = sessionsStateRef.current.data.sessions[route.slug];
+      if (!sess) { location.hash = formatHash({ view: "sessions" }); return; }
+      if (mode !== "sessions") setMode("sessions");
+      if (runSessionId !== sess.id) openRun(sess);
+      return;
+    }
     if (route.view === "browse") {
       if (mode !== "drills") { closeSessionBuilder(); setMode("drills"); }
       return;
@@ -408,7 +495,7 @@ export default function App() {
     } else if (selected?.id !== drill.id) {
       openDrill(drill);
     }
-  }, [status, drills, selected, mode, selectedSessionId, openEdit, openDrill, closeEditor, closeSessionBuilder]);
+  }, [status, drills, selected, mode, selectedSessionId, runSessionId, openEdit, openDrill, openRun, closeEditor, closeSessionBuilder]);
 
   // A ref so the hashchange listener (registered once) always calls the CURRENT
   // resolveRoute rather than the stale one captured when the listener was attached.
@@ -429,6 +516,7 @@ export default function App() {
 
   const sessionsList = Object.values(sessionsState.data.sessions);
   const selectedSession = selectedSessionId ? sessionsState.data.sessions[selectedSessionId] ?? null : null;
+  const runSession = runSessionId ? sessionsState.data.sessions[runSessionId] ?? null : null;
 
   return (
     <div className="page">
@@ -472,6 +560,10 @@ export default function App() {
         sessionsError={sessionsState.error}
         onKeepMineSessions={onKeepMineSessions}
         onReloadSessions={onReloadSessions}
+        runSession={runSession}
+        runTexts={runTexts}
+        onOpenRun={openRun}
+        onRunBack={onRunBack}
       />
     </div>
   );

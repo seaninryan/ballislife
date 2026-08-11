@@ -418,3 +418,120 @@ describe("App sessions", () => {
     });
   });
 });
+
+describe("App session run mode", () => {
+  const runSessionFixture = () => session("s1", "2026-08-12", [
+    { slot: "warmup", drill: "a", minutes: null, note: "" },
+    { slot: "skill", drill: "b", minutes: null, note: "" },
+    { slot: "tactical", drill: null, minutes: null, note: "" },
+    { slot: "match", drill: null, minutes: null, note: "" },
+    { slot: "fun", drill: null, minutes: null, note: "" },
+  ]);
+
+  beforeEach(() => {
+    drive.loadSessions.mockResolvedValue({
+      fileId: "sess", data: { version: 1, sessions: { s1: runSessionFixture() } }, modifiedTime: "S1",
+    });
+  });
+
+  const bodyText = (slug) => `---\ntitle: Drill ${slug}\n---\n\nbody ${slug}\n`;
+
+  it("fetches each referenced drill once, in parallel, when the run view opens", async () => {
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    expect(drive.readDrill).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("body a");
+    expect(container.textContent).toContain("body b");
+  });
+
+  it("a block with no drill chosen and a broken reference both render sensibly, without crashing the rest", async () => {
+    drive.loadSessions.mockResolvedValue({
+      fileId: "sess",
+      data: { version: 1, sessions: { s1: session("s1", "2026-08-12", [
+        { slot: "warmup", drill: "ghost", minutes: null, note: "" },
+        { slot: "skill", drill: null, minutes: null, note: "" },
+        { slot: "tactical", drill: "a", minutes: null, note: "" },
+        { slot: "match", drill: null, minutes: null, note: "" },
+        { slot: "fun", drill: null, minutes: null, note: "" },
+      ]) } },
+      modifiedTime: "S1",
+    });
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    expect(container.textContent).toMatch(/missing/i);
+    expect(container.textContent).toContain("ghost");
+    expect(container.textContent).toMatch(/no drill/i);
+    expect(container.textContent).toContain("body a");
+  });
+
+  it("caches within the session: leaving run mode and coming back does not refetch", async () => {
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    expect(drive.readDrill).toHaveBeenCalledTimes(2);
+
+    await act(async () => { findButton("Back to plan").click(); });
+    await act(async () => { findButton("Run this session").click(); });
+    expect(drive.readDrill).toHaveBeenCalledTimes(2); // still 2 — not refetched
+    expect(container.textContent).toContain("body a");
+  });
+
+  it("drops a late drill response once the run view has been left", async () => {
+    // The stale-request guard pattern from openDrill: a monotonic token, not an id,
+    // since re-entering run mode for the same session is indistinguishable from the
+    // first entry by id alone.
+    const resolvers = {};
+    drive.readDrill.mockImplementation((id) => new Promise((resolve) => { resolvers[id] = resolve; }));
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    await act(async () => { findButton("Back to plan").click(); });
+    await act(async () => {
+      resolvers.a({ text: "STALE A", modifiedTime: "T" });
+      resolvers.b({ text: "STALE B", modifiedTime: "T" });
+    });
+    expect(container.textContent).not.toContain("STALE A");
+    expect(container.textContent).not.toContain("STALE B");
+  });
+
+  it("a drill that fails to load says so for that block only, leaving the rest usable", async () => {
+    drive.readDrill.mockImplementation((id) =>
+      id === "a"
+        ? Promise.reject(Object.assign(new Error("drive 500"), { code: 500 }))
+        : Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    expect(container.textContent).toMatch(/could not load|failed|trouble/i);
+    expect(container.textContent).toContain("body b");
+  });
+
+  it("opens run mode directly from the #/session/<id>/run hash", async () => {
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    location.hash = "#/session/s1/run";
+    await mount();
+    expect(container.textContent).toContain("body a");
+    expect(container.textContent).toContain("body b");
+  });
+
+  it("a run route for an unknown session id falls back to the session list", async () => {
+    location.hash = "#/session/does-not-exist/run";
+    await mount();
+    expect(location.hash).toBe("#/sessions");
+  });
+
+  it("offers a way back to the plan from the run view, returning to the session builder", async () => {
+    drive.readDrill.mockResolvedValue({ text: bodyText("a"), modifiedTime: "T" });
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    await act(async () => { findButton("Back to plan").click(); });
+    expect(container.textContent).toContain("2026-08-12"); // back on the builder
+    expect(location.hash).toBe("#/session/s1");
+  });
+});

@@ -4,37 +4,46 @@
 import React from "react";
 import { resolveBlocks, totalMinutes, emptySlots } from "../lib/sessions.js";
 
-function SessionRow({ session, drills, onOpen }) {
+function SessionRow({ session, drills, onOpen, onRun }) {
   const total = totalMinutes(session, drills);
   const empty = emptySlots(session);
   const broken = resolveBlocks(session, drills).filter((b) => b.missing);
   const over = session.length && total > session.length;
 
   return (
-    <button type="button" className="card session-row" onClick={() => onOpen?.(session)}>
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <strong>{session.date}</strong>
-        <span className={`chip${over ? " warn-chip" : ""}`}>
-          {total}′ of {session.length}′
-        </span>
-      </div>
-      <div className="row">
-        {session.squad ? <span className="chip">{session.squad}</span> : null}
-        {session.theme ? <span className="chip">{session.theme}</span> : null}
-      </div>
-      {empty.length ? (
-        <div className="dim">{empty.length} slot{empty.length === 1 ? "" : "s"} still empty</div>
-      ) : null}
-      {broken.length ? (
-        <div className="banner warn">
-          Broken reference{broken.length === 1 ? "" : "s"}: {broken.map((b) => b.drillRef).join(", ")}
+    <div className="session-row-wrap">
+      <button type="button" className="card session-row" onClick={() => onOpen?.(session)}>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <strong>{session.date}</strong>
+          <span className={`chip${over ? " warn-chip" : ""}`}>
+            {total}′ of {session.length}′
+          </span>
         </div>
+        <div className="row">
+          {session.squad ? <span className="chip">{session.squad}</span> : null}
+          {session.theme ? <span className="chip">{session.theme}</span> : null}
+        </div>
+        {empty.length ? (
+          <div className="dim">{empty.length} slot{empty.length === 1 ? "" : "s"} still empty</div>
+        ) : null}
+        {broken.length ? (
+          <div className="banner warn">
+            Broken reference{broken.length === 1 ? "" : "s"}: {broken.map((b) => b.drillRef).join(", ")}
+          </div>
+        ) : null}
+      </button>
+      {onRun ? (
+        // A sibling of the row's own button, not nested inside it — a <button> inside
+        // a <button> is invalid HTML and would fire onOpen too when tapped.
+        <button type="button" className="chip-button small" onClick={() => onRun(session)}>
+          Run this session
+        </button>
       ) : null}
-    </button>
+    </div>
   );
 }
 
-export default function SessionList({ sessions = [], drills = [], onOpen, onCreate }) {
+export default function SessionList({ sessions = [], drills = [], onOpen, onCreate, onRun }) {
   const sorted = [...sessions].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
 
   return (
@@ -44,7 +53,7 @@ export default function SessionList({ sessions = [], drills = [], onOpen, onCrea
       </div>
 
       {sorted.length ? (
-        sorted.map((s) => <SessionRow key={s.id} session={s} drills={drills} onOpen={onOpen} />)
+        sorted.map((s) => <SessionRow key={s.id} session={s} drills={drills} onOpen={onOpen} onRun={onRun} />)
       ) : (
         <div className="card">
           <p>No sessions yet.</p>
