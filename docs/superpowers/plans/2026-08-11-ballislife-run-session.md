@@ -303,6 +303,13 @@ it passes one argument. The `win` parameter has never been used by anything, so 
 from positional to a named option needs no compatibility shim. Update `prose.js`'s header
 comment to match.
 
+**Known limitation, recorded not fixed:** `makeTickable` matches any
+`<input type="checkbox">` in the sanitised HTML, so a checkbox a coach typed literally in
+prose would also become tickable. Verified: a checkbox inside a fenced code block is safe,
+because marked escapes code content so the regex never sees a tag. A stray box is
+self-consistent — it occupies a stable index — so it costs a pointless tick affordance,
+not misaligned ticks. Not worth distinguishing generated from hand-written boxes for that.
+
 - [ ] **Step 3: Run the whole suite** — the existing `prose` and `drillPreview` tests must
   still pass, since the default behaviour is unchanged. Commit.
 
