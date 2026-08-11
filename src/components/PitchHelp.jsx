@@ -45,6 +45,11 @@ const MOVES = [
   [`shot: C${ARROWS.shot}goal`, "A thick line: a shot or a long delivery."],
 ];
 
+const CHECKLISTS = [
+  ["- [ ] cones out", "One item per line, ticked off one at a time before or during a session."],
+  ["[ ] high knees [ ] butt kicker [ ] gate", "Several short items on one line — good for a warm-up's list of moves."],
+];
+
 const EXAMPLE = `\`\`\`pitch
 area: 40x25 half
 goal: 0,12 small
@@ -107,6 +112,14 @@ export default function PitchHelp() {
           inside the circle. <code>A</code>, <code>CB</code> and <code>GK1</code> all work.
         </li>
       </ul>
+
+      <h4>Checklists</h4>
+      <Lines rows={CHECKLISTS} />
+      <p className="dim">
+        Ticking a box never changes the drill itself — nothing is written back into its
+        text. The ticks live only on this device and only for today; they are cleared
+        again the next time you open the drill on a different day.
+      </p>
 
       <h4>A whole example</h4>
       <pre className="help-example">{EXAMPLE}</pre>

@@ -52,4 +52,18 @@ describe("PitchHelp", () => {
     expect(out).toContain("red:");
     expect(out).toContain("pass:");
   });
+
+  it("documents both checklist forms: one item per list line, and several inline", () => {
+    const out = html();
+    expect(out).toMatch(/checklist/i);
+    expect(out).toContain("- [ ] cones out");
+    // The inline form, the one the owner actually wanted and that used to be undocumented.
+    expect(out).toContain("[ ] high knees [ ] butt kicker [ ] gate");
+  });
+
+  it("states plainly that ticking never changes the drill and clears the next day", () => {
+    const out = html();
+    expect(out).toMatch(/never (changes?|writes?)|not (changed|written)/i);
+    expect(out).toMatch(/next day|tomorrow|clear(ed)? again/i);
+  });
 });
