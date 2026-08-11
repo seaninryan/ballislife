@@ -17,6 +17,17 @@ describe("emptySession", () => {
     expect(s.blocks.map((b) => b.slot)).toEqual(SLOTS);
     expect(totalMinutes(s, drills)).toBe(0);
     expect(emptySlots(s)).toEqual(SLOTS);
+    expect(s.turnout).toBe(null);
+  });
+});
+
+describe("fitsSquad with session turnout", () => {
+  it("filters using turnout stored on the session rather than local UI state", () => {
+    const s = { ...emptySession("s1", "2026-08-12"), turnout: 20 };
+    // rondo-4v2 needs 6-8 players: doesn't fit a turnout of 20.
+    expect(fitsSquad(drills[0], s.turnout)).toBe(false);
+    // a session with no turnout set (null) must not filter anything out.
+    expect(fitsSquad(drills[0], emptySession("s2", "d").turnout)).toBe(true);
   });
 });
 

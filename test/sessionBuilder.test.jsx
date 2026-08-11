@@ -54,13 +54,8 @@ describe("SessionBuilder", () => {
   });
 
   it("with a turnout set, a drill that does not fit is not offered", () => {
-    mount({ session: baseSession(), drills });
-    const turnoutInput = container.querySelector("input[type=number]");
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(turnoutInput, "22");
-      turnoutInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    // Turnout lives on the session (not local UI state), so it's set via the session prop.
+    mount({ session: { ...baseSession(), turnout: 22 }, drills });
     const warmupSelect = container.querySelectorAll("select")[0];
     const options = [...warmupSelect.querySelectorAll("option")].map((o) => o.textContent);
     // rondo-4v2 needs 6-8 players, 22 turnout does not fit; cone-weave needs 20+, fits.
@@ -128,6 +123,47 @@ describe("SessionBuilder", () => {
     expect([...first.querySelectorAll("button")].some((b) => b.textContent === "↓")).toBe(true);
     expect([...last.querySelectorAll("button")].some((b) => b.textContent === "↓")).toBe(false);
     expect([...last.querySelectorAll("button")].some((b) => b.textContent === "↑")).toBe(true);
+  });
+
+  it("shows an inherited duration as an empty input with the drill's minutes as placeholder", () => {
+    let s = setBlock(baseSession(), 0, { drill: "rondo-4v2" });
+    mount({ session: s, drills });
+    const minutesInput = [...container.querySelectorAll("input[type=number]")].find(
+      (i) => i.placeholder === "10"
+    );
+    expect(minutesInput).toBeTruthy();
+    expect(minutesInput.value).toBe("");
+  });
+
+  it("shows an overridden duration as the typed value", () => {
+    let s = setBlock(baseSession(), 0, { drill: "rondo-4v2" });
+    s = setBlock(s, 0, { minutes: 20 });
+    mount({ session: s, drills });
+    const minutesInput = [...container.querySelectorAll("input[type=number]")].find(
+      (i) => i.placeholder === "10"
+    );
+    expect(minutesInput.value).toBe("20");
+  });
+
+  it("reads turnout from the session and reports changes through onChange", () => {
+    const onChange = vi.fn();
+    let s = { ...baseSession(), turnout: 22 };
+    mount({ session: s, drills, onChange });
+    const turnoutInput = container.querySelector("input[type=number]");
+    expect(turnoutInput.value).toBe("22");
+    const warmupSelect = container.querySelectorAll("select")[0];
+    const options = [...warmupSelect.querySelectorAll("option")].map((o) => o.textContent);
+    // rondo-4v2 needs 6-8 players, 22 turnout does not fit.
+    expect(options.some((o) => o.includes("Rondo 4v2"))).toBe(false);
+
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(turnoutInput, "7");
+      turnoutInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenCalled();
+    const updated = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(updated.turnout).toBe(7);
   });
 
   it("reordering with ↓ calls onChange with the blocks swapped", () => {

@@ -1,8 +1,9 @@
 // src/components/SessionBuilder.jsx
 // One session: date, squad, theme and length; a row per block with a picker or the
 // chosen drill; running total and warnings. Presentational except for the "show all"
-// toggle per row and the turnout input, which are view-only UI state — App owns the
-// session data itself and receives every change through onChange.
+// toggle per row, which is view-only UI state. Turnout lives on the session itself
+// (not local state) so it survives closing and reopening the session, and every
+// change — including turnout — is reported through onChange; App owns the data.
 //
 // All filtering, minutes and totals come from lib/sessions.js — this component decides
 // nothing about what fits or what a block is worth.
@@ -50,7 +51,8 @@ function BlockRow({ block, index, count, drills, turnout, onChange, onMove }) {
               <input
                 type="number"
                 min="0"
-                value={block.minutes ?? ""}
+                value={block.rawMinutes ?? ""}
+                placeholder={block.drill?.minutes != null ? String(block.drill.minutes) : ""}
                 onChange={(e) => {
                   const v = e.target.value;
                   onChange(index, { minutes: v === "" ? null : Number(v) });
@@ -87,16 +89,23 @@ function BlockRow({ block, index, count, drills, turnout, onChange, onMove }) {
 }
 
 export default function SessionBuilder({ session, drills = [], onChange, onBack, onDelete }) {
-  const [turnout, setTurnout] = useState("");
-  const turnoutNumber = turnout === "" ? undefined : Number(turnout);
+  const turnout = session.turnout ?? "";
+  const turnoutNumber = session.turnout ?? undefined;
 
-  const blocks = resolveBlocks(session, drills);
+  // rawMinutes carries the block's own (possibly null) minutes through resolveBlocks,
+  // which overwrites `minutes` with the resolved figure — the input needs the raw value
+  // to tell "inherited" apart from "explicitly set".
+  const blocks = resolveBlocks(session, drills).map((block, i) => ({
+    ...block,
+    rawMinutes: session.blocks[i]?.minutes ?? null,
+  }));
   const total = totalMinutes(session, drills);
   const empty = emptySlots(session);
   const over = session.length && total > session.length;
 
   const patchBlock = (index, patch) => onChange?.(setBlock(session, index, patch));
   const move = (from, to) => onChange?.(moveBlock(session, from, to));
+  const setTurnout = (v) => onChange?.({ ...session, turnout: v === "" ? null : Number(v) });
 
   return (
     <div>
