@@ -88,3 +88,12 @@ textarea, input, select {
 .chip-button.small { font-size: 13px; padding: 6px 12px; }
 .chip-button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .search { flex: 1; min-width: 140px; }
+.editor-source { width: 100%; min-height: 60vh; resize: vertical; }
+.editor-preview { min-width: 0; }
+.warn-chip { background: #fdf2d0; color: #6e5400; border-color: #e7d9a4; }
+.err-chip { background: #fbdcd7; color: #8c1d18; border-color: #f0c2ba; }
+@media (max-width: 780px) {
+  /* On a phone the source pane is the thing you scroll past to reach the diagram, so
+     shrink it rather than stacking two full-height panes. */
+  .editor-source { min-height: 30vh; }
+}

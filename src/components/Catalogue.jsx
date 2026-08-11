@@ -4,24 +4,12 @@
 import React from "react";
 import Grid from "./Grid.jsx";
 import DrillView from "./DrillView.jsx";
+import { friendlyError } from "../lib/errors.js";
 
-// Raw exception text like "drive 403" tells a coach nothing about what to do next.
-// Classify on the numeric code driveApi already attaches; only sniff the text for the
-// network case, which has no code. Regexing the message for digits would misread a drill
-// named "500 Cones" as a server error.
-export function friendlyError(error) {
-  if (!error) return "";
-  const code = typeof error === "object" ? error.code : undefined;
-  const text = String((typeof error === "object" ? error.message : error) ?? "");
-  if (code === 401) return "Your Google sign-in expired. Reload to sign in again.";
-  if (code === 403) return "Google is rate-limiting requests. Try again in a minute.";
-  if (code === 404) return "That drill is no longer in your Drive folder.";
-  if (code >= 500 && code < 600) return "Google Drive is having trouble. Try again shortly.";
-  if (/failed to fetch|networkerror|load failed/i.test(text)) {
-    return "No connection to Google Drive. Check your signal and try again.";
-  }
-  return text || "Something went wrong.";
-}
+// Re-exported for backward compatibility: existing tests and callers import
+// friendlyError from here. The implementation lives in lib/errors.js so Editor.jsx can
+// use it too without a circular import (Catalogue renders Editor).
+export { friendlyError };
 
 export default function Catalogue({
   status, drills = [], failed = [], error, onSignIn,
