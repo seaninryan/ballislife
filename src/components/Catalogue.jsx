@@ -5,6 +5,8 @@ import React from "react";
 import Grid from "./Grid.jsx";
 import DrillView from "./DrillView.jsx";
 import Editor from "./Editor.jsx";
+import SessionList from "./SessionList.jsx";
+import SessionBuilder from "./SessionBuilder.jsx";
 import { friendlyError } from "../lib/errors.js";
 
 // Re-exported for backward compatibility: existing tests and callers import
@@ -18,6 +20,10 @@ export default function Catalogue({
   onOpen, onBack, duplicateFolders,
   editor, onEdit, onEditBack, onDelete, onKeepMine, onReload,
   onStartEdit, onCreate,
+  mode = "drills", onModeChange,
+  sessions = [], selectedSession, onOpenSession, onCreateSession,
+  onSessionChange, onSessionBack, onDeleteSession,
+  sessionsStatus, sessionsError, onKeepMineSessions, onReloadSessions,
 }) {
   if (status === "signed-out") {
     return (
@@ -48,6 +54,39 @@ export default function Catalogue({
     );
   }
 
+  // The session builder takes over the whole view, the same way the drill editor does,
+  // and wins regardless of the Drills/Sessions switch: opening a session (e.g. via its
+  // URL) should show it even if `mode` has not caught up yet.
+  if (selectedSession) {
+    return (
+      <div>
+        {sessionsStatus === "conflict" ? (
+          <div className="banner warn">
+            This plan changed in Drive since you opened it. Your edit is safe and still
+            below — choose which version to keep.
+            <div className="row" style={{ marginTop: 6 }}>
+              <button type="button" className="primary" onClick={onKeepMineSessions}>Keep mine</button>
+              <button type="button" onClick={onReloadSessions}>Reload Drive’s version</button>
+            </div>
+          </div>
+        ) : null}
+        {sessionsStatus === "failed" ? (
+          <div className="banner err">
+            Could not save: {friendlyError(sessionsError)} Your edit is still here and will
+            be retried when you change something again.
+          </div>
+        ) : null}
+        <SessionBuilder
+          session={selectedSession}
+          drills={drills}
+          onChange={onSessionChange}
+          onBack={onSessionBack}
+          onDelete={onDeleteSession}
+        />
+      </div>
+    );
+  }
+
   if (selected) {
     return (
       <div>
@@ -75,16 +114,45 @@ export default function Catalogue({
           may be split between them — merge them in Drive to be safe.
         </div>
       ) : null}
-      <div className="row" style={{ justifyContent: "flex-end" }}>
-        <button type="button" className="primary" onClick={onCreate}>New drill</button>
+
+      <div className="row">
+        <button
+          type="button"
+          className={`chip-button${mode !== "sessions" ? " active" : ""}`}
+          onClick={() => onModeChange?.("drills")}
+        >
+          Drills
+        </button>
+        <button
+          type="button"
+          className={`chip-button${mode === "sessions" ? " active" : ""}`}
+          onClick={() => onModeChange?.("sessions")}
+        >
+          Sessions
+        </button>
       </div>
-      <Grid
-        drills={drills}
-        failed={failed}
-        filter={filter}
-        onFilterChange={onFilterChange}
-        onOpen={onOpen}
-      />
+
+      {mode === "sessions" ? (
+        <SessionList
+          sessions={sessions}
+          drills={drills}
+          onOpen={onOpenSession}
+          onCreate={onCreateSession}
+        />
+      ) : (
+        <>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="primary" onClick={onCreate}>New drill</button>
+          </div>
+          <Grid
+            drills={drills}
+            failed={failed}
+            filter={filter}
+            onFilterChange={onFilterChange}
+            onOpen={onOpen}
+          />
+        </>
+      )}
     </>
   );
 }

@@ -42,6 +42,7 @@ beforeEach(() => {
     drills: [drill("a", "Alpha"), drill("b", "Bravo")],
     failed: [], folderId: "F1", duplicateFolders: false, index: { version: 1, entries: {} },
   });
+  drive.loadSessions.mockResolvedValue({ fileId: null, data: { version: 1, sessions: {} }, modifiedTime: null });
 });
 
 afterEach(() => {
@@ -275,5 +276,145 @@ describe("App editing", () => {
     await act(async () => { findButton("Delete").click(); });
 
     expect(drive.deleteDrill).toHaveBeenCalledWith("a");
+  });
+});
+
+const session = (id, date, blocks) => ({
+  id, date, squad: "U12s", theme: "pressing", length: 75,
+  blocks: blocks ?? [
+    { slot: "warmup", drill: null, minutes: null, note: "" },
+    { slot: "skill", drill: null, minutes: null, note: "" },
+    { slot: "tactical", drill: null, minutes: null, note: "" },
+    { slot: "match", drill: null, minutes: null, note: "" },
+    { slot: "fun", drill: null, minutes: null, note: "" },
+  ],
+});
+
+const openSession = async (dateText) => {
+  await act(async () => { findButton("Sessions").click(); });
+  await act(async () => { findButton(dateText).click(); });
+};
+
+describe("App sessions", () => {
+  it("loads sessions after the catalogue is ready", async () => {
+    drive.loadSessions.mockResolvedValue({
+      fileId: "sess",
+      data: { version: 1, sessions: { s1: session("s1", "2026-08-12") } },
+      modifiedTime: "S1",
+    });
+    await mount();
+    expect(drive.loadSessions).toHaveBeenCalledWith("F1");
+    await act(async () => { findButton("Sessions").click(); });
+    expect(container.textContent).toContain("2026-08-12");
+  });
+
+  describe("editing", () => {
+    const initial = () => session("s1", "2026-08-12", [
+      { slot: "warmup", drill: null, minutes: null, note: "" },
+      { slot: "skill", drill: "a", minutes: null, note: "" },
+      { slot: "tactical", drill: null, minutes: null, note: "" },
+      { slot: "match", drill: null, minutes: null, note: "" },
+      { slot: "fun", drill: null, minutes: null, note: "" },
+    ]);
+
+    beforeEach(() => {
+      drive.loadSessions.mockResolvedValue({
+        fileId: "sess", data: { version: 1, sessions: { s1: initial() } }, modifiedTime: "S1",
+      });
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => { vi.useRealTimers(); });
+
+    // Number inputs in DOM order: turnout (always present), then the minutes override
+    // for the "skill" block, the only block with a drill assigned.
+    const minutesInput = () => container.querySelectorAll("input[type=number]")[1];
+
+    it("debounces: repeated edits call saveSessions once, not once per change", async () => {
+      drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+      await mount();
+      await openSession("2026-08-12");
+
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const input = minutesInput();
+      await act(async () => {
+        setter.call(input, "5");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => {
+        setter.call(input, "12");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+
+      expect(drive.saveSessions).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSessions).toHaveBeenCalledTimes(1);
+      const call = drive.saveSessions.mock.calls[0][0];
+      expect(call.data.sessions.s1.blocks[1].minutes).toBe(12);
+      expect(call.baseModifiedTime).toBe("S1");
+    });
+
+    it("adopts the returned modifiedTime, so a second save sends the new baseline", async () => {
+      drive.saveSessions
+        .mockResolvedValueOnce({ ok: true, fileId: "sess", modifiedTime: "S2" })
+        .mockResolvedValueOnce({ ok: true, fileId: "sess", modifiedTime: "S3" });
+      await mount();
+      await openSession("2026-08-12");
+
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const input = minutesInput();
+      await act(async () => {
+        setter.call(input, "5");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSessions.mock.calls[0][0].baseModifiedTime).toBe("S1");
+
+      await act(async () => {
+        setter.call(input, "8");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSessions).toHaveBeenCalledTimes(2);
+      expect(drive.saveSessions.mock.calls[1][0].baseModifiedTime).toBe("S2");
+    });
+
+    it("a conflict keeps the local version and offers both resolutions", async () => {
+      drive.saveSessions.mockResolvedValue({ ok: false, conflict: true, modifiedTime: "S9" });
+      await mount();
+      await openSession("2026-08-12");
+
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const input = minutesInput();
+      await act(async () => {
+        setter.call(input, "17");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+      expect(container.textContent).toMatch(/changed in drive|changed on drive/i);
+      expect(container.textContent).toMatch(/keep mine/i);
+      expect(container.textContent).toMatch(/reload/i);
+      // The user's own edit is still there, not overwritten by the conflicting version.
+      expect(Number(minutesInput().value)).toBe(17);
+    });
+
+    it("deletes the session only after confirmation", async () => {
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+      drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+      await mount();
+      await openSession("2026-08-12");
+
+      await act(async () => { findButton("Delete").click(); });
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(container.textContent).toContain("2026-08-12"); // still on the builder
+
+      confirmSpy.mockReturnValue(true);
+      await act(async () => { findButton("Delete").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSessions).toHaveBeenCalled();
+      const lastCall = drive.saveSessions.mock.calls.at(-1)[0];
+      expect(lastCall.data.sessions.s1).toBeUndefined();
+    });
   });
 });

@@ -5,8 +5,10 @@ import { aboutEmail } from "./lib/driveApi.js";
 import { isOwner } from "./lib/owner.js";
 import {
   loadCatalogue, readDrill, saveDrill, createDrill, deleteDrill, knownModifiedTime,
+  loadSessions, saveSessions,
 } from "./lib/drive.js";
 import { openEditor, reduce, shouldSave } from "./lib/editor.js";
+import { emptySession } from "./lib/sessions.js";
 import { parseHash, formatHash } from "./lib/route.js";
 
 const SAVE_DEBOUNCE_MS = 900;
@@ -25,6 +27,18 @@ export default function App() {
   const [failed, setFailed] = useState([]);
   const [duplicateFolders, setDuplicateFolders] = useState(false);
   const [editor, setEditor] = useState(null);
+  const [mode, setMode] = useState("drills");
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  // The whole sessions.json blob is one save unit — unlike drills there is no per-file
+  // id to key state by, so status/error/fileId/baseModifiedTime travel together with
+  // the data itself, the same shape the editor uses for one drill.
+  const [sessionsState, setSessionsStateRaw] = useState({
+    data: { version: 1, sessions: {} },
+    fileId: null,
+    baseModifiedTime: null,
+    status: "idle", // idle | dirty | saving | conflict | failed
+    error: null,
+  });
   const folderRef = useRef(null);
   // A monotonic token, not the drill id: reopening the SAME drill starts a second
   // request that an id check cannot tell from the first, so the slower response won.
@@ -40,6 +54,15 @@ export default function App() {
     editorRef.current = next;
     setEditor(next);
   }, []);
+
+  // Same pattern as editorRef: the debounce callback and hashchange listener read the
+  // latest sessions state without being re-created on every keystroke.
+  const sessionsStateRef = useRef(sessionsState);
+  const setSessionsState = useCallback((next) => {
+    sessionsStateRef.current = next;
+    setSessionsStateRaw(next);
+  }, []);
+  const sessionsSaveTimer = useRef(null);
 
   const dispatch = useCallback((action) => {
     if (!editorRef.current) return;
@@ -90,6 +113,76 @@ export default function App() {
 
   useEffect(() => () => clearTimeout(saveTimer.current), []);
 
+  // Writes the whole sessions.json blob if it is currently dirty. Mirrors flushSave's
+  // contract: conflict-checked, never overwrites silently, and adopts the returned
+  // modifiedTime on every success.
+  const flushSessionsSave = useCallback(async () => {
+    const state = sessionsStateRef.current;
+    if (state.status !== "dirty") return;
+    const sent = state.data;
+    setSessionsState({ ...state, status: "saving" });
+    const result = await saveSessions({
+      folder: folderRef.current,
+      fileId: state.fileId,
+      data: sent,
+      baseModifiedTime: state.baseModifiedTime,
+    });
+    const latest = sessionsStateRef.current;
+    if (result.ok) {
+      // The data may have moved on again while this save was in flight — that's still
+      // dirty and needs another save, the same way a coalesced drill save can be.
+      const stillCurrent = latest.data === sent;
+      setSessionsState({
+        ...latest,
+        fileId: result.fileId ?? latest.fileId,
+        baseModifiedTime: result.modifiedTime,
+        status: stillCurrent ? "idle" : "dirty",
+        error: null,
+      });
+      if (!stillCurrent) sessionsSaveTimer.current = setTimeout(flushSessionsSave, SAVE_DEBOUNCE_MS);
+    } else if (result.conflict) {
+      // Never touch `data`: the user's plan is the one thing that must survive.
+      setSessionsState({ ...latest, baseModifiedTime: result.modifiedTime, status: "conflict" });
+    } else {
+      setSessionsState({ ...latest, status: "failed", error: result.error });
+    }
+  }, [setSessionsState]);
+
+  const scheduleSessionsSave = useCallback(() => {
+    clearTimeout(sessionsSaveTimer.current);
+    sessionsSaveTimer.current = setTimeout(flushSessionsSave, SAVE_DEBOUNCE_MS);
+  }, [flushSessionsSave]);
+
+  // A block/date/theme/etc change from the builder: merge it into the sessions map by
+  // id and mark the whole file dirty. A conflict is not cleared by editing further —
+  // Drive is still ahead of us — only keepMine or reload resolves it, same as the
+  // drill editor.
+  const onSessionChange = useCallback((updatedSession) => {
+    const cur = sessionsStateRef.current;
+    const nextData = {
+      ...cur.data,
+      sessions: { ...cur.data.sessions, [updatedSession.id]: updatedSession },
+    };
+    setSessionsState({ ...cur, data: nextData, status: cur.status === "conflict" ? "conflict" : "dirty" });
+    scheduleSessionsSave();
+  }, [setSessionsState, scheduleSessionsSave]);
+
+  const onKeepMineSessions = useCallback(() => {
+    const cur = sessionsStateRef.current;
+    if (cur.status !== "conflict") return;
+    // baseModifiedTime was already updated to Drive's current value when the conflict
+    // was reported, so this save now passes the conflict check while keeping our data.
+    setSessionsState({ ...cur, status: "dirty" });
+    sessionsSaveTimer.current = setTimeout(flushSessionsSave, 0);
+  }, [setSessionsState, flushSessionsSave]);
+
+  const onReloadSessions = useCallback(async () => {
+    const { fileId, data, modifiedTime } = await loadSessions(folderRef.current);
+    setSessionsState({ data, fileId, baseModifiedTime: modifiedTime, status: "idle", error: null });
+  }, [setSessionsState]);
+
+  useEffect(() => () => clearTimeout(sessionsSaveTimer.current), []);
+
   const load = useCallback(async () => {
     setStatus("loading");
     try {
@@ -107,6 +200,10 @@ export default function App() {
       setDrills(loaded);
       setFailed(notLoaded ?? []);
       setDuplicateFolders(Boolean(dupes));
+      // Sessions load after drills: they reference drills by slug, so nothing about
+      // resolving a session needs the catalogue to still be loading.
+      const { fileId, data, modifiedTime } = await loadSessions(folderId);
+      setSessionsState({ data, fileId, baseModifiedTime: modifiedTime, status: "idle", error: null });
       setStatus("ready");
       return loaded;
     } catch (e) {
@@ -114,7 +211,7 @@ export default function App() {
       setStatus("error");
       return null;
     }
-  }, []);
+  }, [setSessionsState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -212,20 +309,106 @@ export default function App() {
     if (drill) openEdit(drill);
   }, [drills, load, openEdit]);
 
-  // Resolves the current route against the loaded drills, once the catalogue is ready.
-  // A slug that matches no drill falls back to browse rather than showing nothing.
+  // Closes the builder, flushing any unsaved change first — the sessions equivalent of
+  // closeEditor.
+  const closeSessionBuilder = useCallback(() => {
+    clearTimeout(sessionsSaveTimer.current);
+    flushSessionsSave();
+    setSelectedSessionId(null);
+  }, [flushSessionsSave]);
+
+  const onOpenSession = useCallback((sess) => {
+    setSelectedSessionId(sess.id);
+    location.hash = formatHash({ view: "session", slug: sess.id });
+  }, []);
+
+  const onModeChange = useCallback((next) => {
+    if (next === "sessions") {
+      closeEditor();
+      setSelected(null);
+      setSelectedSessionId(null);
+      setMode("sessions");
+      location.hash = formatHash({ view: "sessions" });
+    } else {
+      closeSessionBuilder();
+      setMode("drills");
+      location.hash = formatHash({ view: "browse" });
+    }
+  }, [closeEditor, closeSessionBuilder]);
+
+  // Makes an id from the date and theme (2026-08-12-pressing), guarding against a
+  // collision with an existing session, then opens the builder on it.
+  const onCreateSession = useCallback(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const date = window.prompt("Date for this session? (YYYY-MM-DD)", today);
+    if (!date || !date.trim()) return;
+    const squad = window.prompt("Squad? (optional)") ?? "";
+    const theme = window.prompt("Theme? (optional)") ?? "";
+    const themeSlug = theme.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const base = themeSlug ? `${date.trim()}-${themeSlug}` : date.trim();
+    const existing = sessionsStateRef.current.data.sessions;
+    let id = base;
+    for (let n = 2; existing[id]; n++) id = `${base}-${n}`;
+    const created = emptySession(id, date.trim(), squad.trim());
+    created.theme = theme.trim();
+    onSessionChange(created);
+    setSelected(null);
+    setMode("sessions");
+    setSelectedSessionId(id);
+    location.hash = formatHash({ view: "session", slug: id });
+  }, [onSessionChange]);
+
+  const onDeleteSession = useCallback(() => {
+    const id = selectedSessionId;
+    if (!id) return;
+    if (!window.confirm("Delete this session plan?")) return;
+    const cur = sessionsStateRef.current;
+    const rest = { ...cur.data.sessions };
+    delete rest[id];
+    setSessionsState({ ...cur, data: { ...cur.data, sessions: rest }, status: "dirty" });
+    setSelectedSessionId(null);
+    location.hash = formatHash({ view: "sessions" });
+    clearTimeout(sessionsSaveTimer.current);
+    sessionsSaveTimer.current = setTimeout(flushSessionsSave, 0);
+  }, [selectedSessionId, setSessionsState, flushSessionsSave]);
+
+  // Resolves the current route against the loaded drills and sessions, once the
+  // catalogue is ready. A slug/id that matches nothing falls back to browse/sessions
+  // rather than showing nothing.
   const resolveRoute = useCallback(() => {
     if (status !== "ready") return;
     const route = routeRef.current;
-    if (route.view === "browse") return;
+
+    if (route.view === "sessions") {
+      closeEditor();
+      setSelected(null);
+      if (mode !== "sessions") setMode("sessions");
+      if (selectedSessionId) setSelectedSessionId(null);
+      return;
+    }
+    if (route.view === "session") {
+      const sess = sessionsStateRef.current.data.sessions[route.slug];
+      if (!sess) { location.hash = formatHash({ view: "sessions" }); return; }
+      closeEditor();
+      setSelected(null);
+      if (mode !== "sessions") setMode("sessions");
+      if (selectedSessionId !== sess.id) setSelectedSessionId(sess.id);
+      return;
+    }
+    if (route.view === "browse") {
+      if (mode !== "drills") { closeSessionBuilder(); setMode("drills"); }
+      return;
+    }
+
     const drill = drills.find((d) => d.slug === route.slug);
     if (!drill) { location.hash = formatHash({ view: "browse" }); return; }
+    if (mode !== "drills") { closeSessionBuilder(); setMode("drills"); }
     if (route.view === "edit") {
       if (editorRef.current?.id !== drill.id) openEdit(drill);
     } else if (selected?.id !== drill.id) {
       openDrill(drill);
     }
-  }, [status, drills, selected, openEdit, openDrill]);
+  }, [status, drills, selected, mode, selectedSessionId, openEdit, openDrill, closeEditor, closeSessionBuilder]);
 
   // A ref so the hashchange listener (registered once) always calls the CURRENT
   // resolveRoute rather than the stale one captured when the listener was attached.
@@ -243,6 +426,9 @@ export default function App() {
     routeRef.current = parseHash(currentHash());
     resolveRoute();
   }, [status, drills, resolveRoute]);
+
+  const sessionsList = Object.values(sessionsState.data.sessions);
+  const selectedSession = selectedSessionId ? sessionsState.data.sessions[selectedSessionId] ?? null : null;
 
   return (
     <div className="page">
@@ -273,6 +459,19 @@ export default function App() {
         onReload={onReloadDrive}
         onStartEdit={openEdit}
         onCreate={onCreate}
+        mode={mode}
+        onModeChange={onModeChange}
+        sessions={sessionsList}
+        selectedSession={selectedSession}
+        onOpenSession={onOpenSession}
+        onCreateSession={onCreateSession}
+        onSessionChange={onSessionChange}
+        onSessionBack={closeSessionBuilder}
+        onDeleteSession={onDeleteSession}
+        sessionsStatus={sessionsState.status}
+        sessionsError={sessionsState.error}
+        onKeepMineSessions={onKeepMineSessions}
+        onReloadSessions={onReloadSessions}
       />
     </div>
   );

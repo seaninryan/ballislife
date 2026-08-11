@@ -8,6 +8,25 @@ describe("parseHash", () => {
     }
   });
 
+  it("reads the session list", () => {
+    expect(parseHash("#/sessions")).toEqual({ view: "sessions", slug: null });
+  });
+
+  it("reads a single session", () => {
+    expect(parseHash("#/session/2026-08-12-pressing")).toEqual({
+      view: "session", slug: "2026-08-12-pressing",
+    });
+  });
+
+  it("treats a session route with no id as the session list", () => {
+    expect(parseHash("#/session/")).toEqual({ view: "sessions", slug: null });
+    expect(parseHash("#/session")).toEqual({ view: "sessions", slug: null });
+  });
+
+  it("decodes a percent-encoded session id", () => {
+    expect(parseHash("#/session/a%20b")).toEqual({ view: "session", slug: "a b" });
+  });
+
   it("reads a drill to read", () => {
     expect(parseHash("#/drill/rondo-4v2")).toEqual({ view: "read", slug: "rondo-4v2" });
   });
@@ -41,6 +60,9 @@ describe("formatHash", () => {
     expect(formatHash({ view: "browse" })).toBe("#/");
     expect(formatHash({ view: "read", slug: "rondo-4v2" })).toBe("#/drill/rondo-4v2");
     expect(formatHash({ view: "edit", slug: "rondo-4v2" })).toBe("#/drill/rondo-4v2/edit");
+    expect(formatHash({ view: "sessions" })).toBe("#/sessions");
+    expect(formatHash({ view: "session", slug: "2026-08-12-pressing" }))
+      .toBe("#/session/2026-08-12-pressing");
   });
 
   it("encodes a slug that needs it", () => {
@@ -56,6 +78,9 @@ describe("formatHash", () => {
       { view: "browse", slug: null },
       { view: "read", slug: "rondo-4v2" },
       { view: "edit", slug: "a b" },
+      { view: "sessions", slug: null },
+      { view: "session", slug: "2026-08-12-pressing" },
+      { view: "session", slug: "a b" },
     ]) {
       expect(parseHash(formatHash(route))).toEqual(route);
     }

@@ -89,3 +89,49 @@ describe("Catalogue", () => {
       .toMatch(/trouble|try again/i);
   });
 });
+
+describe("Catalogue sessions switch", () => {
+  it("defaults to the Drills view, showing the grid", () => {
+    const drills = [
+      { id: "a", slug: "rondo-4v2", title: "Rondo 4v2", category: "warmup", minutes: 10,
+        players: "6-8", tags: [], thumb: null, invalid: null },
+    ];
+    const html = render({ status: "ready", drills });
+    expect(html).toContain("Rondo 4v2");
+    expect(html).toMatch(/drills/i);
+    expect(html).toMatch(/sessions/i);
+  });
+
+  it("shows the session list when mode is sessions", () => {
+    const html = render({ status: "ready", drills: [], mode: "sessions", sessions: [] });
+    expect(html).toMatch(/no sessions/i);
+  });
+
+  it("shows the session builder when a session is selected, regardless of mode", () => {
+    const session = { id: "s1", date: "2026-08-12", squad: "U12s", theme: "", length: 75,
+      blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },
+        { slot: "skill", drill: null, minutes: null, note: "" },
+        { slot: "tactical", drill: null, minutes: null, note: "" },
+        { slot: "match", drill: null, minutes: null, note: "" },
+        { slot: "fun", drill: null, minutes: null, note: "" }] };
+    const html = render({ status: "ready", drills: [], mode: "sessions", selectedSession: session });
+    expect(html).toContain("2026-08-12");
+    expect(html).toContain("warmup");
+  });
+
+  it("surfaces a sessions save conflict the way the editor does", () => {
+    const session = { id: "s1", date: "2026-08-12", squad: "", theme: "", length: 75,
+      blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },
+        { slot: "skill", drill: null, minutes: null, note: "" },
+        { slot: "tactical", drill: null, minutes: null, note: "" },
+        { slot: "match", drill: null, minutes: null, note: "" },
+        { slot: "fun", drill: null, minutes: null, note: "" }] };
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", selectedSession: session,
+      sessionsStatus: "conflict",
+    });
+    expect(html).toMatch(/changed in drive|changed on drive/i);
+    expect(html).toMatch(/keep mine/i);
+    expect(html).toMatch(/reload/i);
+  });
+});
