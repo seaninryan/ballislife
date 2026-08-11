@@ -422,6 +422,10 @@ describe("sessions storage", () => {
   });
 
   it("writes an existing file and returns the new modifiedTime", async () => {
+    // Seed the baseline. `known` is module-level state that vitest does not reset
+    // between it() blocks, so without this the previous test leaves known="T1" for this
+    // same id and the save spuriously conflicts. Passes alone, fails in file order.
+    noteModifiedTime("sess", "T5");
     api.writeFile.mockResolvedValue("T6");
     const r = await saveSessions({ folder: "F1", fileId: "sess", data: { version: 1, sessions: {} }, baseModifiedTime: "T5" });
     expect(r).toMatchObject({ ok: true, modifiedTime: "T6" });
