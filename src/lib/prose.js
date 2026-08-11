@@ -50,22 +50,67 @@ export function renderProse(markdown, options = {}) {
 // pre-pass over raw markdown would have to reimplement marked's own list-item detection
 // to avoid.
 //
+// Block-level tags marked can emit around inline content. Seeing one of these means a
+// new "line" of prose has started, so a run of inline checkboxes never bleeds across a
+// paragraph/list-item/heading/cell boundary — each such container restarts its own count.
+// Everything marked emits *inside* one of these (em, strong, a, code, del, br, img, sup,
+// sub) is inline formatting and must NOT reset the count, or "high **knees**" would read
+// as two separate items.
+const BLOCK_TAG = /^<\/?(p|li|blockquote|h[1-6]|td|th|tr|table|ul|ol|div|hr)(\s|>|\/)/i;
+
+// Turns a bare "[ ]"/"[x]"/"[X]" written in prose — not as a "- [ ] " list item, which
+// marked already renders as a real checkbox by this point — into the same kind of
+// <input type="checkbox"> element, so a one-line warm-up like
+// "[ ] high knees [ ] butt kicker" is tickable without forcing it into a 13-line list.
+//
+// Runs on the SANITISED html, after marked and DOMPurify, rather than pre-processing
+// the markdown source: by this point every task-list item marked recognised has already
+// become a real <input>, so any "[ ]" still present as literal text is guaranteed to be
+// the inline form — there is no risk of double-converting a "- [ ] item" line, which a
+// pre-pass over raw markdown would have to reimplement marked's own list-item detection
+// to avoid.
+//
 // Only scans TEXT between tags: the combined regex alternates between "a whole tag"
 // (passed through unchanged, but inspected to track <pre>/<code> nesting) and "a bracket
 // pattern", so a bracket sequence inside a tag's attributes can never match, and one
 // inside a fenced ```pitch sample (<pre><code>) or inline `code span` (<code>) is left as
 // literal text — a drill documenting the pitch syntax can safely show "[ ]" in a sample.
+//
+// LAYOUT: the owner writes a warm-up compactly on one physical line —
+// "[ ] high knees [ ] butt kicker [ ] gate ..." — and wants each item to read as its own
+// row, "like a shopping list", not run across the page. A <br> is inserted before every
+// checkbox that is NOT the first one seen since the last block boundary: the first item
+// needs no break (it already starts the paragraph's own line), a lone "[ ]" amid ordinary
+// prose gets no break at all (nothing to separate it from), and a run of several gets one
+// break per item, pushing each into its own line together with the text that follows it
+// up to the next break. This was chosen over wrapping each item in its own block-level
+// span because item boundaries are genuinely ambiguous here: an inline checkbox row is
+// unstructured prose text, not a list with real item delimiters, and the text after one
+// checkbox and before the next can itself contain arbitrary inline markup (**bold**, a
+// `code span`, a link) spanning tag boundaries that this single left-to-right regex pass
+// only sees as opaque pass-through tokens. A <br> just before the checkbox needs no
+// notion of "where the previous item ends" at all — it only has to notice "another
+// checkbox is starting" — so it is correct regardless of what the intervening text
+// contains. The one case this cannot help is a checkbox placed BEFORE any of its own
+// label text on the same conceptual line ("prep [ ] station A [ ] station B"): "prep"
+// stays glued to the first checkbox's line rather than getting a line of its own, which
+// matches how the text actually reads (as a lead-in to the list, not a separate item).
 function makeInlineCheckboxes(html) {
   let codeDepth = 0;
+  let seenInBlock = false;
   return html.replace(/<[^>]+>|\[([ xX])\]/g, (match, mark) => {
     if (match.charCodeAt(0) === 60 /* "<" */) {
       if (/^<(pre|code)(\s|>)/i.test(match)) codeDepth++;
       else if (/^<\/(pre|code)>/i.test(match)) codeDepth = Math.max(0, codeDepth - 1);
+      if (BLOCK_TAG.test(match)) seenInBlock = false;
       return match;
     }
     if (codeDepth > 0) return match;
     const checked = mark.toLowerCase() === "x";
-    return `<input disabled="" type="checkbox"${checked ? ' checked=""' : ""}>`;
+    const box = `<input disabled="" type="checkbox"${checked ? ' checked=""' : ""}>`;
+    const prefix = seenInBlock ? "<br>" : "";
+    seenInBlock = true;
+    return `${prefix}${box}`;
   });
 }
 

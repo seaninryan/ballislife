@@ -53,6 +53,16 @@ textarea, input, select {
 .prose img { max-width: 100%; }
 .prose table { border-collapse: collapse; }
 .prose th, .prose td { border: 1px solid var(--line); padding: 4px 8px; }
+/* Sized for a thumb, not a mouse, same as .chip-button: these get tapped while setting
+   up cones at the side of a pitch, not clicked with a mouse. A compact one-line warm-up
+   like "[ ] high knees [ ] butt kicker ..." is split one item per line (see
+   makeInlineCheckboxes in lib/prose.js), so the extra line-height here gives each line
+   room to be a comfortable tap target without the rows feeling glued together. */
+.prose input[type="checkbox"] {
+  width: 20px; height: 20px; margin: 0 8px 3px 0; vertical-align: -5px;
+  accent-color: var(--accent); cursor: pointer;
+}
+.prose p:has(input[type="checkbox"]) { line-height: 2.3; }
 .drill-card {
   display: block; width: 100%; text-align: left; cursor: pointer;
   padding: 8px; border-radius: 10px;

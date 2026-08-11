@@ -141,3 +141,57 @@ describe("inline checkboxes written as prose, not a list", () => {
     expect(html).toContain('data-tick="0"');
   });
 });
+
+describe("inline checkbox row layout: one item per line", () => {
+  // The owner's actual report: a compact warm-up written on one line renders as
+  // checkboxes but they all sit on a single row, running across the page.
+  const warmup =
+    "[ ] high knees [ ] butt kicker [ ] gate [ ] open [ ] close [ ] scoop [ ] quad pull\n";
+
+  it("puts a line break before every inline checkbox after the first", () => {
+    const html = renderProse(warmup);
+    // 7 checkboxes -> 6 line breaks separating them.
+    const breaks = html.match(/<br\s*\/?>/g) ?? [];
+    expect(breaks.length).toBe(6);
+    // No break needed before the very first item on the line.
+    expect(html.indexOf("<input")).toBeLessThan(html.indexOf("<br"));
+  });
+
+  it("does not add a break for a single inline checkbox amid ordinary prose", () => {
+    const html = renderProse("remember [ ] to bring the cones bag today\n");
+    expect(html).not.toMatch(/<br\s*\/?>/);
+    expect(html).toContain("<input");
+  });
+
+  it("keeps each checkbox's own trailing text with it, in order", () => {
+    const html = renderProse("[ ] a [ ] b [ ] c\n");
+    const order = [...html.matchAll(/<input[^>]*>|<br\s*\/?>|[abc]/g)].map((m) => m[0]);
+    // The sequence must alternate: input, then its letter, then a break, then next input...
+    expect(order).toEqual([
+      "<input disabled=\"\" type=\"checkbox\">",
+      "a",
+      "<br>",
+      "<input disabled=\"\" type=\"checkbox\">",
+      "b",
+      "<br>",
+      "<input disabled=\"\" type=\"checkbox\">",
+      "c",
+    ]);
+  });
+
+  it("does not insert a break across separate paragraphs or into a real GFM list", () => {
+    const md = "- [ ] cones\n- [ ] bibs\n\n[ ] warm up a\n\n[ ] warm up b\n";
+    const html = renderProse(md);
+    // The two inline paragraphs each have exactly one checkbox, so no <br> is needed
+    // for either, and the real list must still be a <ul> with no <br> inserted into it.
+    expect(html).toContain("<ul>");
+    expect(html).not.toMatch(/<li>[^<]*<br/);
+    expect(html).not.toMatch(/<br\s*\/?>/);
+  });
+
+  it("still numbers ticks continuously with the layout change", () => {
+    const html = renderProse("[ ] a [ ] b [ ] c\n", { interactive: true });
+    expect(html.indexOf('data-tick="0"')).toBeLessThan(html.indexOf('data-tick="1"'));
+    expect(html.indexOf('data-tick="1"')).toBeLessThan(html.indexOf('data-tick="2"'));
+  });
+});
