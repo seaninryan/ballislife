@@ -54,10 +54,27 @@ const mount = async () => {
   await act(async () => { root.render(<App />); });
 };
 
+const findButton = (text) =>
+  [...container.querySelectorAll("button")].find((b) => b.textContent.includes(text));
+
 const openCard = async (title) => {
-  const button = [...container.querySelectorAll("button")]
-    .find((b) => b.textContent.includes(title));
-  await act(async () => { button.click(); });
+  await act(async () => { findButton(title).click(); });
+};
+
+// Opens a drill (read view), then clicks its Edit control to enter the editor.
+const openEditFor = async (title) => {
+  await openCard(title);
+  await act(async () => { findButton("Edit").click(); });
+};
+
+// Sets a textarea's value the way a real keystroke would: through the native setter, so
+// React's onChange fires, then dispatches the input event.
+const typeInto = async (textarea, text) => {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+  await act(async () => {
+    setter.call(textarea, text);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 };
 
 describe("App", () => {
@@ -125,5 +142,138 @@ describe("App", () => {
     await mount();
     await openCard("Alpha");
     expect(container.textContent).toMatch(/having trouble/i);
+  });
+});
+
+describe("App editing", () => {
+  const OPEN_TEXT = "---\ntitle: Alpha\n---\n\nAlpha body\n";
+
+  beforeEach(() => {
+    drive.readDrill.mockResolvedValue({ text: OPEN_TEXT, modifiedTime: "T1" });
+    drive.knownModifiedTime.mockReturnValue("T1");
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("debounces: typing repeatedly calls saveDrill once, not once per keystroke", async () => {
+    drive.saveDrill.mockResolvedValue({ ok: true, modifiedTime: "T2" });
+    await mount();
+    await openEditFor("Alpha");
+    const textarea = container.querySelector("textarea");
+
+    await typeInto(textarea, "Alpha body one");
+    await typeInto(textarea, "Alpha body two");
+    await typeInto(textarea, "Alpha body three");
+
+    expect(drive.saveDrill).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+    expect(drive.saveDrill).toHaveBeenCalledTimes(1);
+    expect(drive.saveDrill.mock.calls[0][0].text).toBe("Alpha body three");
+  });
+
+  it("saves with baseModifiedTime only — no currentModifiedTime in the contract", async () => {
+    drive.saveDrill.mockResolvedValue({ ok: true, modifiedTime: "T2" });
+    await mount();
+    await openEditFor("Alpha");
+    const textarea = container.querySelector("textarea");
+    await typeInto(textarea, "changed");
+    await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+    expect(drive.saveDrill).toHaveBeenCalledTimes(1);
+    const call = drive.saveDrill.mock.calls[0][0];
+    expect(call).toEqual({ id: "a", text: "changed", baseModifiedTime: "T1" });
+    expect(call.currentModifiedTime).toBeUndefined();
+  });
+
+  it("adopts the returned modifiedTime, so a second save sends the new baseline", async () => {
+    drive.saveDrill
+      .mockResolvedValueOnce({ ok: true, modifiedTime: "T2" })
+      .mockResolvedValueOnce({ ok: true, modifiedTime: "T3" });
+    await mount();
+    await openEditFor("Alpha");
+    const textarea = container.querySelector("textarea");
+
+    await typeInto(textarea, "first edit");
+    await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+    expect(drive.saveDrill.mock.calls[0][0].baseModifiedTime).toBe("T1");
+
+    await typeInto(textarea, "second edit");
+    await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+    expect(drive.saveDrill).toHaveBeenCalledTimes(2);
+    // Regression test: skipping the adopted modifiedTime here would send "T1" again,
+    // which would conflict against the write this very save just made.
+    expect(drive.saveDrill.mock.calls[1][0].baseModifiedTime).toBe("T2");
+  });
+
+  it("treats a coalesced result as success and adopts its modifiedTime too", async () => {
+    drive.saveDrill
+      .mockResolvedValueOnce({ ok: true, coalesced: true, modifiedTime: "T5" })
+      .mockResolvedValueOnce({ ok: true, modifiedTime: "T6" });
+    await mount();
+    await openEditFor("Alpha");
+    const textarea = container.querySelector("textarea");
+
+    await typeInto(textarea, "first edit");
+    await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+    expect(container.textContent).toMatch(/saved/i);
+
+    await typeInto(textarea, "second edit");
+    await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+    // The coalesced save's modifiedTime (T5) must have become the baseline for this
+    // second save, not the original T1.
+    expect(drive.saveDrill.mock.calls[1][0].baseModifiedTime).toBe("T5");
+  });
+
+  it("shows the conflict banner on a conflicting save, with the user's text still there", async () => {
+    drive.saveDrill.mockResolvedValue({ ok: false, conflict: true, modifiedTime: "T9" });
+    await mount();
+    await openEditFor("Alpha");
+    const textarea = container.querySelector("textarea");
+
+    await typeInto(textarea, "my precious edit");
+    await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+    expect(container.textContent).toMatch(/changed in drive|changed on drive/i);
+    expect(container.querySelector("textarea").value).toBe("my precious edit");
+  });
+
+  it("flushes a pending save when the editor is closed before the debounce fires", async () => {
+    drive.saveDrill.mockResolvedValue({ ok: true, modifiedTime: "T2" });
+    await mount();
+    await openEditFor("Alpha");
+    const textarea = container.querySelector("textarea");
+
+    await typeInto(textarea, "typed just before leaving");
+    expect(drive.saveDrill).not.toHaveBeenCalled(); // debounce has not fired yet
+
+    await act(async () => { findButton("Back").click(); });
+
+    expect(drive.saveDrill).toHaveBeenCalledTimes(1);
+    expect(drive.saveDrill.mock.calls[0][0].text).toBe("typed just before leaving");
+  });
+
+  it("asks for confirmation before deleting, and does not delete if declined", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await mount();
+    await openEditFor("Alpha");
+
+    await act(async () => { findButton("Delete").click(); });
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(drive.deleteDrill).not.toHaveBeenCalled();
+  });
+
+  it("deletes when confirmed", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    drive.deleteDrill.mockResolvedValue(undefined);
+    await mount();
+    await openEditFor("Alpha");
+
+    await act(async () => { findButton("Delete").click(); });
+
+    expect(drive.deleteDrill).toHaveBeenCalledWith("a");
   });
 });
