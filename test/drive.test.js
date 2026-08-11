@@ -3,6 +3,7 @@ import * as api from "../src/lib/driveApi.js";
 import * as auth from "../src/lib/driveAuth.js";
 import {
   loadCatalogue, saveDrill, noteModifiedTime, knownModifiedTime, readDrill, FOLDER_NAME, INDEX_NAME,
+  createDrill, deleteDrill,
 } from "../src/lib/drive.js";
 
 vi.mock("../src/lib/driveApi.js");
@@ -272,5 +273,74 @@ describe("saveDrill", () => {
       saveDrill({ id: "b", text: "y", baseModifiedTime: "T" }),
     ]);
     expect(api.writeFile.mock.calls.map((c) => c[1]).sort()).toEqual(["a", "b"]);
+  });
+});
+
+describe("createDrill", () => {
+  it("writes a starter drill and returns its id", async () => {
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([]);
+    api.readFile.mockResolvedValue("");
+    api.createFile.mockResolvedValue({ id: "NEW", modifiedTime: "T1" });
+    api.writeFile.mockResolvedValue("T1");
+
+    const r = await createDrill("F1", "Rondo 4v2", ["other.md"]);
+    expect(r.id).toBe("NEW");
+    const [, , name, text] = api.createFile.mock.calls[0];
+    expect(name).toBe("rondo-4v2.md");
+    expect(text).toContain("title: Rondo 4v2");
+    expect(text).toContain("```pitch");
+    expect(knownModifiedTime("NEW")).toBe("T1");
+  });
+
+  it("avoids colliding with a name already in the folder", async () => {
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([]);
+    api.readFile.mockResolvedValue("");
+    api.createFile.mockResolvedValue({ id: "NEW", modifiedTime: "T1" });
+    api.writeFile.mockResolvedValue("T1");
+    await createDrill("F1", "Rondo 4v2", ["rondo-4v2.md"]);
+    expect(api.createFile.mock.calls[0][2]).toBe("rondo-4v2-2.md");
+  });
+
+  it("starts from a template that parses cleanly", async () => {
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([]);
+    api.readFile.mockResolvedValue("");
+    api.createFile.mockResolvedValue({ id: "NEW", modifiedTime: "T1" });
+    api.writeFile.mockResolvedValue("T1");
+    await createDrill("F1", "Test", []);
+    const text = api.createFile.mock.calls[0][3];
+    const { parseDoc } = await import("../src/lib/frontmatter.js");
+    const { parse } = await import("../src/lib/pitch.js");
+    const { splitSegments } = await import("../src/lib/markdown.js");
+    const doc = parseDoc(text);
+    expect(doc.error).toBe(null);
+    const block = splitSegments(doc.body).find((s) => s.kind === "pitch");
+    expect(parse(block.text).errors).toEqual([]);
+  });
+});
+
+describe("deleteDrill", () => {
+  it("trashes rather than destroying, so a mistake is recoverable", async () => {
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([]);
+    api.readFile.mockResolvedValue("");
+    api.createFile.mockResolvedValue({ id: "idx", modifiedTime: "T" });
+    api.trashFile.mockResolvedValue(undefined);
+    await deleteDrill("a");
+    expect(api.trashFile).toHaveBeenCalledWith("tok", "a");
+  });
+
+  it("retries once on a 401", async () => {
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([]);
+    api.readFile.mockResolvedValue("");
+    api.createFile.mockResolvedValue({ id: "idx", modifiedTime: "T" });
+    api.trashFile
+      .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
+      .mockResolvedValue(undefined);
+    await expect(deleteDrill("a")).resolves.toBeUndefined();
+    expect(api.trashFile).toHaveBeenCalledTimes(2);
   });
 });

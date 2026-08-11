@@ -4,7 +4,7 @@
 import * as api from "./driveApi.js";
 import { getAccessToken, ensureFreshToken } from "./driveAuth.js";
 import { readIndex, entryFor, diffIndex, applyDiff } from "./driveIndex.js";
-import { drillsFromIndex } from "./drills.js";
+import { drillsFromIndex, fileNameFor } from "./drills.js";
 
 export const FOLDER_NAME = "BallIsLife";
 export const INDEX_NAME = "index.json";
@@ -159,4 +159,43 @@ export async function saveDrill({ id, text, baseModifiedTime }) {
       return { ok: false, error };
     }
   });
+}
+
+// A new drill starts from a template that parses cleanly, so the preview is a real
+// diagram from the first keystroke rather than an error banner.
+export const TEMPLATE = (title) => `---
+title: ${title}
+category: skill
+minutes: 15
+players: 8-12
+tags: []
+---
+
+What the players do.
+
+\`\`\`pitch
+area: 30x20 plain
+cone: 0,0 30,0 0,20 30,20
+red: A@6,10 B@24,10
+pass: A->B
+label: "${title}"
+\`\`\`
+`;
+
+// -> { id, modifiedTime }. `taken` is the filenames already in the folder, so the slug
+// does not collide.
+export async function createDrill(folder, title, taken = []) {
+  return withRetry(async () => {
+    const token = getAccessToken();
+    const name = fileNameFor(title, taken);
+    const created = await api.createFile(token, folder, name, TEMPLATE(title));
+    known.set(created.id, created.modifiedTime);
+    return created;
+  });
+}
+
+// Trash rather than delete: a mis-tap should be recoverable from Drive's bin.
+export async function deleteDrill(id) {
+  await withRetry(async () => api.trashFile(getAccessToken(), id));
+  known.delete(id);
 }
