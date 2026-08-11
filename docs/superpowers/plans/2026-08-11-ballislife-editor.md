@@ -364,6 +364,12 @@ describe("parseHash", () => {
   it("ignores a trailing slash", () => {
     expect(parseHash("#/drill/x/")).toEqual({ view: "read", slug: "x" });
   });
+
+  it("treats an empty slug as browse, not as a drill named edit", () => {
+    // filter(Boolean) collapsed the empty segment and read "edit" as the slug.
+    expect(parseHash("#/drill//edit")).toEqual({ view: "browse", slug: null });
+    expect(parseHash("#/drill/")).toEqual({ view: "browse", slug: null });
+  });
 });
 
 describe("formatHash", () => {
@@ -411,7 +417,9 @@ const BROWSE = { view: "browse", slug: null };
 const decode = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
 
 export function parseHash(hash) {
-  const parts = String(hash ?? "").replace(/^#/, "").split("/").filter(Boolean);
+  // Deliberately NOT .filter(Boolean): collapsing empty segments made "#/drill//edit"
+  // parse as a drill named "edit" rather than a malformed URL. Position matters here.
+  const parts = String(hash ?? "").replace(/^#\/?/, "").split("/");
   if (parts[0] !== "drill" || !parts[1]) return { ...BROWSE };
   return { view: parts[2] === "edit" ? "edit" : "read", slug: decode(parts[1]) };
 }
@@ -426,7 +434,7 @@ export function formatHash({ view, slug }) {
 - [ ] **Step 4: Run the tests, then commit**
 
 ```bash
-npx vitest run test/route.test.js    # expect 10 passed
+npx vitest run test/route.test.js    # expect 11 passed
 git add src/lib/route.js test/route.test.js
 git commit -m "feat: hash routing so a drill has a url"
 ```
