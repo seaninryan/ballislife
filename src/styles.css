@@ -98,6 +98,10 @@ textarea, input, select {
   .editor-source { min-height: 30vh; }
 }
 
+.session-row { display: block; width: 100%; text-align: left; cursor: pointer; }
+.session-block { display: block; }
+.session-block select { max-width: 100%; }
+
 /* The editor reference card. Collapsed by default, so it costs nothing until wanted. */
 .help > summary { cursor: pointer; font-weight: 700; }
 .help h4 { margin: 14px 0 4px; font-size: 14px; }
