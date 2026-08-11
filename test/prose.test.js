@@ -82,3 +82,62 @@ describe("interactive checklists", () => {
     expect(html).not.toContain('data-tick="0"');
   });
 });
+
+describe("inline checkboxes written as prose, not a list", () => {
+  // The owner's real report: a warm-up written as one line —
+  // "[ ] high knees [ ] butt kicker [ ] gate" — instead of one list item per move.
+  const row = "[ ] high knees [ ] butt kicker [x] gate\n";
+
+  it("renders a bare [ ] and [x] in prose as checkboxes, disabled by default", () => {
+    const html = renderProse(row);
+    expect(html).toContain('<input disabled="" type="checkbox">');
+    expect(html).not.toContain("[ ]");
+    expect(html).not.toContain("[x]");
+  });
+
+  it("renders [x] checked", () => {
+    const html = renderProse(row);
+    expect(html).toMatch(/<input disabled="" type="checkbox" checked="">/);
+  });
+
+  it("makes inline checkboxes tickable, numbered, when interactive", () => {
+    const html = renderProse(row, { interactive: true });
+    expect(html).not.toContain("disabled");
+    expect(html).toContain('data-tick="0"');
+    expect(html).toContain('data-tick="1"');
+    expect(html).toContain('data-tick="2"');
+  });
+
+  it("numbers a mix of a real list and an inline row continuously, in document order", () => {
+    // This is the case that matters: a collision here would tick the wrong item,
+    // because the tick store keys purely on the index.
+    const md = "- [ ] cones\n- [x] bibs\n\n[ ] ball pump [ ] cones bag\n";
+    const html = renderProse(md, { interactive: true });
+    const at = (s) => html.indexOf(s);
+    expect(at('data-tick="0"')).toBeLessThan(at('data-tick="1"'));
+    expect(at('data-tick="1"')).toBeLessThan(at('data-tick="2"'));
+    expect(at('data-tick="2"')).toBeLessThan(at('data-tick="3"'));
+    // Exactly one input per index — no reused number.
+    const indices = [...html.matchAll(/data-tick="(\d+)"/g)].map((m) => m[1]);
+    expect(indices).toEqual(["0", "1", "2", "3"]);
+  });
+
+  it("does not touch a [ ] inside a fenced ```pitch code sample", () => {
+    const md = "```pitch\n[ ] this documents pitch syntax, not a checklist\n```\n";
+    const html = renderProse(md);
+    expect(html).toContain("[ ] this documents pitch syntax");
+    expect(html).not.toContain("<input");
+  });
+
+  it("does not touch a [ ] inside inline code", () => {
+    const html = renderProse("write a checklist line like `[ ] item` in your drill\n");
+    expect(html).toContain("<code>[ ] item</code>");
+    expect(html).not.toContain("<input");
+  });
+
+  it("still sanitises normally around an inline checkbox row", () => {
+    const html = renderProse("[ ] warm up <script>alert(1)</script>", { interactive: true });
+    expect(html).not.toContain("<script");
+    expect(html).toContain('data-tick="0"');
+  });
+});

@@ -30,7 +30,43 @@ export function renderProse(markdown, options = {}) {
   // a component cannot render one.
   const html = marked.parse(String(markdown ?? ""), { async: false });
   const clean = purifier(win).sanitize(html);
-  return interactive ? makeTickable(clean, tickOffset) : clean;
+  // Runs unconditionally, not just when interactive: an inline "[ ] high knees [ ] ..."
+  // row should read as checkboxes the same way a real GFM task list already does in
+  // read-only mode (disabled, unticked). makeTickable numbers whatever this leaves
+  // behind alongside marked's own list checkboxes, so the two kinds share one sequence.
+  const withInlineChecks = makeInlineCheckboxes(clean);
+  return interactive ? makeTickable(withInlineChecks, tickOffset) : withInlineChecks;
+}
+
+// Turns a bare "[ ]"/"[x]"/"[X]" written in prose — not as a "- [ ] " list item, which
+// marked already renders as a real checkbox by this point — into the same kind of
+// <input type="checkbox"> element, so a one-line warm-up like
+// "[ ] high knees [ ] butt kicker" is tickable without forcing it into a 13-line list.
+//
+// Runs on the SANITISED html, after marked and DOMPurify, rather than pre-processing
+// the markdown source: by this point every task-list item marked recognised has already
+// become a real <input>, so any "[ ]" still present as literal text is guaranteed to be
+// the inline form — there is no risk of double-converting a "- [ ] item" line, which a
+// pre-pass over raw markdown would have to reimplement marked's own list-item detection
+// to avoid.
+//
+// Only scans TEXT between tags: the combined regex alternates between "a whole tag"
+// (passed through unchanged, but inspected to track <pre>/<code> nesting) and "a bracket
+// pattern", so a bracket sequence inside a tag's attributes can never match, and one
+// inside a fenced ```pitch sample (<pre><code>) or inline `code span` (<code>) is left as
+// literal text — a drill documenting the pitch syntax can safely show "[ ]" in a sample.
+function makeInlineCheckboxes(html) {
+  let codeDepth = 0;
+  return html.replace(/<[^>]+>|\[([ xX])\]/g, (match, mark) => {
+    if (match.charCodeAt(0) === 60 /* "<" */) {
+      if (/^<(pre|code)(\s|>)/i.test(match)) codeDepth++;
+      else if (/^<\/(pre|code)>/i.test(match)) codeDepth = Math.max(0, codeDepth - 1);
+      return match;
+    }
+    if (codeDepth > 0) return match;
+    const checked = mark.toLowerCase() === "x";
+    return `<input disabled="" type="checkbox"${checked ? ' checked=""' : ""}>`;
+  });
 }
 
 // Runs AFTER sanitising, and only removes an attribute and adds a data- one, so it

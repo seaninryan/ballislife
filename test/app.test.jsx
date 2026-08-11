@@ -534,4 +534,18 @@ describe("App session run mode", () => {
     expect(container.textContent).toContain("2026-08-12"); // back on the builder
     expect(location.hash).toBe("#/session/s1");
   });
+
+  it("returns to the builder from Back to plan even when run mode was entered directly via the /run hash (not through a click)", async () => {
+    // Mirrors the owner's report as closely as this harness allows: land on the run
+    // view via #/session/<id>/run directly — the same route the report's address bar
+    // could plausibly have shown right before backing out — then click Back.
+    drive.readDrill.mockResolvedValue({ text: bodyText("a"), modifiedTime: "T" });
+    location.hash = "#/session/s1/run";
+    await mount();
+    expect(container.textContent).toContain("body a"); // confirm run view is showing
+    await act(async () => { findButton("Back to plan").click(); });
+    expect(container.textContent).toContain("2026-08-12"); // back on the builder
+    expect(container.textContent).not.toContain("body a"); // run view is gone
+    expect(location.hash).toBe("#/session/s1");
+  });
 });
