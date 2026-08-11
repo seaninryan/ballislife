@@ -369,7 +369,7 @@ export function moveBlock(session, from, to) {
 - [ ] **Step 4: Run the tests, then commit**
 
 ```bash
-npx vitest run test/sessions.test.js    # expect 18 passed
+npx vitest run test/sessions.test.js    # expect 19 passed
 git add src/lib/sessions.js test/sessions.test.js
 git commit -m "feat: the session model with slots, totals and squad fitting"
 ```
