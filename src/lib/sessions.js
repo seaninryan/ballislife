@@ -20,6 +20,9 @@ export function emptySession(id, date, squad = "") {
     length: 60,
     turnout: null,
     blocks: SLOTS.map((slot) => ({ slot, drill: null, minutes: null, note: "" })),
+    // Filled in per day by a run (see lib/progress.js). Every reader tolerates its
+    // absence, because sessions created before this existed do not have it.
+    progress: {},
   };
 }
 

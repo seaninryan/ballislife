@@ -23,6 +23,10 @@ describe("emptySession", () => {
   it("defaults length to 60 minutes — a guideline, editable afterwards, not a hard total", () => {
     expect(emptySession("s1", "2026-08-12", "U12s").length).toBe(60);
   });
+
+  it("a new session has a progress map, so the shape is the same before and after a run", () => {
+    expect(emptySession("s1", "2026-08-13").progress).toEqual({});
+  });
 });
 
 describe("fitsSquad with session turnout", () => {
