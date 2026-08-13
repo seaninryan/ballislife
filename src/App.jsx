@@ -345,8 +345,12 @@ export default function App() {
     location.hash = formatHash({ view: "session", slug: sess.id });
   }, []);
 
-  // Slugs with a read in flight for the current run visit, so a swap away and back does
-  // not fire a second identical request.
+  // Slugs with a read in flight, each recorded under the run-visit token it was issued
+  // under. Narrower than it looks: openRun never consults this, so re-entering a run
+  // view while a read is pending does start a second read for the same slug. What it
+  // guarantees is that a swap does not add a read for a drill THIS visit is already
+  // fetching — and, because the token is recorded, that a leftover entry from a visit
+  // that has been left never suppresses a swap's read (that reply would be dropped).
   const runFetching = useRef(new Map());
 
   // A read counts as in flight only if the visit that issued it is still the one on

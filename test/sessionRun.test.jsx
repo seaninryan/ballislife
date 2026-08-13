@@ -632,4 +632,13 @@ describe("SessionRun print stylesheet", () => {
     expect(styles).toMatch(/@media print/);
     expect(styles).toMatch(/break-inside:\s*avoid/);
   });
+
+  it("hides a half-finished swap entirely: the picker and the buttons above it", () => {
+    // The picker renders INSTEAD of the drill body, so on paper a mid-swap block is
+    // just its header line. Leaving the Swap/Cancel swap row visible above that gap
+    // would print a control that means nothing on paper.
+    const print = styles.slice(styles.indexOf("@media print"));
+    expect(print).toMatch(/\.drill-picker\s*\{\s*display:\s*none/);
+    expect(print).toMatch(/\.run-block-actions\s*\{\s*display:\s*none/);
+  });
 });

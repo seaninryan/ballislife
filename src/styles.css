@@ -246,10 +246,14 @@ textarea, input, select {
 
 /* Carried on paper at the side of a pitch: the back button and any other on-screen-
    only chrome are useless there, and a block split across a page break is worse than
-   a blank inch at the bottom of one. A half-finished swap is on-screen-only chrome too:
-   the paper should show the plan, not the list you were browsing when you printed it. */
+   a blank inch at the bottom of one. The block controls (Done/Skip/Swap) and the drill
+   picker are on-screen-only chrome too. Note what that means for a block you were
+   mid-swap on when you printed: the picker renders INSTEAD of the drill body, so that
+   one block comes out as its header line alone — slot, title, duration — with nothing
+   beneath it. Cancel the swap before printing if you want its drill on the page. */
 @media print {
   .run-controls button { display: none; }
+  .run-block-actions { display: none; }
   .drill-picker { display: none; }
   .run-block { break-inside: avoid; page-break-inside: avoid; }
 }
