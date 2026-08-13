@@ -269,21 +269,36 @@ export default function App() {
     sessionsSaveTimer.current = setTimeout(flushSessionsSave, 0);
   }, [setSessionsState, flushSessionsSave]);
 
-  // Reload drops local edits by definition, so a pending flush must not write them back
-  // afterwards.
-  const onReloadSessions = useCallback(async () => {
-    clearTimeout(sessionsSaveTimer.current);
-    const { sessions, meta, migrated, failed: unreadable } = await loadSessions(folderRef.current);
+  // Takes Drive's version of ONE plan, dropping this device's unsaved edit to it — which is
+  // what Reload means — and only to it. With a file per plan there is no reason for the
+  // answer about tonight's session to discard an edit to next week's that has not landed
+  // yet. The whole set is refetched because that is the only read the Drive layer offers,
+  // but only the named plan is applied.
+  const onReloadSessions = useCallback(async (id) => {
+    if (!id) return;
+    const { sessions, meta, migrated, failed: unreadable, unmigrated } =
+      await loadSessions(folderRef.current);
+    const cur = sessionsStateRef.current;
+    const nextSessions = { ...cur.data.sessions };
+    const nextMeta = { ...cur.meta };
+    // Gone from Drive is an answer too: the plan was deleted on the other device.
+    if (sessions[id]) nextSessions[id] = sessions[id]; else delete nextSessions[id];
+    if (meta?.[id]) nextMeta[id] = meta[id]; else delete nextMeta[id];
     setSessionsState({
-      data: { version: 1, sessions },
-      meta: meta ?? {},
-      dirty: [],
-      conflicts: [],
-      status: "idle",
-      error: null,
+      ...cur,
+      data: { ...cur.data, sessions: nextSessions },
+      meta: nextMeta,
+      // This plan has nothing left to save and nothing left to resolve. Every other plan's
+      // pending edit, conflict and failure is exactly as it was.
+      dirty: cur.dirty.filter((d) => d !== id),
+      conflicts: cur.conflicts.filter((c) => c !== id),
     });
     setSessionsMigrated(migrated ?? 0);
     setSessionsFailed(unreadable ?? []);
+    // The load reported these too, so leaving them from the previous load would keep a
+    // banner on screen about a state this read has just replaced.
+    setSessionsUnmigrated(unmigrated ?? []);
+    setSessionsLoadError(null);
   }, [setSessionsState]);
 
   useEffect(() => () => clearTimeout(sessionsSaveTimer.current), []);

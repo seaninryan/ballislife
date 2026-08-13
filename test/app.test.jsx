@@ -735,6 +735,53 @@ describe("App sessions", () => {
       expect(banners()).toContain("2026-08-14");
       expect(banners()).not.toContain("2026-08-12");
     });
+
+    it("reloading one plan's version leaves every other plan's unsaved edit alone", async () => {
+      // It used to refetch everything and replace the whole state, so answering a conflict
+      // on tonight's plan threw away an edit to next week's that had not landed yet.
+      drive.loadSessions.mockResolvedValue(twoPlans());
+      drive.saveSession.mockImplementation(({ id }) => Promise.resolve(
+        id === "s1"
+          ? { ok: false, conflict: true, id, modifiedTime: "A9" }
+          : { ok: false, id, error: Object.assign(new Error("offline"), { code: 0 }) },
+      ));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+      await goToHash("#/session/s2");
+      await setNumber(0, "9");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(banners()).toContain("2026-08-12");           // s1 conflicted
+      expect(banners()).toMatch(/could not save/i);        // s2's save failed
+
+      await act(async () => { conflictButton("Reload", "2026-08-12").click(); });
+
+      // Still on s2, and its unsaved turnout is exactly where the owner left it.
+      expect(Number(container.querySelectorAll("input[type=number]")[0].value)).toBe(9);
+      // s1 has taken Drive's version — that is what Reload means — and is resolved.
+      expect(banners()).not.toContain("2026-08-12");
+      await goToHash("#/session/s1");
+      expect(minutesInput().value).toBe("");
+    });
+
+    it("a reload clears the banners the previous load left behind", async () => {
+      drive.loadSessions.mockResolvedValueOnce(sessionsLoad(
+        { s1: initial() },
+        { unmigrated: [{ id: "s1", reason: "write", error: new Error("boom") }] },
+      ));
+      drive.saveSession.mockResolvedValue({ ok: false, conflict: true, id: "s1", modifiedTime: "S9" });
+      await mount();
+      expect(container.textContent).toMatch(/not moved into its own file/i);
+
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: initial() }));
+      await act(async () => { conflictButton("Reload", "2026-08-12").click(); });
+      await goToHash("#/sessions");
+
+      expect(container.textContent).not.toMatch(/not moved into its own file/i);
+    });
   });
 });
 
