@@ -515,6 +515,12 @@ describe("SessionRun swapping a drill", () => {
     expect(findButton("Swap")).toBeUndefined();
     mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {} });
     expect(findButton("Swap")).toBeDefined();
+    // On the OPEN block only: block 1 is collapsed, and a collapsed block offers no
+    // controls at all — hence exactly one Swap for the two blocks.
+    expect([...container.querySelectorAll("button")].filter((b) => b.textContent === "Swap"))
+      .toHaveLength(1);
+    expect(container.querySelectorAll(".run-block-collapsed")[0].querySelector(".run-block-actions"))
+      .toBeNull();
   });
 
   it("labels it Choose a drill when the slot is empty", () => {
@@ -572,6 +578,43 @@ describe("SessionRun swapping a drill", () => {
     // BUTTON, which is the opposite of a Done mark.
     expect(first.querySelector(".run-block-summary").textContent).not.toContain("Done");
     expect(first.querySelector(".run-block-now-badge")).not.toBeNull();
+  });
+
+  it("marking a block Done while its picker is open leaves it showing the drill, not the picker", () => {
+    // Done collapses the block. Reopening it must show the drill it now holds — a block
+    // that is being marked has stopped choosing.
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {} });
+    act(() => { findButton("Swap").click(); });
+    act(() => { findButton("Done").click(); });
+    act(() => { container.querySelectorAll(".run-block-summary")[0].click(); }); // peek it open
+    const first = container.querySelectorAll(".run-block")[0];
+    expect(first.querySelector(".drill-picker")).toBeNull();
+    expect(first.textContent).toContain("Coaching points here");
+  });
+
+  it("collapsing a block while its picker is open leaves it showing the drill, not the picker", () => {
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {} });
+    act(() => { container.querySelectorAll(".run-block-summary")[1].click(); }); // peek block 1
+    const swaps = () => [...container.querySelectorAll("button")].filter((b) => b.textContent === "Swap");
+    act(() => { swaps()[1].click(); }); // block 1's Swap
+    act(() => { container.querySelectorAll(".run-block-summary")[1].click(); }); // collapse it
+    act(() => { container.querySelectorAll(".run-block-summary")[1].click(); }); // and open again
+    const second = container.querySelectorAll(".run-block")[1];
+    expect(second.querySelector(".drill-picker")).toBeNull();
+    expect(second.textContent).toContain("Coaching points here");
+  });
+
+  it("un-marking a block while its picker is open leaves it showing the drill, not the picker", () => {
+    // Same stranding as Done, from the other direction: Not done re-settles the block
+    // and collapses it, so it too has stopped choosing.
+    writeProgress(localStorage, "s1", "2026-08-13", { 0: DONE });
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {}, today: "2026-08-13" });
+    act(() => { container.querySelectorAll(".run-block-summary")[0].click(); }); // peek block 0
+    act(() => { findButton("Swap").click(); });
+    act(() => { findButton("Not done").click(); });
+    const first = container.querySelectorAll(".run-block")[0];
+    expect(first.querySelector(".drill-picker")).toBeNull();
+    expect(first.textContent).toContain("Coaching points here");
   });
 
   it("only one block can be picking at a time", () => {

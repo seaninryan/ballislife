@@ -165,13 +165,20 @@ export default function SessionRun({ session, drills = [], texts = {}, onBack, o
     });
   };
 
+  // A block that is being marked or collapsed has stopped choosing a drill. Without
+  // this, marking Done with the picker open left `picking` pointing at a block that is
+  // no longer even open, so peeking it back later showed the picker instead of the drill.
+  const stopPicking = (index) => setPicking((cur) => (cur === index ? null : cur));
+
   const handleMark = (index, state) => {
     persist(mark(marks, index, state));
+    stopPicking(index);
     collapse(index);
   };
 
   const handleReopen = (index) => {
     persist(reopen(marks, index));
+    stopPicking(index);
     collapse(index);
   };
 
@@ -185,6 +192,7 @@ export default function SessionRun({ session, drills = [], texts = {}, onBack, o
   };
 
   const handleToggle = (index) => {
+    stopPicking(index);
     setOpened((prev) => {
       const next = new Set(prev);
       if (next.has(index)) next.delete(index);
