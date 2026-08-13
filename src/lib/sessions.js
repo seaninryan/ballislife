@@ -26,18 +26,35 @@ export function emptySession(id, date, squad = "") {
   };
 }
 
-// Unlike index.json this file is authoritative — it is the only copy of the plans — so it
-// is never rebuilt from anything. This only guards against a corrupt read.
-export function readSessions(raw) {
+// -> { ok: true, sessions } | { ok: false, reason }
+//
+// Separate from readSessions because "the blob holds no plans" and "the blob could not be
+// read" must not answer the same thing. The migration acts on the answer: a truncated blob
+// that reads as empty looked like a finished migration, so the only copy of every plan was
+// renamed aside and could never be found by name again.
+export function parseSessionsBlob(raw) {
+  let parsed;
   try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("shape");
-    if (parsed.version !== VERSION) throw new Error("version");
-    if (!parsed.sessions || typeof parsed.sessions !== "object") throw new Error("sessions");
-    return parsed;
+    parsed = JSON.parse(raw);
   } catch {
-    return { version: VERSION, sessions: {} };
+    return { ok: false, reason: "json" };
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, reason: "shape" };
+  }
+  if (parsed.version !== VERSION) return { ok: false, reason: "version" };
+  if (!parsed.sessions || typeof parsed.sessions !== "object" || Array.isArray(parsed.sessions)) {
+    return { ok: false, reason: "sessions" };
+  }
+  return { ok: true, sessions: parsed.sessions };
+}
+
+// Unlike index.json this file is authoritative — it is the only copy of the plans — so it
+// is never rebuilt from anything. This only guards against a corrupt read. Callers that
+// must act differently on a corrupt read use parseSessionsBlob instead.
+export function readSessions(raw) {
+  const parsed = parseSessionsBlob(raw);
+  return parsed.ok ? { version: VERSION, sessions: parsed.sessions } : { version: VERSION, sessions: {} };
 }
 
 // A session's id is its file name, so it has to be safe as one. Ids are generated from a

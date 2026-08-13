@@ -160,6 +160,29 @@ describe("Catalogue sessions switch", () => {
     expect(html).toMatch(/run this session/i);
   });
 
+  it("reports an unreadable sessions.json without pretending the plans are gone", () => {
+    // An empty session list with no explanation reads as "my plans have vanished". Say
+    // instead that nothing was moved and nothing was renamed.
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", sessions: [],
+      sessionsFailed: [{ id: "BLOB", name: "sessions.json", reason: "blob", error: new Error("x") }],
+    });
+    expect(html).toContain("sessions.json");
+    expect(html).toMatch(/could not be read/i);
+    expect(html).toMatch(/nothing.*(moved|renamed)/i);
+    // Not the generic per-plan banner, which would miscount the blob as one lost plan.
+    expect(html).not.toMatch(/1 session plan could not be loaded/i);
+  });
+
+  it("still reports a plan that failed to download separately from the blob", () => {
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", sessions: [],
+      sessionsFailed: [{ id: "FB", name: "b.json", reason: "read", error: new Error("x") }],
+    });
+    expect(html).toMatch(/1 session plan could not be loaded/i);
+    expect(html).toContain("b.json");
+  });
+
   it("surfaces a sessions save conflict the way the editor does", () => {
     const session = { id: "s1", date: "2026-08-12", squad: "", theme: "", length: 75,
       blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },

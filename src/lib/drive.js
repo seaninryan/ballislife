@@ -6,7 +6,7 @@ import { getAccessToken, ensureFreshToken } from "./driveAuth.js";
 import { readIndex, entryFor, diffIndex, applyDiff } from "./driveIndex.js";
 import { drillsFromIndex, fileNameFor } from "./drills.js";
 import {
-  readSessions, sessionFileName, sessionIdFromFileName, SESSIONS_FOLDER, SESSIONS_INDEX_NAME,
+  parseSessionsBlob, sessionFileName, sessionIdFromFileName, SESSIONS_FOLDER, SESSIONS_INDEX_NAME,
 } from "./sessions.js";
 import {
   readSessionsIndex, diffSessionsIndex, applySessionsDiff, sessionsFromIndex,
@@ -257,9 +257,9 @@ function sessionEntry(name, modifiedTime, text) {
 
 const sessionBody = (id, session) => JSON.stringify({ ...session, id }, null, 2);
 
-// The pre-split blob, split into one file per plan. -> { migrated, entries } where entries
-// are ready-made index entries, since the plans are already in memory and reading back what
-// we just wrote would be a wasted request.
+// The pre-split blob, split into one file per plan. -> { migrated, entries, failed } where
+// entries are ready-made index entries, since the plans are already in memory and reading
+// back what we just wrote would be a wasted request.
 //
 // Only a session with NO file yet is written, never an overwrite: a migration interrupted
 // halfway (or retried by withRetry after a 401) resumes rather than clobbering a per-file
@@ -267,9 +267,34 @@ const sessionBody = (id, session) => JSON.stringify({ ...session, id }, null, 2)
 // migration does not repeat.
 async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) {
   const blob = parentFiles.find((f) => f.name === SESSIONS_NAME) ?? null;
-  if (!blob) return { migrated: 0, entries: {} };
+  if (!blob) return { migrated: 0, entries: {}, failed: [] };
 
-  const { sessions } = readSessions(await api.readFile(token, blob.id));
+  // A blob we cannot read is NOT an empty one. Either way nothing is written and nothing is
+  // renamed, so the blob stays findable by name and a later load — after the owner repairs
+  // it, or the signal comes back — migrates it for real. Reporting it is the other half:
+  // an empty session list with no explanation reads as "my plans are gone".
+  let raw;
+  try {
+    raw = await api.readFile(token, blob.id);
+  } catch (error) {
+    // A 401 must still reach withRetry, which reauths and retries the whole load.
+    if (error?.code === 401) throw error;
+    return { migrated: 0, entries: {}, failed: [{ id: blob.id, name: SESSIONS_NAME, error, reason: "blob" }] };
+  }
+  const parsed = parseSessionsBlob(raw);
+  if (!parsed.ok) {
+    return {
+      migrated: 0,
+      entries: {},
+      failed: [{
+        id: blob.id,
+        name: SESSIONS_NAME,
+        error: new Error(`sessions.json is unreadable (${parsed.reason})`),
+        reason: "blob",
+      }],
+    };
+  }
+  const sessions = parsed.sessions;
   const haveFile = new Set(listing.map((f) => sessionIdFromFileName(f.name)).filter(Boolean));
   const entries = {};
   let unmigrated = 0;
@@ -305,14 +330,16 @@ async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) 
     }
   }
 
-  return { migrated: Object.keys(entries).length, entries };
+  return { migrated: Object.keys(entries).length, entries, failed: [] };
 }
 
 // -> { sessions, meta, migrated, failed }
 //    sessions: { [id]: session }                    the map the app renders
 //    meta:     { [id]: { fileId, modifiedTime } }   per-file conflict baselines
 //    migrated: how many plans came out of the old blob this load
-//    failed:   the files that could not be read, for the same reporting as drills
+//    failed:   [{ id, name, error, reason }] — everything that could not be read, for the
+//              same reporting as drills. `reason` is "read" for a flaky download and
+//              "blob" for a sessions.json that could not be read at all.
 export async function loadSessions(folder) {
   return withRetry(async () => {
     const token = getAccessToken();
@@ -325,14 +352,14 @@ export async function loadSessions(folder) {
       ? readSessionsIndex(await api.readFile(token, indexFile.id))
       : readSessionsIndex(null);
 
-    const { migrated, entries: fromBlob } = await migrateBlob(
+    const { migrated, entries: fromBlob, failed: blobFailed } = await migrateBlob(
       token, folder, sessionsFolder, parentFiles, files,
     );
 
     const { keep, refetch, dropped } = diffSessionsIndex(cached, files);
 
     const built = { ...fromBlob };
-    const failed = [];
+    const failed = [...blobFailed];
     for (const file of refetch) {
       try {
         const text = await api.readFile(token, file.id);

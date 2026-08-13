@@ -68,6 +68,11 @@ export default function Catalogue({
   }
   if (status === "error") return <div className="card banner err">{friendlyError(error)}</div>;
 
+  // The old blob failing to read is not "one plan failed": no plan was lost, and counting
+  // it as one would tell the owner a plan is missing that never existed as a file.
+  const blobUnreadable = sessionsFailed.some((f) => f.reason === "blob");
+  const unloadable = sessionsFailed.filter((f) => f.reason !== "blob");
+
   // The editor takes over the whole view when open — it is not a peer of the grid or
   // the read view, and rendering both at once would mean two sources of truth for the
   // same drill's text.
@@ -167,10 +172,19 @@ export default function Catalogue({
         </div>
       ) : null}
 
-      {sessionsFailed.length ? (
+      {blobUnreadable ? (
+        <div className="banner err">
+          Your old <strong>sessions.json</strong> could not be read, so nothing has been
+          moved out of it and nothing has been renamed. Any plan still only in that file is
+          not listed below yet. It will be tried again next time you reload — if it keeps
+          failing, check the file in Drive.
+        </div>
+      ) : null}
+
+      {unloadable.length ? (
         <div className="banner warn">
-          {sessionsFailed.length} session plan{sessionsFailed.length === 1 ? "" : "s"} could
-          not be loaded: {sessionsFailed.map((f) => f.name).join(", ")}. They will be
+          {unloadable.length} session plan{unloadable.length === 1 ? "" : "s"} could
+          not be loaded: {unloadable.map((f) => f.name).join(", ")}. They will be
           retried next time you reload.
         </div>
       ) : null}

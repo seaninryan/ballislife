@@ -599,6 +599,62 @@ describe("migrating the sessions.json blob", () => {
     expect(Object.keys(sessions).sort()).toEqual(["a", "b"]);
   });
 
+  it("never renames a blob it could not parse, and says so", async () => {
+    // An upload interrupted mid-write leaves exactly this. Renaming it aside would make
+    // the only copy of every plan unfindable by name, so the migration could never retry.
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: '{"version":1,"sessions":{"a":{"id":"a"' },
+    });
+    const { sessions, migrated, failed } = await loadSessions("F1");
+    expect(migrated).toBe(0);
+    expect(sessions).toEqual({});
+    expect(api.renameFile).not.toHaveBeenCalled();
+    expect(failed).toEqual([
+      expect.objectContaining({ name: SESSIONS_NAME, reason: "blob" }),
+    ]);
+  });
+
+  it("never renames a blob it could not download, and says so", async () => {
+    mockSessionsDrive({ parent: [file("BLOB", SESSIONS_NAME, "T0")] });
+    api.readFile.mockRejectedValue(Object.assign(new Error("flaky"), { code: 500 }));
+    const { migrated, failed } = await loadSessions("F1");
+    expect(migrated).toBe(0);
+    expect(api.renameFile).not.toHaveBeenCalled();
+    expect(failed.map((f) => f.reason)).toEqual(["blob"]);
+  });
+
+  it("still renames aside a blob that is genuinely empty", async () => {
+    // "Nothing to move" is a real state — every plan already has its own file — and must
+    // not be confused with "could not read it".
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: blob({}) },
+    });
+    const { migrated, failed } = await loadSessions("F1");
+    expect(migrated).toBe(0);
+    expect(failed).toEqual([]);
+    expect(api.renameFile).toHaveBeenCalledWith("tok", "BLOB", SESSIONS_BACKUP_NAME);
+  });
+
+  it("lets a 401 reading the blob reach the retry rather than reporting it broken", async () => {
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: blob({ a: sess("a") }) },
+    });
+    const good = api.readFile.getMockImplementation();
+    let reads = 0;
+    api.readFile.mockImplementation(async (t, id) => {
+      reads += 1;
+      if (reads === 1) throw Object.assign(new Error("auth"), { code: 401 });
+      return good(t, id);
+    });
+    const { sessions, migrated, failed } = await loadSessions("F1");
+    expect(migrated).toBe(1);
+    expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(failed).toEqual([]);
+  });
+
   it("keeps the blob findable when a plan's id cannot be a file name", async () => {
     // The blob accepted any key; a file name cannot. Renaming the blob away would hide a
     // plan the app has nowhere to show.

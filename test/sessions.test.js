@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  SLOTS, EMPTY, emptySession, readSessions, blockMinutes, resolveBlocks,
+  SLOTS, EMPTY, emptySession, readSessions, parseSessionsBlob, blockMinutes, resolveBlocks,
   totalMinutes, emptySlots, squadRange, fitsSquad, setBlock, moveBlock,
   sessionFileName, sessionIdFromFileName,
 } from "../src/lib/sessions.js";
@@ -162,6 +162,30 @@ describe("readSessions", () => {
     a.sessions.x = 1;
     expect(readSessions("nope").sessions).toEqual({});
     expect(EMPTY.sessions).toEqual({});
+  });
+});
+
+describe("parseSessionsBlob", () => {
+  it("reports the plans when the blob is readable", () => {
+    const raw = JSON.stringify({ version: 1, sessions: { a: { id: "a" } } });
+    expect(parseSessionsBlob(raw)).toEqual({ ok: true, sessions: { a: { id: "a" } } });
+  });
+
+  it("distinguishes a legitimately empty blob from an unreadable one", () => {
+    // The whole point: readSessions answers {} to both, which let the migration decide
+    // there was nothing to move and rename the only copy of every plan aside.
+    expect(parseSessionsBlob('{"version":1,"sessions":{}}')).toEqual({ ok: true, sessions: {} });
+    for (const bad of ["", "x", "null", "[]", '{"version":9}', undefined, "{}",
+      '{"version":1,"sessions":{"a":{"id":"a"}', '{"version":1,"sessions":[]}']) {
+      expect(parseSessionsBlob(bad).ok).toBe(false);
+    }
+  });
+
+  it("says why it could not be read, so the owner can be told something useful", () => {
+    expect(parseSessionsBlob("{{{").reason).toBe("json");
+    expect(parseSessionsBlob("[]").reason).toBe("shape");
+    expect(parseSessionsBlob('{"version":9,"sessions":{}}').reason).toBe("version");
+    expect(parseSessionsBlob('{"version":1}').reason).toBe("sessions");
   });
 });
 
