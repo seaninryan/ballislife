@@ -58,15 +58,18 @@ export function applySessionsDiff(keep, fetched) {
 // app renders plus the per-file conflict baselines.
 //
 // The FILE NAME decides a session's id, and the stored id is overwritten with it: a plan
-// hand-edited so its stored id drifted must not shadow another file's plan. An entry with
-// no session, or one that never had an id, is skipped rather than keyed on a guess.
+// hand-edited so its stored id drifted must not shadow another file's plan. That rule also
+// covers a plan with no stored id at all — the name still names it, and dropping it would
+// make a file the owner can see in Drive vanish from the app. Only something that is not a
+// session object at all (null, a string, an array) is skipped, having nothing to key.
 export function sessionsFromIndex(index) {
   const sessions = {};
   const meta = {};
   for (const [fileId, entry] of Object.entries(index?.entries ?? {})) {
     const id = sessionIdFromFileName(entry?.name);
-    if (!id || !entry.session || !entry.session.id) continue;
-    sessions[id] = { ...entry.session, id };
+    const session = entry?.session;
+    if (!id || !session || typeof session !== "object" || Array.isArray(session)) continue;
+    sessions[id] = { ...session, id };
     meta[id] = { fileId, modifiedTime: entry.modifiedTime };
   }
   return { sessions, meta };

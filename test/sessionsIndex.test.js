@@ -87,16 +87,27 @@ describe("applySessionsDiff / sessionsFromIndex", () => {
     expect(meta.a).toEqual({ fileId: "F1", modifiedTime: "T1" });
   });
 
-  it("skips an entry whose session is missing or has no id, rather than making a bad key", () => {
+  it("skips an entry with nothing that could be a session, rather than making a bad key", () => {
     const index = {
       version: 1,
       entries: {
         F1: entry("a.json", "T1", sess("a")),
         F2: entry("b.json", "T2", null),
-        F3: entry("c.json", "T3", { date: "x" }),
+        F3: entry("c.json", "T3", "not an object"),
+        F4: entry("d.json", "T4", []),
       },
     };
     expect(Object.keys(sessionsFromIndex(index).sessions)).toEqual(["a"]);
+  });
+
+  it("keeps a hand-edited plan that lost its stored id, taking the id from the file name", () => {
+    // The file name is the authority everywhere else in this function, so it has to be here
+    // too: dropping the entry would make a file the owner can see in Drive disappear from
+    // the app with nothing to explain it.
+    const index = { version: 1, entries: { F3: entry("c.json", "T3", { date: "x" }) } };
+    const { sessions, meta } = sessionsFromIndex(index);
+    expect(sessions.c).toEqual({ date: "x", id: "c" });
+    expect(meta.c).toEqual({ fileId: "F3", modifiedTime: "T3" });
   });
 
   it("prefers the id in the file NAME when the stored session disagrees with it", () => {
