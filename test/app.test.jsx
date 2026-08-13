@@ -739,6 +739,37 @@ describe("App session run mode", () => {
     expect(blocks[1].querySelector(".run-block-now-badge")).not.toBeNull();
   });
 
+  it("a hand-edited progress block survives opening the run view", async () => {
+    // The owner reads and edits sessions.json by hand. An entry with no updatedAt used to
+    // be reported upward as {}, which App then saved — deleting his marks.
+    const day = new Date().toISOString().slice(0, 10);
+    drive.loadSessions.mockResolvedValue({
+      fileId: "sess",
+      data: { version: 1, sessions: { s1: {
+        ...runSessionFixture(),
+        progress: { [day]: { marks: { 0: "done", 1: "skipped" } } },
+      } } },
+      modifiedTime: "S1",
+    });
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      const summaries = [...container.querySelectorAll(".run-block-summary")];
+      expect(summaries[0].textContent).toContain("Done");
+      expect(summaries[1].textContent).toContain("Skipped");
+      for (const [arg] of drive.saveSessions.mock.calls) {
+        expect(arg.data.sessions.s1.progress[day].marks).toEqual({ 0: "done", 1: "skipped" });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a mark cleared on the laptop stays cleared when the phone comes back to it", async () => {
     // The reported bug: "every mark cleared" used to be stored exactly like "no marks
     // yet", so the phone's older stamped mark won the merge and the block came back Done.

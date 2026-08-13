@@ -840,6 +840,47 @@ describe("SessionRun progress reconciliation", () => {
     expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-now-badge")).not.toBeNull();
   });
 
+  // The owner reads and hand-edits sessions.json, so an entry he typed himself — with no
+  // stamp, or a stamp we cannot parse — must still be shown and must above all SURVIVE.
+  // Reporting {} upward for it made App save the session with the entry emptied out.
+  describe("a hand-edited progress entry", () => {
+    const cases = {
+      "no updatedAt at all": { marks: { 0: DONE, 1: SKIPPED } },
+      "an unparseable updatedAt": { marks: { 0: DONE, 1: SKIPPED }, updatedAt: "last night" },
+      "a numeric updatedAt": { marks: { 0: DONE, 1: SKIPPED }, updatedAt: 1770000000000 },
+      "a date-only updatedAt": { marks: { 0: DONE, 1: SKIPPED }, updatedAt: "2026-08-13" },
+    };
+
+    for (const [label, entry] of Object.entries(cases)) {
+      it(`with ${label} is shown, and is never overwritten from this device`, () => {
+        const onProgress = vi.fn();
+        const s = { ...session(twoBlocks()), progress: { "2026-08-13": entry } };
+        mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
+        const summaries = [...container.querySelectorAll(".run-block-summary")];
+        expect(summaries[0].textContent).toContain("Done");
+        expect(summaries[1].textContent).toContain("Skipped");
+        // Nothing reported means App writes nothing, which is what keeps the file intact.
+        expect(onProgress.mock.calls.filter(([, marks]) => Object.keys(marks).length === 0))
+          .toEqual([]);
+      });
+    }
+
+    it("stays intact when this device's own marks are unstamped too", () => {
+      // An entry written before stamps existed wins on screen here, but has nothing to
+      // prove it is newer, so it must stay silent until the next tap stamps it.
+      localStorage.setItem("ballislife_progress", JSON.stringify({
+        s1: { date: "2026-08-13", marks: { 1: DONE } },
+      }));
+      const onProgress = vi.fn();
+      const s = { ...session(twoBlocks()), progress: {
+        "2026-08-13": { marks: { 0: DONE, 1: SKIPPED } },
+      } };
+      mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
+      expect([...container.querySelectorAll(".run-block-summary")][1].textContent).toContain("Done");
+      expect(onProgress).not.toHaveBeenCalled();
+    });
+  });
+
   it("works with no onProgress at all, exactly as before", () => {
     const s = session(twoBlocks());
     mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13" });
