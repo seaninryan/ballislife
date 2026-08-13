@@ -24,23 +24,30 @@ export { friendlyError };
 // one he can never resolve, and the plan stays unsaved meanwhile. What used to make the
 // prompt safe (only offering it on the plan on screen) is kept by naming the plan in the
 // banner and on both buttons: "Keep mine" writes one file, and it must be obvious which.
-function SessionsSaveBanner({ status, error, conflicts = [], onKeepMine, onReload }) {
+// `resolving` is the plans whose Reload is still on the wire. Both buttons go dead for that
+// plan while it is, and say so: a round trip on a bad connection looks like nothing happened,
+// and answering the same conflict twice writes one version and then displays another.
+function SessionsSaveBanner({ status, error, conflicts = [], resolving = [], onKeepMine, onReload }) {
   return (
     <>
-      {conflicts.map((c) => (
-        <div className="banner warn" key={c.id}>
-          The plan for <strong>{c.label}</strong> changed in Drive since you opened it. Your
-          edit to it is safe and has not been overwritten — choose which version to keep.
-          <div className="row" style={{ marginTop: 6 }}>
-            <button type="button" className="primary" onClick={() => onKeepMine?.(c.id)}>
-              Keep mine ({c.label})
-            </button>
-            <button type="button" onClick={() => onReload?.(c.id)}>
-              Reload Drive’s version ({c.label})
-            </button>
+      {conflicts.map((c) => {
+        const busy = resolving.includes(c.id);
+        return (
+          <div className="banner warn" key={c.id}>
+            The plan for <strong>{c.label}</strong> changed in Drive since you opened it. Your
+            edit to it is safe and has not been overwritten — choose which version to keep.
+            <div className="row" style={{ marginTop: 6 }}>
+              <button type="button" className="primary" disabled={busy} onClick={() => onKeepMine?.(c.id)}>
+                Keep mine ({c.label})
+              </button>
+              <button type="button" disabled={busy} onClick={() => onReload?.(c.id)}>
+                Reload Drive’s version ({c.label})
+              </button>
+              {busy ? <span className="dim">Fetching Drive’s version…</span> : null}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       {status === "failed" ? (
         <div className="banner err">
           Could not save: {friendlyError(error)} Your edit is still here and will be
@@ -60,7 +67,8 @@ export default function Catalogue({
   mode = "drills", onModeChange,
   sessions = [], selectedSession, onOpenSession, onCreateSession,
   onSessionChange, onSessionBack, onDeleteSession,
-  sessionsStatus, sessionsError, sessionsConflicts = [], onKeepMineSessions, onReloadSessions,
+  sessionsStatus, sessionsError, sessionsConflicts = [], sessionsResolving = [],
+  onKeepMineSessions, onReloadSessions,
   sessionsMigrated = 0, sessionsFailed = [], sessionsUnmigrated = [], sessionsLoadError,
   runSession, runTexts, onOpenRun, onRunBack, onRunSwap, onRunProgress,
 }) {
@@ -107,6 +115,7 @@ export default function Catalogue({
       status={sessionsStatus}
       error={sessionsError}
       conflicts={sessionsConflicts}
+      resolving={sessionsResolving}
       onKeepMine={onKeepMineSessions}
       onReload={onReloadSessions}
     />

@@ -251,11 +251,31 @@ export default function App() {
     scheduleSessionsSave();
   }, [setSessionsState, scheduleSessionsSave]);
 
+  // Plans with a Reload on the wire. Both resolutions write — Keep mine writes to Drive,
+  // Reload writes Drive's version over what is on this device — so answering one plan twice
+  // while the first answer is still travelling makes the app show a version Drive does not
+  // have, or overwrites the one it has just taken. Only one answer per plan is accepted at a
+  // time, and the banner says which plan is working rather than looking inert.
+  const [sessionsResolving, setSessionsResolving] = useState([]);
+  const resolving = useRef(new Set());
+  const beginResolve = useCallback((id) => {
+    if (resolving.current.has(id)) return false;
+    resolving.current.add(id);
+    setSessionsResolving([...resolving.current]);
+    return true;
+  }, []);
+  const endResolve = useCallback((id) => {
+    resolving.current.delete(id);
+    setSessionsResolving([...resolving.current]);
+  }, []);
+
   // Resolves ONE plan's conflict: "Keep mine" writes one file, so it is always answered
   // about the plan the banner names, never about whatever else is conflicted too.
   const onKeepMineSessions = useCallback((id) => {
     const cur = sessionsStateRef.current;
     if (!cur.conflicts.includes(id)) return;
+    // Answering this plan's conflict is already in progress; that answer wins.
+    if (resolving.current.has(id)) return;
     // This id's baseline was already moved to Drive's current value when the conflict was
     // reported, so dropping it from `conflicts` is enough for the next flush to send our
     // plan and win.
@@ -276,8 +296,16 @@ export default function App() {
   // but only the named plan is applied.
   const onReloadSessions = useCallback(async (id) => {
     if (!id) return;
-    const { sessions, meta, migrated, failed: unreadable, unmigrated } =
-      await loadSessions(folderRef.current);
+    // Also what stops a double tap issuing two concurrent loads, each rewriting the index and
+    // each landing into the state after the other.
+    if (!beginResolve(id)) return;
+    let loaded;
+    try {
+      loaded = await loadSessions(folderRef.current);
+    } finally {
+      endResolve(id);
+    }
+    const { sessions, meta, migrated, failed: unreadable, unmigrated } = loaded;
     const cur = sessionsStateRef.current;
     const nextSessions = { ...cur.data.sessions };
     const nextMeta = { ...cur.meta };
@@ -299,7 +327,7 @@ export default function App() {
     // banner on screen about a state this read has just replaced.
     setSessionsUnmigrated(unmigrated ?? []);
     setSessionsLoadError(null);
-  }, [setSessionsState]);
+  }, [setSessionsState, beginResolve, endResolve]);
 
   useEffect(() => () => clearTimeout(sessionsSaveTimer.current), []);
 
@@ -801,6 +829,7 @@ export default function App() {
         sessionsFailed={sessionsFailed}
         sessionsUnmigrated={sessionsUnmigrated}
         sessionsLoadError={sessionsLoadError}
+        sessionsResolving={sessionsResolving}
         onKeepMineSessions={onKeepMineSessions}
         onReloadSessions={onReloadSessions}
         runSession={runSession}

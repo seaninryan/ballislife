@@ -789,6 +789,57 @@ describe("App sessions", () => {
       expect(drive.loadSessions).toHaveBeenCalledTimes(1);
     });
 
+    // Reload takes a whole round trip on his connection, during which nothing visibly
+    // happened and both buttons stayed live.
+    const conflictOnS1 = async () => {
+      drive.saveSession.mockResolvedValue({ ok: false, conflict: true, id: "s1", modifiedTime: "S9" });
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(banners()).toContain("2026-08-12");
+    };
+
+    it("says a Reload is working, and will not let Keep mine race it", async () => {
+      // Both resolutions write — Keep mine to Drive, Reload to this device — so answering
+      // twice wrote the local version to Drive and then displayed Drive's PRE-write version
+      // as clean: content Drive does not have, and a spurious conflict on the next edit.
+      await conflictOnS1();
+      let release;
+      drive.loadSessions.mockImplementation(() => new Promise((resolve) => {
+        release = () => resolve(sessionsLoad({ s1: initial() }));
+      }));
+
+      await act(async () => { conflictButton("Reload", "2026-08-12").click(); });
+      expect(banners()).toMatch(/fetching drive/i);
+
+      await act(async () => { conflictButton("Keep mine", "2026-08-12").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1); // the local version was not written
+
+      await act(async () => { release(); await vi.advanceTimersByTimeAsync(900); });
+      // Drive's version landed, the conflict is answered, and nothing else was sent.
+      expect(banners()).not.toContain("2026-08-12");
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+      expect(minutesInput().value).toBe("");
+    });
+
+    it("double-tapping Reload loads once, not twice", async () => {
+      await conflictOnS1();
+      let release;
+      drive.loadSessions.mockImplementation(() => new Promise((resolve) => {
+        release = () => resolve(sessionsLoad({ s1: initial() }));
+      }));
+
+      await act(async () => { conflictButton("Reload", "2026-08-12").click(); });
+      await act(async () => { conflictButton("Reload", "2026-08-12").click(); });
+
+      // Once on mount, once for the tap that took effect. Two concurrent loads would each
+      // rewrite the index and race each other into the state.
+      expect(drive.loadSessions).toHaveBeenCalledTimes(2);
+      await act(async () => { release(); });
+    });
+
     it("a reload clears the banners the previous load left behind", async () => {
       drive.loadSessions.mockResolvedValueOnce(sessionsLoad(
         { s1: initial() },
