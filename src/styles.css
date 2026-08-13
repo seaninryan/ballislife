@@ -246,13 +246,17 @@ textarea, input, select {
 /* The thumbnail is a fixed box, and the text wraps inside its own: at 390px a
    percentage-width thumbnail left the title breaking one word per line. The same
    8/5 aspect ratio as the card grid keeps rows level whether the drill is a square
-   20x20 rondo or a half pitch, and 40px tall keeps the row inside a thumb's reach. */
+   20x20 rondo or a half pitch.
+
+   84px, not the 64px this started at: rendered side by side, 64px reduced the cones and
+   pass lines to mush, and telling one drill from another by its shape is the entire
+   point of the thumbnail. The cost is one fewer row visible in the scrolling list. */
 .drill-picker-option-body {
   flex: 1 1 160px; min-width: 0;
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
 }
 .drill-picker-thumb {
-  flex: 0 0 64px; aspect-ratio: 8 / 5; overflow: hidden; border-radius: 6px;
+  flex: 0 0 84px; aspect-ratio: 8 / 5; overflow: hidden; border-radius: 6px;
   background: var(--grass); display: flex; align-items: center; justify-content: center;
 }
 /* PitchDiagram wraps its svg in a div, so the svg needs a parent with a definite
