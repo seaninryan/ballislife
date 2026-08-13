@@ -15,6 +15,33 @@ import { friendlyError } from "../lib/errors.js";
 // use it too without a circular import (Catalogue renders Editor).
 export { friendlyError };
 
+// The sessions file is saved from two places now — the builder and, via progress marks,
+// the run view. A save that fails at the side of a pitch must say so there rather than
+// only on the screen the coach is not looking at.
+function SessionsSaveBanner({ status, error, onKeepMine, onReload }) {
+  if (status === "conflict") {
+    return (
+      <div className="banner warn">
+        This plan changed in Drive since you opened it. Your edit is safe and still
+        below — choose which version to keep.
+        <div className="row" style={{ marginTop: 6 }}>
+          <button type="button" className="primary" onClick={onKeepMine}>Keep mine</button>
+          <button type="button" onClick={onReload}>Reload Drive’s version</button>
+        </div>
+      </div>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <div className="banner err">
+        Could not save: {friendlyError(error)} Your edit is still here and will be
+        retried when you change something again.
+      </div>
+    );
+  }
+  return null;
+}
+
 export default function Catalogue({
   status, drills = [], failed = [], error, onSignIn,
   filter = {}, onFilterChange, selected, drillStatus, drillText, drillError,
@@ -25,7 +52,7 @@ export default function Catalogue({
   sessions = [], selectedSession, onOpenSession, onCreateSession,
   onSessionChange, onSessionBack, onDeleteSession,
   sessionsStatus, sessionsError, onKeepMineSessions, onReloadSessions,
-  runSession, runTexts, onOpenRun, onRunBack, onRunSwap,
+  runSession, runTexts, onOpenRun, onRunBack, onRunSwap, onRunProgress,
 }) {
   if (status === "signed-out") {
     return (
@@ -60,13 +87,22 @@ export default function Catalogue({
   // a session is opened to run, that is the only thing on screen until "Back to plan".
   if (runSession) {
     return (
-      <SessionRun
-        session={runSession}
-        drills={drills}
-        texts={runTexts}
-        onBack={onRunBack}
-        onSwap={onRunSwap}
-      />
+      <div>
+        <SessionsSaveBanner
+          status={sessionsStatus}
+          error={sessionsError}
+          onKeepMine={onKeepMineSessions}
+          onReload={onReloadSessions}
+        />
+        <SessionRun
+          session={runSession}
+          drills={drills}
+          texts={runTexts}
+          onBack={onRunBack}
+          onSwap={onRunSwap}
+          onProgress={onRunProgress}
+        />
+      </div>
     );
   }
 
@@ -76,22 +112,12 @@ export default function Catalogue({
   if (selectedSession) {
     return (
       <div>
-        {sessionsStatus === "conflict" ? (
-          <div className="banner warn">
-            This plan changed in Drive since you opened it. Your edit is safe and still
-            below — choose which version to keep.
-            <div className="row" style={{ marginTop: 6 }}>
-              <button type="button" className="primary" onClick={onKeepMineSessions}>Keep mine</button>
-              <button type="button" onClick={onReloadSessions}>Reload Drive’s version</button>
-            </div>
-          </div>
-        ) : null}
-        {sessionsStatus === "failed" ? (
-          <div className="banner err">
-            Could not save: {friendlyError(sessionsError)} Your edit is still here and will
-            be retried when you change something again.
-          </div>
-        ) : null}
+        <SessionsSaveBanner
+          status={sessionsStatus}
+          error={sessionsError}
+          onKeepMine={onKeepMineSessions}
+          onReload={onReloadSessions}
+        />
         <SessionBuilder
           session={selectedSession}
           drills={drills}

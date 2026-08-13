@@ -9,6 +9,7 @@ import {
 } from "./lib/drive.js";
 import { openEditor, reduce, shouldSave } from "./lib/editor.js";
 import { emptySession, resolveBlocks, setBlock } from "./lib/sessions.js";
+import { withSessionProgress } from "./lib/progress.js";
 import { parseHash, formatHash } from "./lib/route.js";
 
 const SAVE_DEBOUNCE_MS = 900;
@@ -436,6 +437,16 @@ export default function App() {
     fetchRunText(drill, runRequestSeq.current);
   }, [runSessionId, drills, onSessionChange, fetchRunText]);
 
+  // A mark from the run view. Same path as any other session edit — merge into the
+  // sessions map, schedule the debounced save — so tonight's progress reaches Drive and
+  // the laptop. The run view's own localStorage write has already made it durable on
+  // this device whether or not this succeeds.
+  const onRunProgress = useCallback((day, marks, updatedAt) => {
+    const sess = sessionsStateRef.current.data.sessions[runSessionId];
+    if (!sess) return;
+    onSessionChange(withSessionProgress(sess, day, marks, updatedAt));
+  }, [runSessionId, onSessionChange]);
+
   // Back to the plan = the builder for the session that was just being run, not the
   // session list — running is a detour from editing, not a replacement for it.
   const onRunBack = useCallback(() => {
@@ -620,6 +631,7 @@ export default function App() {
         onOpenRun={openRun}
         onRunBack={onRunBack}
         onRunSwap={onRunSwap}
+        onRunProgress={onRunProgress}
       />
     </div>
   );

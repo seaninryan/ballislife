@@ -647,6 +647,66 @@ describe("App session run mode", () => {
     expect(container.textContent).not.toContain("Loading…");
   });
 
+  it("a mark made during a run is saved into the session's progress", async () => {
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      await act(async () => { findButton("Done").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      const saved = drive.saveSessions.mock.calls.at(-1)[0];
+      // Keyed by the day the run happened, which is today — NOT the session's planned
+      // date (2026-08-12), so re-running this plan another day starts clean.
+      const days = Object.keys(saved.data.sessions.s1.progress);
+      expect(days).toHaveLength(1);
+      expect(saved.data.sessions.s1.progress[days[0]].marks).toEqual({ 0: "done" });
+      expect(saved.data.sessions.s1.progress[days[0]].updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("progress made on another device shows when the run view opens", async () => {
+    drive.loadSessions.mockResolvedValue({
+      fileId: "sess",
+      data: { version: 1, sessions: { s1: {
+        ...runSessionFixture(),
+        progress: { [new Date().toISOString().slice(0, 10)]: {
+          marks: { 0: "done" }, updatedAt: new Date().toISOString(),
+        } },
+      } } },
+      modifiedTime: "S1",
+    });
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    const first = container.querySelectorAll(".run-block")[0];
+    expect(first.querySelector(".run-block-summary").textContent).toContain("Done");
+  });
+
+  it("a failed save is visible from the run view, not only from the builder", async () => {
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    drive.saveSessions.mockResolvedValue({ ok: false, error: new Error("offline") });
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      await act(async () => { findButton("Done").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(container.textContent).toMatch(/could not save/i);
+      // And the mark itself is still on screen: localStorage took it regardless.
+      expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-summary").textContent)
+        .toContain("Done");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("returns to the builder from Back to plan even when run mode was entered directly via the /run hash (not through a click)", async () => {
     // Mirrors the owner's report as closely as this harness allows: land on the run
     // view via #/session/<id>/run directly — the same route the report's address bar
