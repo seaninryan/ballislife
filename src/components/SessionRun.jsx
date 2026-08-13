@@ -19,7 +19,7 @@ import DrillPreview from "./DrillPreview.jsx";
 import DrillPicker from "./DrillPicker.jsx";
 import {
   DONE, SKIPPED, readProgress, localProgress, writeProgress, mark, reopen, currentIndex,
-  counts, sessionProgress, mergeProgress, sameMarks,
+  counts, sessionProgress, mergeProgress, sameMarks, blockKey, migrateMarks,
 } from "../lib/progress.js";
 
 const storage = () => (typeof window !== "undefined" ? window.localStorage : null);
@@ -156,7 +156,14 @@ export default function SessionRun({
   // against session B's blocks, and the next persist would write A's marks under B's
   // key. Everything below is scoped to one session on one night, so it all reloads
   // together when either changes.
-  const [marks, setMarks] = useState(() => readProgress(storage(), session?.id, day));
+  // Every read of either store goes through a migration: marks written before v0.10 are
+  // keyed by block index, and a mark must land on the drill it was made against even if
+  // the plan has been reordered since. One helper per store so the migration cannot be
+  // forgotten at one of the four places a store is read.
+  const readLocalMarks = () => migrateMarks(readProgress(storage(), session?.id, day), blocks);
+  const readSide = (side) => (side ? { ...side, marks: migrateMarks(side.marks, blocks) } : side);
+
+  const [marks, setMarks] = useState(readLocalMarks);
   // Blocks opened by hand to look back or peek ahead, independent of what is marked.
   // The current block is always open regardless of this set.
   const [opened, setOpened] = useState(() => new Set());
@@ -175,7 +182,7 @@ export default function SessionRun({
     // re-render happens before anything is committed, rather than showing the wrong
     // session's progress for one frame and then correcting it in an effect.
     setShownKey(progressKey);
-    setMarks(readProgress(storage(), session?.id, day));
+    setMarks(readLocalMarks());
     setOpened(new Set());
     setPicking(null);
   }
@@ -189,12 +196,12 @@ export default function SessionRun({
   // It cannot loop: reporting upward makes App write those same marks into the session,
   // which re-renders this component, at which point sameMarks finds the two sides in
   // agreement and nothing further happens.
-  const remote = sessionProgress(session, day);
+  const remote = readSide(sessionProgress(session, day));
   const remoteKey = remote ? `${remote.updatedAt} ${JSON.stringify(remote.marks)}` : "";
   useEffect(() => {
     // localProgress, not readProgress: null here means this device has nothing for tonight,
     // which must not be confused with this device having deliberately cleared everything.
-    const local = localProgress(storage(), session?.id, day);
+    const local = readSide(localProgress(storage(), session?.id, day));
     // `now` goes in so mergeProgress can disbelieve a stamp far in the future, and so a
     // test with an injected clock is judged against that clock rather than the real one.
     const winner = mergeProgress(local, remote, Date.parse(now()));
@@ -220,8 +227,8 @@ export default function SessionRun({
     // callback. Neither can change who wins.
   }, [session?.id, day, remoteKey]);
 
-  const current = currentIndex(marks, blocks.length);
-  const { done, skipped, remaining } = counts(marks, blocks.length);
+  const current = currentIndex(marks, blocks);
+  const { done, skipped, remaining } = counts(marks, blocks);
 
   // localStorage first and synchronously: marking a drill done must never wait on signal
   // or be able to fail. Reporting upward is what eventually reaches Drive, on App's
@@ -247,24 +254,27 @@ export default function SessionRun({
   // no longer even open, so peeking it back later showed the picker instead of the drill.
   const stopPicking = (index) => setPicking((cur) => (cur === index ? null : cur));
 
-  const handleMark = (index, state) => {
-    persist(mark(marks, index, state));
+  // Both an index and a key: the index drives `opened`/`picking` and the accordion, the
+  // key drives `marks`. They are not interchangeable — that conflation was the bug.
+  const handleMark = (index, key, state) => {
+    persist(mark(marks, key, state));
     stopPicking(index);
     collapse(index);
   };
 
-  const handleReopen = (index) => {
-    persist(reopen(marks, index));
+  const handleReopen = (index, key) => {
+    persist(reopen(marks, key));
     stopPicking(index);
     collapse(index);
   };
 
   // A swap replaces the work, so whatever was marked no longer refers to anything that
   // happened — clear it. App owns the write to the plan itself; this component only
-  // reports the choice and cleans up tonight's progress for that block.
-  const handlePick = (index, drill) => {
+  // reports the choice and cleans up tonight's progress for that block. The slot keeps its
+  // key across a swap, so the mark to clear is the one under that key.
+  const handlePick = (index, key, drill) => {
     setPicking(null);
-    persist(reopen(marks, index));
+    persist(reopen(marks, key));
     onSwap?.(index, drill.slug);
   };
 
@@ -285,6 +295,7 @@ export default function SessionRun({
   const rows = blocks.map((block, index) => {
     const isCurrent = index === current;
     const isOpen = isCurrent || opened.has(index);
+    const markKey = blockKey(block, index);
     return (
       <RunBlock
         key={block.slot}
@@ -293,16 +304,16 @@ export default function SessionRun({
         today={day}
         isOpen={isOpen}
         isCurrent={isCurrent}
-        state={marks[index]}
+        state={marks[markKey]}
         picking={picking === index}
         canSwap={Boolean(onSwap)}
         turnout={Number.isFinite(session?.turnout) ? session.turnout : undefined}
         drills={drills}
         onSwapToggle={() => setPicking((cur) => (cur === index ? null : index))}
-        onPick={(drill) => handlePick(index, drill)}
-        onDone={() => handleMark(index, DONE)}
-        onSkip={() => handleMark(index, SKIPPED)}
-        onReopen={() => handleReopen(index)}
+        onPick={(drill) => handlePick(index, markKey, drill)}
+        onDone={() => handleMark(index, markKey, DONE)}
+        onSkip={() => handleMark(index, markKey, SKIPPED)}
+        onReopen={() => handleReopen(index, markKey)}
         onToggle={() => handleToggle(index)}
       />
     );

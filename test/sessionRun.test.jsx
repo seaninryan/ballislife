@@ -162,7 +162,7 @@ describe("SessionRun accordion (static shape)", () => {
       a: { status: "ready", text: drillText("Rondo") },
       b: { status: "ready", text: drillText("Possession") },
     };
-    writeProgress(localStorage, "settled-summary", "2026-08-12", { 0: DONE });
+    writeProgress(localStorage, "settled-summary", "2026-08-12", { warmup: DONE });
     const html = render({ session: s, drills, texts, today: "2026-08-12" });
     expect(html).toMatch(/done/i);
     expect(html).toMatch(/not done/i);
@@ -177,7 +177,7 @@ describe("SessionRun accordion (static shape)", () => {
       { slot: "tactical", drill: "c", minutes: 20, note: "" },
     ], "counts-summary");
     const drills = [drill("a", "Rondo"), drill("b", "Possession"), drill("c", "Shape")];
-    writeProgress(localStorage, "counts-summary", "2026-08-12", { 0: DONE, 1: SKIPPED });
+    writeProgress(localStorage, "counts-summary", "2026-08-12", { warmup: DONE, skill: SKIPPED });
     const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
     expect(html).toMatch(/1\D+done/i);
     expect(html).toMatch(/1\D+skipped/i);
@@ -190,7 +190,7 @@ describe("SessionRun accordion (static shape)", () => {
       { slot: "skill", drill: "b", minutes: 15, note: "" },
     ], "finished");
     const drills = [drill("a", "Rondo"), drill("b", "Possession")];
-    writeProgress(localStorage, "finished", "2026-08-12", { 0: DONE, 1: SKIPPED });
+    writeProgress(localStorage, "finished", "2026-08-12", { warmup: DONE, skill: SKIPPED });
     const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
     expect(html).toMatch(/finished/i);
     expect(html).toMatch(/start over/i);
@@ -226,7 +226,7 @@ describe("SessionRun accordion (static shape)", () => {
       "not-done-weight",
     );
     const drills = [drill("a", "Rondo"), drill("b", "Possession")];
-    writeProgress(localStorage, "not-done-weight", "2026-08-12", { 0: DONE });
+    writeProgress(localStorage, "not-done-weight", "2026-08-12", { warmup: DONE });
     const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
     expect(html).toMatch(/class="chip-button"[^>]*>Not done</);
   });
@@ -237,7 +237,7 @@ describe("SessionRun accordion (static shape)", () => {
       { slot: "skill", drill: "b", minutes: 15, note: "" },
     ], "chip-colour");
     const drills = [drill("a", "Rondo"), drill("b", "Possession")];
-    writeProgress(localStorage, "chip-colour", "2026-08-12", { 0: DONE, 1: SKIPPED });
+    writeProgress(localStorage, "chip-colour", "2026-08-12", { warmup: DONE, skill: SKIPPED });
     const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
     expect(html).toMatch(/class="chip ok-chip"[^>]*>Done</);
     expect(html).toMatch(/class="chip warn-chip"[^>]*>Skipped</);
@@ -573,7 +573,7 @@ describe("SessionRun swapping a drill", () => {
   it("clears the block's mark: a swapped drill was never done", () => {
     // Block 0 marked done, so block 1 is current. Peek block 0 open and swap its drill:
     // its "Done" chip must go, and block 0 becomes current again.
-    writeProgress(localStorage, "s1", "2026-08-13", { 0: DONE });
+    writeProgress(localStorage, "s1", "2026-08-13", { warmup: DONE });
     mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {}, today: "2026-08-13" });
     act(() => { container.querySelectorAll(".run-block-summary")[0].click(); });
     act(() => { findButton("Swap").click(); });
@@ -612,7 +612,7 @@ describe("SessionRun swapping a drill", () => {
   it("un-marking a block while its picker is open leaves it showing the drill, not the picker", () => {
     // Same stranding as Done, from the other direction: Not done re-settles the block
     // and collapses it, so it too has stopped choosing.
-    writeProgress(localStorage, "s1", "2026-08-13", { 0: DONE });
+    writeProgress(localStorage, "s1", "2026-08-13", { warmup: DONE });
     mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {}, today: "2026-08-13" });
     act(() => { container.querySelectorAll(".run-block-summary")[0].click(); }); // peek block 0
     act(() => { findButton("Swap").click(); });
@@ -680,7 +680,7 @@ describe("SessionRun handed a different session", () => {
   const summaries = () => [...container.querySelectorAll(".run-block-summary")];
 
   it("shows the new session's progress, not the old session's", () => {
-    writeProgress(localStorage, "s1", DAY, { 0: DONE, 1: SKIPPED });
+    writeProgress(localStorage, "s1", DAY, { warmup: DONE, skill: SKIPPED });
     show({ session: sessionA() });
     expect(summaries()[0].textContent).toContain("Done");
 
@@ -691,12 +691,12 @@ describe("SessionRun handed a different session", () => {
   });
 
   it("writes a mark under the new session's key, leaving the old session's untouched", () => {
-    writeProgress(localStorage, "s1", DAY, { 1: SKIPPED });
+    writeProgress(localStorage, "s1", DAY, { skill: SKIPPED });
     show({ session: sessionA() });
     show({ session: sessionB() });
     act(() => { [...container.querySelectorAll("button")].find((b) => b.textContent === "Done").click(); });
-    expect(readProgress(localStorage, "s2", DAY)).toEqual({ 0: DONE });
-    expect(readProgress(localStorage, "s1", DAY)).toEqual({ 1: SKIPPED });
+    expect(readProgress(localStorage, "s2", DAY)).toEqual({ warmup: DONE });
+    expect(readProgress(localStorage, "s1", DAY)).toEqual({ skill: SKIPPED });
   });
 
   it("drops what was peeked open and any half-finished swap", () => {
@@ -724,7 +724,7 @@ describe("SessionRun handed a different session", () => {
       vi.setSystemTime(new Date("2026-08-14T00:01:00.000Z"));
       show({ session: sessionA(), today: undefined });
       expect(summaries()[0].textContent).toContain("Done");
-      expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 0: DONE });
+      expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ warmup: DONE });
       expect(readProgress(localStorage, "s1", "2026-08-14")).toEqual({});
     } finally {
       vi.useRealTimers();
@@ -732,7 +732,7 @@ describe("SessionRun handed a different session", () => {
   });
 
   it("reloads progress when the day changes under the same session", () => {
-    writeProgress(localStorage, "s1", DAY, { 0: DONE });
+    writeProgress(localStorage, "s1", DAY, { warmup: DONE });
     show({ session: sessionA() });
     expect(summaries()[0].textContent).toContain("Done");
     show({ session: sessionA(), today: "2026-08-14" }); // a new night, nothing settled
@@ -780,7 +780,7 @@ describe("SessionRun progress reconciliation", () => {
 
   it("shows marks that were made on another device", () => {
     const s = { ...session(twoBlocks()), progress: {
-      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+      "2026-08-13": { marks: { warmup: DONE }, updatedAt: at("19:00") },
     } };
     mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress: () => {}, now });
     const blocks = container.querySelectorAll(".run-block");
@@ -790,29 +790,29 @@ describe("SessionRun progress reconciliation", () => {
 
   it("writes those marks to this device too, so it works offline from then on", () => {
     const s = { ...session(twoBlocks()), progress: {
-      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+      "2026-08-13": { marks: { warmup: DONE }, updatedAt: at("19:00") },
     } };
     mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress: () => {}, now });
-    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 0: DONE });
+    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ warmup: DONE });
   });
 
   it("a newer local mark wins over the session's, and is reported so Drive catches up", () => {
-    writeProgress(localStorage, "s1", "2026-08-13", { 0: SKIPPED }, at("20:00"));
+    writeProgress(localStorage, "s1", "2026-08-13", { warmup: SKIPPED }, at("20:00"));
     const onProgress = vi.fn();
     const s = { ...session(twoBlocks()), progress: {
-      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+      "2026-08-13": { marks: { warmup: DONE }, updatedAt: at("19:00") },
     } };
     mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
     expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-summary").textContent)
       .toContain("Skipped");
-    expect(onProgress).toHaveBeenCalledWith("2026-08-13", { 0: SKIPPED }, at("20:00"));
+    expect(onProgress).toHaveBeenCalledWith("2026-08-13", { warmup: SKIPPED }, at("20:00"));
   });
 
   it("reports nothing when both sides already agree", () => {
-    writeProgress(localStorage, "s1", "2026-08-13", { 0: DONE }, at("19:00"));
+    writeProgress(localStorage, "s1", "2026-08-13", { warmup: DONE }, at("19:00"));
     const onProgress = vi.fn();
     const s = { ...session(twoBlocks()), progress: {
-      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+      "2026-08-13": { marks: { warmup: DONE }, updatedAt: at("19:00") },
     } };
     mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
     expect(onProgress).not.toHaveBeenCalled();
@@ -823,11 +823,11 @@ describe("SessionRun progress reconciliation", () => {
     const s = session(twoBlocks());
     mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
     act(() => { findButton("Done").click(); });
-    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { 0: DONE }, at("21:00"));
+    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { warmup: DONE }, at("21:00"));
     act(() => { findButton("Skip").click(); });
-    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { 0: DONE, 1: SKIPPED }, at("21:00"));
+    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { warmup: DONE, skill: SKIPPED }, at("21:00"));
     act(() => { findButton("Not done").click(); });
-    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { 1: SKIPPED }, at("21:00"));
+    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { skill: SKIPPED }, at("21:00"));
   });
 
   it("settles rather than looping when the session prop comes back with what was reported", () => {
@@ -858,8 +858,8 @@ describe("SessionRun progress reconciliation", () => {
     // skipped altogether — asserting only that block 0 is current proved neither.
     const onProgress = vi.fn();
     const s = { ...session(twoBlocks()), progress: {
-      "2026-08-12": { marks: { 0: DONE, 1: DONE }, updatedAt: at("19:00") },
-      "2026-08-13": { marks: { 1: SKIPPED }, updatedAt: at("20:00") },
+      "2026-08-12": { marks: { warmup: DONE, skill: DONE }, updatedAt: at("19:00") },
+      "2026-08-13": { marks: { skill: SKIPPED }, updatedAt: at("20:00") },
     } };
     mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
     const summaries = [...container.querySelectorAll(".run-block-summary")];
@@ -867,7 +867,7 @@ describe("SessionRun progress reconciliation", () => {
     expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-now-badge")).not.toBeNull();
     expect(summaries[1].textContent).toContain("Skipped");
     // Tonight's marks were adopted onto this device; yesterday's were not written anywhere.
-    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 1: SKIPPED });
+    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ skill: SKIPPED });
     expect(readProgress(localStorage, "s1", "2026-08-12")).toEqual({});
     expect(onProgress).not.toHaveBeenCalled();
   });
@@ -875,15 +875,15 @@ describe("SessionRun progress reconciliation", () => {
   it("adopts the other device's marks even when this device's clock is wildly fast", () => {
     // A local stamp in 2027 beat every real stamp forever, so the other device could never
     // be adopted and the stale local marks were re-reported on every reconcile.
-    writeProgress(localStorage, "s1", "2026-08-13", { 0: SKIPPED }, "2027-01-01T00:00:00.000Z");
+    writeProgress(localStorage, "s1", "2026-08-13", { warmup: SKIPPED }, "2027-01-01T00:00:00.000Z");
     const onProgress = vi.fn();
     const s = { ...session(twoBlocks()), progress: {
-      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("20:00") },
+      "2026-08-13": { marks: { warmup: DONE }, updatedAt: at("20:00") },
     } };
     mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
     expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-summary").textContent)
       .toContain("Done");
-    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 0: DONE });
+    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ warmup: DONE });
     expect(onProgress).not.toHaveBeenCalled();
   });
 
@@ -932,7 +932,89 @@ describe("SessionRun progress reconciliation", () => {
     const s = session(twoBlocks());
     mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13" });
     act(() => { findButton("Done").click(); });
-    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 0: DONE });
+    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ warmup: DONE });
+  });
+});
+
+// The bug this suite exists for: marks used to be keyed by a block's position, so
+// reordering the plan moved a "Done" onto whatever drill took that position — and, since
+// the marks reach the session file, onto the other device as well.
+describe("SessionRun marks follow the drill, not the position", () => {
+  let container, root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+  });
+
+  const mount = (props) => {
+    if (root) act(() => root.unmount());
+    root = createRoot(container);
+    act(() => { root.render(<SessionRun {...props} />); });
+  };
+
+  const findButton = (text) =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === text);
+
+  const twoBlocks = () => [
+    { slot: "warmup", drill: "a", minutes: null, note: "" },
+    { slot: "skill", drill: "b", minutes: null, note: "" },
+  ];
+  const at = (t) => `2026-08-13T${t}:00.000Z`;
+  const now = () => at("21:00");
+
+  it("a reordered plan keeps each mark on its own drill", () => {
+    const s = { ...session(twoBlocks()), progress: {
+      "2026-08-13": { marks: { warmup: DONE }, updatedAt: at("19:00") },
+    } };
+    // Same session, blocks swapped — exactly what moveBlock produces.
+    const swapped = { ...s, blocks: [s.blocks[1], s.blocks[0]] };
+    mount({ session: swapped, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress: () => {}, now });
+    const rows = container.querySelectorAll(".run-block");
+    // Row 0 is now the skill block, and it is the one to do next.
+    expect(rows[0].querySelector(".run-block-summary").textContent).toContain("skill");
+    expect(rows[0].querySelector(".run-block-now-badge")).not.toBeNull();
+    // Row 1 is the warmup, still Done.
+    expect(rows[1].querySelector(".run-block-summary").textContent).toContain("Done");
+  });
+
+  it("marks are stored by slot", () => {
+    const onProgress = vi.fn();
+    mount({
+      session: session(twoBlocks()), drills: runDrills(), texts: {},
+      today: "2026-08-13", onProgress, now,
+    });
+    act(() => { findButton("Done").click(); });
+    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { warmup: DONE }, at("21:00"));
+    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ warmup: DONE });
+  });
+
+  it("an index-keyed mark left by the previous version still loads, onto the right drill", () => {
+    // A deploy can land between two drills. Tonight's progress must not evaporate.
+    writeProgress(localStorage, "s1", "2026-08-13", { 0: DONE }, at("19:00"));
+    mount({
+      session: session(twoBlocks()), drills: runDrills(), texts: {},
+      today: "2026-08-13", onProgress: () => {}, now,
+    });
+    const rows = container.querySelectorAll(".run-block");
+    expect(rows[0].querySelector(".run-block-summary").textContent).toContain("Done");
+    expect(rows[1].querySelector(".run-block-now-badge")).not.toBeNull();
+  });
+
+  it("an index-keyed mark in the session file loads too", () => {
+    const s = { ...session(twoBlocks()), progress: {
+      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+    } };
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress: () => {}, now });
+    expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-summary").textContent)
+      .toContain("Done");
   });
 });
 

@@ -662,7 +662,9 @@ describe("App session run mode", () => {
       // date (2026-08-12), so re-running this plan another day starts clean.
       const days = Object.keys(saved.data.sessions.s1.progress);
       expect(days).toHaveLength(1);
-      expect(saved.data.sessions.s1.progress[days[0]].marks).toEqual({ 0: "done" });
+      // Keyed by the block's slot, not its position: reordering the plan must not move
+      // this mark onto another drill.
+      expect(saved.data.sessions.s1.progress[days[0]].marks).toEqual({ warmup: "done" });
       expect(saved.data.sessions.s1.progress[days[0]].updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     } finally {
       vi.useRealTimers();
