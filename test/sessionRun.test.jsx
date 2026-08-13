@@ -31,6 +31,15 @@ const session = (blocks, id = "s1") => ({
   id, date: "2026-08-12", squad: "U12s", theme: "pressing", length: 75, blocks,
 });
 
+// Two warmups sharing a tag and one skill drill: enough for the swap suite's ranking
+// assertions, and shared with the reconciliation suite so there is one drill fixture for
+// the interactive tests rather than three.
+const runDrills = () => [
+  { ...drill("a", "Alpha", 10, "warmup"), tags: ["mobility"] },
+  { ...drill("b", "Bravo", 10, "skill"), tags: [] },
+  { ...drill("c", "Charlie", 5, "warmup"), tags: ["mobility"] },
+];
+
 const render = (props) => renderToStaticMarkup(<SessionRun {...props} />);
 
 beforeEach(() => {
@@ -500,11 +509,7 @@ describe("SessionRun swapping a drill", () => {
     { slot: "warmup", drill: "a", minutes: null, note: "" },
     { slot: "skill", drill: "b", minutes: null, note: "" },
   ]);
-  const swapDrills = () => [
-    { ...drill("a", "Alpha", 10, "warmup"), tags: ["mobility"] },
-    { ...drill("b", "Bravo", 10, "skill"), tags: [] },
-    { ...drill("c", "Charlie", 5, "warmup"), tags: ["mobility"] },
-  ];
+  const swapDrills = runDrills;
   const texts = {
     a: { status: "ready", text: drillText("Alpha") },
     b: { status: "ready", text: drillText("Bravo") },
@@ -711,6 +716,135 @@ describe("SessionRun handed a different session", () => {
     expect(summaries()[0].textContent).toContain("Done");
     show({ session: sessionA(), today: "2026-08-14" }); // a new night, nothing settled
     expect(summaries()[0].textContent).not.toContain("Done");
+  });
+});
+
+// The run view now has a second source of truth for tonight's marks: the session file,
+// which another device may have written. These pin the reconciliation — who wins, what is
+// adopted locally, what is reported upward — and above all that it SETTLES, because
+// reporting upward comes back as a new session prop.
+describe("SessionRun progress reconciliation", () => {
+  let container, root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+  });
+
+  // Returns the root so a test can re-render into it: App handing back a session that now
+  // carries the marks just reported is a re-render, not a remount.
+  const mount = (props) => {
+    if (root) act(() => root.unmount());
+    root = createRoot(container);
+    act(() => { root.render(<SessionRun {...props} />); });
+    return root;
+  };
+
+  const findButton = (text) =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === text);
+
+  const twoBlocks = () => [
+    { slot: "warmup", drill: "a", minutes: null, note: "" },
+    { slot: "skill", drill: "b", minutes: null, note: "" },
+  ];
+  const at = (t) => `2026-08-13T${t}:00.000Z`;
+  const now = () => at("21:00");
+
+  it("shows marks that were made on another device", () => {
+    const s = { ...session(twoBlocks()), progress: {
+      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+    } };
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress: () => {}, now });
+    const blocks = container.querySelectorAll(".run-block");
+    expect(blocks[0].querySelector(".run-block-summary").textContent).toContain("Done");
+    expect(blocks[1].querySelector(".run-block-now-badge")).not.toBeNull();
+  });
+
+  it("writes those marks to this device too, so it works offline from then on", () => {
+    const s = { ...session(twoBlocks()), progress: {
+      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+    } };
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress: () => {}, now });
+    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 0: DONE });
+  });
+
+  it("a newer local mark wins over the session's, and is reported so Drive catches up", () => {
+    writeProgress(localStorage, "s1", "2026-08-13", { 0: SKIPPED }, at("20:00"));
+    const onProgress = vi.fn();
+    const s = { ...session(twoBlocks()), progress: {
+      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+    } };
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
+    expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-summary").textContent)
+      .toContain("Skipped");
+    expect(onProgress).toHaveBeenCalledWith("2026-08-13", { 0: SKIPPED }, at("20:00"));
+  });
+
+  it("reports nothing when both sides already agree", () => {
+    writeProgress(localStorage, "s1", "2026-08-13", { 0: DONE }, at("19:00"));
+    const onProgress = vi.fn();
+    const s = { ...session(twoBlocks()), progress: {
+      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+    } };
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("reports each mark, skip and un-mark upward with the time it happened", () => {
+    const onProgress = vi.fn();
+    const s = session(twoBlocks());
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
+    act(() => { findButton("Done").click(); });
+    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { 0: DONE }, at("21:00"));
+    act(() => { findButton("Skip").click(); });
+    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { 0: DONE, 1: SKIPPED }, at("21:00"));
+    act(() => { findButton("Not done").click(); });
+    expect(onProgress).toHaveBeenLastCalledWith("2026-08-13", { 1: SKIPPED }, at("21:00"));
+  });
+
+  it("settles rather than looping when the session prop comes back with what was reported", () => {
+    // App writes the reported marks into the session, which re-renders this component.
+    // The effect must then find both sides in agreement and do nothing.
+    const onProgress = vi.fn();
+    let s = session(twoBlocks());
+    const r = mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
+    act(() => { findButton("Done").click(); });
+    const [day, marks, stamp] = onProgress.mock.calls.at(-1);
+    onProgress.mockClear();
+    s = { ...s, progress: { [day]: { marks, updatedAt: stamp } } };
+    act(() => {
+      r.render(
+        <SessionRun
+          session={s} drills={runDrills()} texts={{}} today="2026-08-13"
+          onProgress={onProgress} now={now}
+        />,
+      );
+    });
+    expect(onProgress).not.toHaveBeenCalled();
+    expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-summary").textContent)
+      .toContain("Done");
+  });
+
+  it("ignores another day's stored progress", () => {
+    const s = { ...session(twoBlocks()), progress: {
+      "2026-08-12": { marks: { 0: DONE, 1: DONE }, updatedAt: at("19:00") },
+    } };
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress: () => {}, now });
+    expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-now-badge")).not.toBeNull();
+  });
+
+  it("works with no onProgress at all, exactly as before", () => {
+    const s = session(twoBlocks());
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13" });
+    act(() => { findButton("Done").click(); });
+    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 0: DONE });
   });
 });
 
