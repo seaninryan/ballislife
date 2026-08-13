@@ -202,8 +202,9 @@ describe("progress stored on the session itself", () => {
   });
 
   it("works on a session that has no progress key yet", () => {
-    const next = withSessionProgress(session(undefined), "2026-08-13", { 0: DONE }, "T");
-    expect(next.progress["2026-08-13"].marks).toEqual({ 0: DONE });
+    const next = withSessionProgress(session(undefined), "2026-08-13", { 0: DONE }, "2026-08-13T19:04:12.000Z");
+    expect(next.progress["2026-08-13"])
+      .toEqual({ marks: { 0: DONE }, updatedAt: "2026-08-13T19:04:12.000Z" });
   });
 });
 

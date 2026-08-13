@@ -853,12 +853,23 @@ describe("SessionRun progress reconciliation", () => {
       .toContain("Done");
   });
 
-  it("ignores another day's stored progress", () => {
+  it("reconciles tonight's stored progress and ignores another day's", () => {
+    // Both days present, so this fails if the wrong day is read AND if reconciliation is
+    // skipped altogether — asserting only that block 0 is current proved neither.
+    const onProgress = vi.fn();
     const s = { ...session(twoBlocks()), progress: {
       "2026-08-12": { marks: { 0: DONE, 1: DONE }, updatedAt: at("19:00") },
+      "2026-08-13": { marks: { 1: SKIPPED }, updatedAt: at("20:00") },
     } };
-    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress: () => {}, now });
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
+    const summaries = [...container.querySelectorAll(".run-block-summary")];
+    expect(summaries[0].textContent).not.toContain("Done");
     expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-now-badge")).not.toBeNull();
+    expect(summaries[1].textContent).toContain("Skipped");
+    // Tonight's marks were adopted onto this device; yesterday's were not written anywhere.
+    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 1: SKIPPED });
+    expect(readProgress(localStorage, "s1", "2026-08-12")).toEqual({});
+    expect(onProgress).not.toHaveBeenCalled();
   });
 
   it("adopts the other device's marks even when this device's clock is wildly fast", () => {
