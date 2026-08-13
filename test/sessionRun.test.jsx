@@ -5,7 +5,7 @@
 // pitch side — the current block expanded, the rest collapsed but reopenable. It never
 // fetches anything itself and never writes to Drive; tonight's progress goes through
 // lib/progress.js into localStorage only, exactly like DrillPreview's checklist ticks.
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
 import React, { act } from "react";
@@ -463,6 +463,124 @@ describe("SessionRun tickable checklists", () => {
     expect(box.disabled).toBe(false);
     await act(async () => { box.click(); });
     expect(box.checked).toBe(true);
+  });
+});
+
+// Swapping is the one thing the run view does that changes the PLAN rather than tonight's
+// progress, so these tests pin both halves: what is reported upwards (App writes it), and
+// what this component cleans up locally (the block's mark).
+describe("SessionRun swapping a drill", () => {
+  let container, root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+  });
+
+  // Synchronous sibling of the accordion suite's mountSession: nothing here awaits Drive,
+  // and remounting into the same container (the onSwap-present/absent pair below) has to
+  // replace the previous tree rather than render a second one beside it.
+  const mount = (props) => {
+    if (root) act(() => root.unmount());
+    root = createRoot(container);
+    act(() => { root.render(<SessionRun {...props} />); });
+  };
+
+  const findButton = (text) =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === text);
+
+  const swapSession = () => session([
+    { slot: "warmup", drill: "a", minutes: null, note: "" },
+    { slot: "skill", drill: "b", minutes: null, note: "" },
+  ]);
+  const swapDrills = () => [
+    { ...drill("a", "Alpha", 10, "warmup"), tags: ["mobility"] },
+    { ...drill("b", "Bravo", 10, "skill"), tags: [] },
+    { ...drill("c", "Charlie", 5, "warmup"), tags: ["mobility"] },
+  ];
+  const texts = {
+    a: { status: "ready", text: drillText("Alpha") },
+    b: { status: "ready", text: drillText("Bravo") },
+  };
+
+  it("offers Swap on the open block only when onSwap is given", () => {
+    mount({ session: swapSession(), drills: swapDrills(), texts });
+    expect(findButton("Swap")).toBeUndefined();
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {} });
+    expect(findButton("Swap")).toBeDefined();
+  });
+
+  it("labels it Choose a drill when the slot is empty", () => {
+    const s = session([{ slot: "warmup", drill: null, minutes: null, note: "" }]);
+    mount({ session: s, drills: swapDrills(), texts, onSwap: () => {} });
+    expect(findButton("Choose a drill")).toBeDefined();
+  });
+
+  it("shows the picker in place of the drill body, and hides it again on cancel", () => {
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {} });
+    expect(container.textContent).toContain("Coaching points here");
+    act(() => { findButton("Swap").click(); });
+    expect(container.querySelector(".drill-picker")).not.toBeNull();
+    expect(container.textContent).not.toContain("Coaching points here");
+    act(() => { findButton("Cancel swap").click(); });
+    expect(container.querySelector(".drill-picker")).toBeNull();
+    expect(container.textContent).toContain("Coaching points here");
+  });
+
+  it("does not offer the drill already in the block", () => {
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {} });
+    act(() => { findButton("Swap").click(); });
+    const offered = [...container.querySelectorAll(".drill-picker-option .block-title")]
+      .map((e) => e.textContent);
+    expect(offered).not.toContain("Alpha");
+    expect(offered).toContain("Charlie");
+  });
+
+  it("puts a like-for-like drill first: same category and a shared tag", () => {
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {} });
+    act(() => { findButton("Swap").click(); });
+    const first = container.querySelector(".drill-picker-option .block-title").textContent;
+    expect(first).toBe("Charlie"); // warmup + mobility, like Alpha; Bravo is a skill drill
+  });
+
+  it("reports the block index and the chosen slug, then closes the picker", () => {
+    const onSwap = vi.fn();
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap });
+    act(() => { findButton("Swap").click(); });
+    act(() => { container.querySelector(".drill-picker-option").click(); });
+    expect(onSwap).toHaveBeenCalledWith(0, "c");
+    expect(container.querySelector(".drill-picker")).toBeNull();
+  });
+
+  it("clears the block's mark: a swapped drill was never done", () => {
+    // Block 0 marked done, so block 1 is current. Peek block 0 open and swap its drill:
+    // its "Done" chip must go, and block 0 becomes current again.
+    writeProgress(localStorage, "s1", "2026-08-13", { 0: DONE });
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {}, today: "2026-08-13" });
+    act(() => { container.querySelectorAll(".run-block-summary")[0].click(); });
+    act(() => { findButton("Swap").click(); });
+    act(() => { container.querySelector(".drill-picker-option").click(); });
+    const first = container.querySelectorAll(".run-block")[0];
+    // The summary row, not the whole block: an unsettled block's body carries a Done
+    // BUTTON, which is the opposite of a Done mark.
+    expect(first.querySelector(".run-block-summary").textContent).not.toContain("Done");
+    expect(first.querySelector(".run-block-now-badge")).not.toBeNull();
+  });
+
+  it("only one block can be picking at a time", () => {
+    mount({ session: swapSession(), drills: swapDrills(), texts, onSwap: () => {} });
+    act(() => { container.querySelectorAll(".run-block-summary")[1].click(); }); // peek block 1
+    const swaps = () => [...container.querySelectorAll("button")].filter((b) => b.textContent === "Swap");
+    act(() => { swaps()[0].click(); });
+    act(() => { swaps()[0].click(); }); // the remaining Swap belongs to the other block
+    expect(container.querySelectorAll(".drill-picker")).toHaveLength(1);
   });
 });
 

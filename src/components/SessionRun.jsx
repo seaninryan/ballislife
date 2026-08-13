@@ -14,6 +14,7 @@
 import React, { useState } from "react";
 import { resolveBlocks, totalMinutes } from "../lib/sessions.js";
 import DrillPreview from "./DrillPreview.jsx";
+import DrillPicker from "./DrillPicker.jsx";
 import {
   DONE, SKIPPED, readProgress, writeProgress, mark, reopen, currentIndex, counts,
 } from "../lib/progress.js";
@@ -53,7 +54,11 @@ function BlockContent({ block, entry, today }) {
 // to be open beside it. `state` is only set once a block is settled, and its Not done
 // control lives in the summary row itself so a settled block never needs to be opened
 // just to be un-marked.
-function RunBlock({ block, entry, today, isOpen, isCurrent, state, onDone, onSkip, onReopen, onToggle }) {
+function RunBlock({
+  block, entry, today, isOpen, isCurrent, state,
+  picking, canSwap, turnout, drills, onSwapToggle, onPick,
+  onDone, onSkip, onReopen, onToggle,
+}) {
   const classes = [
     "card",
     "run-block",
@@ -88,20 +93,45 @@ function RunBlock({ block, entry, today, isOpen, isCurrent, state, onDone, onSki
 
       {isOpen ? (
         <>
-          {!state ? (
+          {/* The actions row no longer belongs to Done/Skip alone: a block marked Done can
+              still have its drill swapped without being un-marked first. It is skipped
+              entirely when it would be empty, so a read-only mount (no onSwap) does not
+              gain 20px of dead space above a settled block's body. */}
+          {!state || canSwap ? (
             <div className="row run-block-actions">
-              <button type="button" className="chip-button chip-button-ok" onClick={onDone}>Done</button>
-              <button type="button" className="chip-button chip-button-warn" onClick={onSkip}>Skip</button>
+              {!state ? (
+                <>
+                  <button type="button" className="chip-button chip-button-ok" onClick={onDone}>Done</button>
+                  <button type="button" className="chip-button chip-button-warn" onClick={onSkip}>Skip</button>
+                </>
+              ) : null}
+              {canSwap ? (
+                <button type="button" className="chip-button" onClick={onSwapToggle}>
+                  {picking ? "Cancel swap" : block.drill ? "Swap" : "Choose a drill"}
+                </button>
+              ) : null}
             </div>
           ) : null}
-          <BlockContent block={block} entry={entry} today={today} />
+          {picking ? (
+            <DrillPicker
+              drills={drills}
+              slot={block.slot}
+              tags={block.drill?.tags ?? []}
+              turnout={turnout}
+              exclude={block.drill?.slug ?? null}
+              onPick={onPick}
+              onCancel={onSwapToggle}
+            />
+          ) : (
+            <BlockContent block={block} entry={entry} today={today} />
+          )}
         </>
       ) : null}
     </section>
   );
 }
 
-export default function SessionRun({ session, drills = [], texts = {}, onBack, today }) {
+export default function SessionRun({ session, drills = [], texts = {}, onBack, onSwap, today }) {
   const day = today ?? new Date().toISOString().slice(0, 10);
   const blocks = resolveBlocks(session, drills);
   const total = totalMinutes(session, drills);
@@ -112,6 +142,9 @@ export default function SessionRun({ session, drills = [], texts = {}, onBack, t
   // Blocks opened by hand to look back or peek ahead, independent of what is marked.
   // The current block is always open regardless of this set.
   const [opened, setOpened] = useState(() => new Set());
+  // Which block is choosing a replacement drill, or null. One at a time: two open
+  // pickers on a phone is two scrolling lists competing for the same thumb.
+  const [picking, setPicking] = useState(null);
 
   const current = currentIndex(marks, blocks.length);
   const { done, skipped, remaining } = counts(marks, blocks.length);
@@ -140,6 +173,15 @@ export default function SessionRun({ session, drills = [], texts = {}, onBack, t
     collapse(index);
   };
 
+  // A swap replaces the work, so whatever was marked no longer refers to anything that
+  // happened — clear it. App owns the write to the plan itself; this component only
+  // reports the choice and cleans up tonight's progress for that block.
+  const handlePick = (index, drill) => {
+    setPicking(null);
+    persist(reopen(marks, index));
+    onSwap?.(index, drill.slug);
+  };
+
   const handleToggle = (index) => {
     setOpened((prev) => {
       const next = new Set(prev);
@@ -165,6 +207,12 @@ export default function SessionRun({ session, drills = [], texts = {}, onBack, t
         isOpen={isOpen}
         isCurrent={isCurrent}
         state={marks[index]}
+        picking={picking === index}
+        canSwap={Boolean(onSwap)}
+        turnout={Number.isFinite(session?.turnout) ? session.turnout : undefined}
+        drills={drills}
+        onSwapToggle={() => setPicking((cur) => (cur === index ? null : index))}
+        onPick={(drill) => handlePick(index, drill)}
         onDone={() => handleMark(index, DONE)}
         onSkip={() => handleMark(index, SKIPPED)}
         onReopen={() => handleReopen(index)}
