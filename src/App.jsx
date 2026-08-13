@@ -303,6 +303,16 @@ export default function App() {
 
   useEffect(() => () => clearTimeout(sessionsSaveTimer.current), []);
 
+  // Whether the plans have had their one automatic load. They are loaded once, with the
+  // first catalogue, and never again by a later one: `load` also runs on New drill and
+  // Delete drill, and replacing the sessions state there threw away every unsaved edit and
+  // unresolved conflict along with it. For a conflicted plan — held back from Drive on
+  // purpose until the owner answers — that in-memory copy is the ONLY copy, so a drill-side
+  // action must not reach into session state at all. Set before the load rather than after,
+  // so even a failed one is not retried behind a plan the owner has since typed into; the
+  // banner asks him to reload the page instead. Reload (per plan) is the other way in.
+  const sessionsLoaded = useRef(false);
+
   const load = useCallback(async () => {
     setStatus("loading");
     try {
@@ -321,30 +331,34 @@ export default function App() {
       setFailed(notLoaded ?? []);
       setDuplicateFolders(Boolean(dupes));
       // Sessions load after drills: they reference drills by slug, so nothing about
-      // resolving a session needs the catalogue to still be loading.
+      // resolving a session needs the catalogue to still be loading. Once only — see
+      // `sessionsLoaded` above.
       //
       // Its own try/catch, deliberately: this ran inside the one below, so a single flaky
       // request during the one-time blob migration replaced the whole app — drills
       // included, all of them already loaded — with an error screen.
-      try {
-        const { sessions, meta, migrated, failed: unreadable, unmigrated } =
-          await loadSessions(folderId);
-        setSessionsState({
-          data: { version: 1, sessions },
-          meta: meta ?? {},
-          dirty: [],
-          conflicts: [],
-          status: "idle",
-          error: null,
-        });
-        setSessionsMigrated(migrated ?? 0);
-        setSessionsFailed(unreadable ?? []);
-        setSessionsUnmigrated(unmigrated ?? []);
-        setSessionsLoadError(null);
-      } catch (e) {
-        // Nothing in Drive has been changed by a failed load, so the plans are still there
-        // to find on the next one. Say so, and leave the drills usable meanwhile.
-        setSessionsLoadError(e);
+      if (!sessionsLoaded.current) {
+        sessionsLoaded.current = true;
+        try {
+          const { sessions, meta, migrated, failed: unreadable, unmigrated } =
+            await loadSessions(folderId);
+          setSessionsState({
+            data: { version: 1, sessions },
+            meta: meta ?? {},
+            dirty: [],
+            conflicts: [],
+            status: "idle",
+            error: null,
+          });
+          setSessionsMigrated(migrated ?? 0);
+          setSessionsFailed(unreadable ?? []);
+          setSessionsUnmigrated(unmigrated ?? []);
+          setSessionsLoadError(null);
+        } catch (e) {
+          // Nothing in Drive has been changed by a failed load, so the plans are still there
+          // to find on the next one. Say so, and leave the drills usable meanwhile.
+          setSessionsLoadError(e);
+        }
       }
       setStatus("ready");
       return loaded;

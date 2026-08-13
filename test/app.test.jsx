@@ -764,6 +764,31 @@ describe("App sessions", () => {
       expect(minutesInput().value).toBe("");
     });
 
+    it("creating a drill cannot discard an unresolved conflict or the edit behind it", async () => {
+      // The banner is up and the edit exists only in memory. Tapping New drill instead of
+      // answering the banner used to refetch the plans and reset dirty/conflicts with them,
+      // so the edit was gone silently and permanently.
+      drive.saveSession.mockResolvedValue({ ok: false, conflict: true, id: "s1", modifiedTime: "S9" });
+      drive.createDrill.mockResolvedValue({ id: "c", modifiedTime: "T" });
+      vi.spyOn(window, "prompt").mockReturnValue("Charlie");
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(banners()).toContain("2026-08-12");
+
+      await goToHash("#/browse");
+      await act(async () => { findButton("New drill").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+      expect(banners()).toContain("2026-08-12");
+      await goToHash("#/session/s1");
+      expect(Number(minutesInput().value)).toBe(17);
+      // The catalogue was reloaded; the plans were not touched at all.
+      expect(drive.loadCatalogue).toHaveBeenCalledTimes(2);
+      expect(drive.loadSessions).toHaveBeenCalledTimes(1);
+    });
+
     it("a reload clears the banners the previous load left behind", async () => {
       drive.loadSessions.mockResolvedValueOnce(sessionsLoad(
         { s1: initial() },
