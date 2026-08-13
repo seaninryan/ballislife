@@ -222,10 +222,34 @@ textarea, input, select {
   .run-block-now-badge { animation: none; }
 }
 
+/* Choosing a drill, used mid-session to swap a block. The list scrolls inside itself
+   rather than pushing the rest of the run view down: on a phone the controls above must
+   stay put while you scan candidates with a thumb. */
+.drill-picker { margin-top: 4px; }
+.drill-picker-controls { flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.drill-picker-search {
+  flex: 1 1 160px; min-width: 0; padding: 8px 10px; font: inherit;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card);
+}
+.drill-picker-list {
+  list-style: none; margin: 0; padding: 0;
+  max-height: 46vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 8px;
+}
+.drill-picker-list li + li { border-top: 1px solid var(--line); }
+.drill-picker-option {
+  width: 100%; background: none; border: none; border-radius: 0;
+  padding: 10px 12px; text-align: left; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.drill-picker-option:hover, .drill-picker-option:focus-visible { background: var(--bg); }
+
 /* Carried on paper at the side of a pitch: the back button and any other on-screen-
    only chrome are useless there, and a block split across a page break is worse than
-   a blank inch at the bottom of one. */
+   a blank inch at the bottom of one. A half-finished swap is on-screen-only chrome too:
+   the paper should show the plan, not the list you were browsing when you printed it. */
 @media print {
   .run-controls button { display: none; }
+  .drill-picker { display: none; }
   .run-block { break-inside: avoid; page-break-inside: avoid; }
 }
