@@ -9,8 +9,10 @@ import DrillPicker from "../src/components/DrillPicker.jsx";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const d = (slug, title, category, minutes, tags = [], players = null) =>
-  ({ slug, title, category, minutes, tags, players });
+const d = (slug, title, category, minutes, tags = [], players = null, thumb = null) =>
+  ({ slug, title, category, minutes, tags, players, thumb });
+
+const THUMB = "area: 20x20 plain\nred: A@5,5 B@15,15\npass: A->B\n";
 
 const drills = [
   d("rondo", "Rondo 4v2", "skill", 12, ["possession", "rondo"]),
@@ -104,6 +106,22 @@ describe("DrillPicker", () => {
     mount({ slot: "skill", drills: [d("x", "Bare", "skill", null)] });
     expect(options()[0].textContent).toMatch(/no duration/i);
     expect(options()[0].textContent).not.toContain("0′");
+  });
+
+  it("draws each drill's diagram, so a drill can be picked by its shape", () => {
+    mount({ slot: "skill", drills: [d("r", "Rondo 4v2", "skill", 12, [], null, THUMB)] });
+    const thumb = options()[0].querySelector(".drill-picker-thumb");
+    expect(thumb.querySelector("svg")).not.toBeNull();
+  });
+
+  it("keeps the row whole for a drill with no diagram", () => {
+    mount({ slot: "skill", drills: [d("x", "Bare", "skill", 10)] });
+    const row = options()[0];
+    // The placeholder holds the same box as a diagram would: without it the titles of
+    // drills either side of a diagram-less one no longer line up.
+    expect(row.querySelector(".drill-picker-thumb")).not.toBeNull();
+    expect(row.querySelector("svg")).toBeNull();
+    expect(row.querySelector(".block-title").textContent).toBe("Bare");
   });
 
   it("offers a way out when given one", () => {

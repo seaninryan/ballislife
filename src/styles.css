@@ -243,6 +243,25 @@ textarea, input, select {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .drill-picker-option:hover, .drill-picker-option:focus-visible { background: var(--bg); }
+/* The thumbnail is a fixed box, and the text wraps inside its own: at 390px a
+   percentage-width thumbnail left the title breaking one word per line. The same
+   8/5 aspect ratio as the card grid keeps rows level whether the drill is a square
+   20x20 rondo or a half pitch, and 40px tall keeps the row inside a thumb's reach. */
+.drill-picker-option-body {
+  flex: 1 1 160px; min-width: 0;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+}
+.drill-picker-thumb {
+  flex: 0 0 64px; aspect-ratio: 8 / 5; overflow: hidden; border-radius: 6px;
+  background: var(--grass); display: flex; align-items: center; justify-content: center;
+}
+/* PitchDiagram wraps its svg in a div, so the svg needs a parent with a definite
+   height or its height:100% falls back to auto and the diagram overflows and gets
+   cropped - which silently loses players. */
+.drill-picker-thumb > div { width: 100%; height: 100%; }
+.drill-picker-thumb svg { width: 100%; height: 100%; }
+.drill-picker-thumb-empty { background: var(--bg); width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; }
 
 /* Carried on paper at the side of a pitch: the back button and any other on-screen-
    only chrome are useless there, and a block split across a page break is worse than

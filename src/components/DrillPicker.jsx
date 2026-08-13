@@ -7,6 +7,7 @@
 // last night's search.
 import React, { useState } from "react";
 import { rankDrills, SORTS } from "../lib/picker.js";
+import PitchDiagram from "./PitchDiagram.jsx";
 
 export default function DrillPicker({
   drills = [], slot = null, tags = [], turnout, exclude = null, onPick, onCancel,
@@ -63,17 +64,27 @@ export default function DrillPicker({
                 className="drill-picker-option"
                 onClick={() => onPick?.(drill)}
               >
-                <span className="block-title">{drill.title}</span>
-                <span
-                  className={`chip drill-picker-category${drill.category === slot ? " ok-chip" : ""}`}
-                >
-                  {drill.category ?? "no category"}
+                {/* Mid-swap you are looking for a shape you remember, not a name you
+                    can spell. The placeholder keeps its box when there is no diagram so
+                    the titles down the list stay on one line. */}
+                <span className="drill-picker-thumb">
+                  {drill.thumb
+                    ? <PitchDiagram source={drill.thumb} />
+                    : <span className="drill-picker-thumb-empty dim" aria-hidden="true">—</span>}
                 </span>
-                <span className="chip">
-                  {drill.minutes != null && drill.minutes !== "" ? `${drill.minutes}′` : "no duration"}
+                <span className="drill-picker-option-body">
+                  <span className="block-title">{drill.title}</span>
+                  <span
+                    className={`chip drill-picker-category${drill.category === slot ? " ok-chip" : ""}`}
+                  >
+                    {drill.category ?? "no category"}
+                  </span>
+                  <span className="chip">
+                    {drill.minutes != null && drill.minutes !== "" ? `${drill.minutes}′` : "no duration"}
+                  </span>
+                  {drill.players ? <span className="chip dim">{drill.players}</span> : null}
+                  {matched.map((t) => <span key={t} className="chip ok-chip">{t}</span>)}
                 </span>
-                {drill.players ? <span className="chip dim">{drill.players}</span> : null}
-                {matched.map((t) => <span key={t} className="chip ok-chip">{t}</span>)}
               </button>
             </li>
           ))}
