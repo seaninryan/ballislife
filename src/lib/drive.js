@@ -579,7 +579,37 @@ export async function saveSession({ folder, id, session, baseModifiedTime }) {
       return { ok: true, id, fileId, modifiedTime };
     });
   } catch (error) {
+    // A create whose reply was lost is the expected failure on a bad connection, and the file
+    // may well be there. Reporting it as failed means the next save creates a SECOND file for
+    // this plan, after which the duplicate guard above blocks saving it at all — so look
+    // before believing the failure. One listing, only on this path: doing it per save would
+    // cost a request every time the owner types.
+    if (!fileId) {
+      const landed = await findLandedSessionFile(id, folder);
+      if (landed) {
+        known.set(landed.id, landed.modifiedTime);
+        sessionFileIds.set(id, landed.id);
+        return { ok: true, id, fileId: landed.id, modifiedTime: landed.modifiedTime };
+      }
+    }
     return { ok: false, id, error };
+  }
+}
+
+// The file a create may have written before its reply was lost, or null. Anything other than
+// exactly one match is null: none means nothing landed, and more than one means this plan is
+// already the ambiguous case the next load will report and refuse to save into. A failure
+// here is answered the same way — the caller then reports the original error, which is the
+// truthful thing to say when we could not find out.
+async function findLandedSessionFile(id, folder) {
+  try {
+    const token = getAccessToken();
+    const sessionsFolder = await sessionsFolderFor(token, folder);
+    const name = sessionFileName(id);
+    const matches = (await api.listFiles(token, sessionsFolder)).filter((f) => f.name === name);
+    return matches.length === 1 ? matches[0] : null;
+  } catch {
+    return null;
   }
 }
 

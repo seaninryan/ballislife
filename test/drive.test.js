@@ -577,6 +577,42 @@ describe("saveSession", () => {
     expect(JSON.parse(body).id).toBe("2026-08-13");
   });
 
+  it("adopts a create that landed without a reply rather than duplicating it", async () => {
+    // The expected failure on poor signal: the file was written, the response never came
+    // back. Taking the create branch again makes a second b.json, after which the duplicate
+    // guard blocks saving that plan at all.
+    mockSessionsDrive();
+    api.createFile.mockRejectedValue(Object.assign(new Error("network"), { code: 0 }));
+    api.listFiles.mockImplementation(async (_t, folder) =>
+      (folder === "SF" ? [file("F-b", "b.json", "TN")] : []));
+
+    const r = await saveSession({ folder: "F1", id: "b", session: sess("b"), baseModifiedTime: null });
+    expect(r).toMatchObject({ ok: true, id: "b", fileId: "F-b", modifiedTime: "TN" });
+    expect(api.createFile).toHaveBeenCalledTimes(1);
+
+    // And the file is now known, so the next save writes it instead of creating anything.
+    api.writeFile.mockResolvedValue("TN2");
+    const again = await saveSession({ folder: "F1", id: "b", session: sess("b"), baseModifiedTime: "TN" });
+    expect(again).toMatchObject({ ok: true, fileId: "F-b", modifiedTime: "TN2" });
+    expect(api.createFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a create that really did fail, having found no file for it", async () => {
+    mockSessionsDrive();
+    api.createFile.mockRejectedValue(Object.assign(new Error("network"), { code: 0 }));
+    const r = await saveSession({ folder: "F1", id: "b", session: sess("b"), baseModifiedTime: null });
+    expect(r.ok).toBe(false);
+    expect(r.id).toBe("b");
+    expect(r.error.code).toBe(0);
+  });
+
+  it("costs no listing at all when the create succeeds", async () => {
+    // One extra listing on the failure path is worth it; one per save is not.
+    mockSessionsDrive();
+    await saveSession({ folder: "F1", id: "b", session: sess("b"), baseModifiedTime: null });
+    expect(api.listFiles).not.toHaveBeenCalled();
+  });
+
   it("writes the plan's own file and returns its new modifiedTime", async () => {
     await loadOneSession();
     api.writeFile.mockResolvedValue("T6");
