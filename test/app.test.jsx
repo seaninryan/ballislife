@@ -556,6 +556,56 @@ describe("App session run mode", () => {
     expect(location.hash).toBe("#/session/s1");
   });
 
+  it("a swap writes the new drill into the plan and loads its text", async () => {
+    drive.loadCatalogue.mockResolvedValue({
+      drills: [drill("a", "Alpha"), drill("b", "Bravo"), drill("c", "Charlie")],
+      failed: [], folderId: "F1", duplicateFolders: false, index: { version: 1, entries: {} },
+    });
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    drive.saveSessions.mockResolvedValue({ ok: true, modifiedTime: "S2" });
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      expect(drive.readDrill).toHaveBeenCalledTimes(2); // a and b
+
+      await act(async () => { findButton("Swap").click(); });
+      const charlie = [...container.querySelectorAll(".drill-picker-option")]
+        .find((b) => b.textContent.includes("Charlie"));
+      await act(async () => { charlie.click(); });
+
+      // The swapped-in drill's text is fetched and shown — the run view had never
+      // loaded it, since it was not in the plan when the view opened.
+      expect(drive.readDrill).toHaveBeenCalledTimes(3);
+      expect(container.textContent).toContain("body c");
+
+      // And the change is a real edit to the plan, saved like any builder edit.
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      const saved = drive.saveSessions.mock.calls.at(-1)[0];
+      expect(saved.data.sessions.s1.blocks[0].drill).toBe("c");
+      expect(saved.data.sessions.s1.blocks[0].minutes).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a swap to a drill already loaded this visit does not refetch it", async () => {
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    drive.saveSessions.mockResolvedValue({ ok: true, modifiedTime: "S2" });
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    expect(drive.readDrill).toHaveBeenCalledTimes(2);
+    // Block 0 (a) swaps to b, whose text is already in hand from this same visit.
+    await act(async () => { findButton("Swap").click(); });
+    const bravo = [...container.querySelectorAll(".drill-picker-option")]
+      .find((b) => b.textContent.includes("Bravo"));
+    await act(async () => { bravo.click(); });
+    expect(drive.readDrill).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("body b");
+  });
+
   it("returns to the builder from Back to plan even when run mode was entered directly via the /run hash (not through a click)", async () => {
     // Mirrors the owner's report as closely as this harness allows: land on the run
     // view via #/session/<id>/run directly — the same route the report's address bar

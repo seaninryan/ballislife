@@ -8,7 +8,7 @@ import {
   loadSessions, saveSessions,
 } from "./lib/drive.js";
 import { openEditor, reduce, shouldSave } from "./lib/editor.js";
-import { emptySession, resolveBlocks } from "./lib/sessions.js";
+import { emptySession, resolveBlocks, setBlock } from "./lib/sessions.js";
 import { parseHash, formatHash } from "./lib/route.js";
 
 const SAVE_DEBOUNCE_MS = 900;
@@ -345,6 +345,34 @@ export default function App() {
     location.hash = formatHash({ view: "session", slug: sess.id });
   }, []);
 
+  // Slugs with a read in flight for the current run visit, so a swap away and back does
+  // not fire a second identical request.
+  const runFetching = useRef(new Set());
+
+  // Fetches one drill's text into runTexts, tagged with the run-visit token so a reply
+  // landing after the run view has been left is dropped. Shared by openRun's opening
+  // batch and by a mid-session swap.
+  const fetchRunText = useCallback((drill, token) => {
+    runFetching.current.add(drill.slug);
+    readDrill(drill.id, folderRef.current).then(
+      ({ text }) => {
+        const entry = { status: "ready", text };
+        drillTextCache.current.set(drill.slug, entry);
+        runFetching.current.delete(drill.slug);
+        if (runRequestSeq.current !== token) return; // this run view has been left
+        setRunTexts((prev) => ({ ...prev, [drill.slug]: entry }));
+      },
+      (error) => {
+        // Deliberately not cached: a flaky read is ordinary on a phone at the side of a
+        // pitch (same reasoning as loadCatalogue's per-drill failure), and the next
+        // visit should try again rather than remembering the failure forever.
+        runFetching.current.delete(drill.slug);
+        if (runRequestSeq.current !== token) return;
+        setRunTexts((prev) => ({ ...prev, [drill.slug]: { status: "error", error } }));
+      },
+    );
+  }, []);
+
   // Opens run mode for a session: fetches each referenced drill's full text ONCE, in
   // parallel, reusing whatever this app session already fetched for it. Mirrors
   // openDrill's stale-request guard, but the token guards a whole batch rather than
@@ -371,24 +399,27 @@ export default function App() {
     }
     setRunTexts(seeded);
 
-    for (const drill of toFetch) {
-      readDrill(drill.id, folderRef.current).then(
-        ({ text }) => {
-          const entry = { status: "ready", text };
-          drillTextCache.current.set(drill.slug, entry);
-          if (runRequestSeq.current !== mine) return; // this run view has been left
-          setRunTexts((prev) => ({ ...prev, [drill.slug]: entry }));
-        },
-        (error) => {
-          // Deliberately not cached: a flaky read is ordinary on a phone at the side
-          // of a pitch (same reasoning as loadCatalogue's per-drill failure), and the
-          // next visit should try again rather than remembering the failure forever.
-          if (runRequestSeq.current !== mine) return;
-          setRunTexts((prev) => ({ ...prev, [drill.slug]: { status: "error", error } }));
-        },
-      );
-    }
-  }, [drills, closeEditor, closeSessionBuilder]);
+    for (const drill of toFetch) fetchRunText(drill, mine);
+  }, [drills, closeEditor, closeSessionBuilder, fetchRunText]);
+
+  // A mid-session swap is a real edit to the plan, not a run-only override: if ten
+  // players turn up and the 11v11 becomes a 5v5, that is what the session WAS. So it
+  // goes through onSessionChange like any builder edit and saves with the same debounce.
+  // The block's own minutes are cleared so the new drill's duration applies rather than
+  // the one it replaced.
+  const onRunSwap = useCallback((index, slug) => {
+    const sess = sessionsStateRef.current.data.sessions[runSessionId];
+    if (!sess) return;
+    onSessionChange(setBlock(sess, index, { drill: slug, minutes: null }));
+
+    const drill = drills.find((d) => d.slug === slug);
+    if (!drill) return;
+    const cached = drillTextCache.current.get(drill.slug);
+    if (cached) { setRunTexts((prev) => ({ ...prev, [drill.slug]: cached })); return; }
+    if (runFetching.current.has(drill.slug)) return;
+    setRunTexts((prev) => ({ ...prev, [drill.slug]: { status: "loading" } }));
+    fetchRunText(drill, runRequestSeq.current);
+  }, [runSessionId, drills, onSessionChange, fetchRunText]);
 
   // Back to the plan = the builder for the session that was just being run, not the
   // session list — running is a detour from editing, not a replacement for it.
@@ -573,6 +604,7 @@ export default function App() {
         runTexts={runTexts}
         onOpenRun={openRun}
         onRunBack={onRunBack}
+        onRunSwap={onRunSwap}
       />
     </div>
   );

@@ -25,7 +25,7 @@ export default function Catalogue({
   sessions = [], selectedSession, onOpenSession, onCreateSession,
   onSessionChange, onSessionBack, onDeleteSession,
   sessionsStatus, sessionsError, onKeepMineSessions, onReloadSessions,
-  runSession, runTexts, onOpenRun, onRunBack,
+  runSession, runTexts, onOpenRun, onRunBack, onRunSwap,
 }) {
   if (status === "signed-out") {
     return (
@@ -59,7 +59,15 @@ export default function Catalogue({
   // The run view takes over the whole view too, and wins over the builder below: once
   // a session is opened to run, that is the only thing on screen until "Back to plan".
   if (runSession) {
-    return <SessionRun session={runSession} drills={drills} texts={runTexts} onBack={onRunBack} />;
+    return (
+      <SessionRun
+        session={runSession}
+        drills={drills}
+        texts={runTexts}
+        onBack={onRunBack}
+        onSwap={onRunSwap}
+      />
+    );
   }
 
   // The session builder takes over the whole view, the same way the drill editor does,
