@@ -18,28 +18,37 @@ export { friendlyError };
 // The sessions file is saved from two places now — the builder and, via progress marks,
 // the run view. A save that fails at the side of a pitch must say so there rather than
 // only on the screen the coach is not looking at.
-function SessionsSaveBanner({ status, error, onKeepMine, onReload }) {
-  if (status === "conflict") {
-    return (
-      <div className="banner warn">
-        This plan changed in Drive since you opened it. Your edit is safe and still
-        below — choose which version to keep.
-        <div className="row" style={{ marginTop: 6 }}>
-          <button type="button" className="primary" onClick={onKeepMine}>Keep mine</button>
-          <button type="button" onClick={onReload}>Reload Drive’s version</button>
+//
+// A conflict is per plan, and unresolved until the owner answers it, so it is shown
+// WHEREVER he is rather than only on the plan it belongs to — a conflict he cannot see is
+// one he can never resolve, and the plan stays unsaved meanwhile. What used to make the
+// prompt safe (only offering it on the plan on screen) is kept by naming the plan in the
+// banner and on both buttons: "Keep mine" writes one file, and it must be obvious which.
+function SessionsSaveBanner({ status, error, conflicts = [], onKeepMine, onReload }) {
+  return (
+    <>
+      {conflicts.map((c) => (
+        <div className="banner warn" key={c.id}>
+          The plan for <strong>{c.label}</strong> changed in Drive since you opened it. Your
+          edit to it is safe and has not been overwritten — choose which version to keep.
+          <div className="row" style={{ marginTop: 6 }}>
+            <button type="button" className="primary" onClick={() => onKeepMine?.(c.id)}>
+              Keep mine ({c.label})
+            </button>
+            <button type="button" onClick={() => onReload?.(c.id)}>
+              Reload Drive’s version ({c.label})
+            </button>
+          </div>
         </div>
-      </div>
-    );
-  }
-  if (status === "failed") {
-    return (
-      <div className="banner err">
-        Could not save: {friendlyError(error)} Your edit is still here and will be
-        retried when you change something again.
-      </div>
-    );
-  }
-  return null;
+      ))}
+      {status === "failed" ? (
+        <div className="banner err">
+          Could not save: {friendlyError(error)} Your edit is still here and will be
+          retried when you change something again.
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 export default function Catalogue({
@@ -51,7 +60,7 @@ export default function Catalogue({
   mode = "drills", onModeChange,
   sessions = [], selectedSession, onOpenSession, onCreateSession,
   onSessionChange, onSessionBack, onDeleteSession,
-  sessionsStatus, sessionsError, onKeepMineSessions, onReloadSessions,
+  sessionsStatus, sessionsError, sessionsConflicts = [], onKeepMineSessions, onReloadSessions,
   sessionsMigrated = 0, sessionsFailed = [], sessionsUnmigrated = [], sessionsLoadError,
   runSession, runTexts, onOpenRun, onRunBack, onRunSwap, onRunProgress,
 }) {
@@ -84,6 +93,20 @@ export default function Catalogue({
   const notMoved = sessionsUnmigrated.filter((u) => u.reason !== "unsafe-id");
   const unnameable = sessionsUnmigrated.filter((u) => u.reason === "unsafe-id");
 
+  // Rendered on every view below except the drill editor, which has a conflict prompt of
+  // its own for the drill being typed into: two identically shaped "Keep mine" offers about
+  // two different files on one screen is precisely the wrong, destructive prompt. Leaving
+  // that editor lands on the grid, where this is shown.
+  const sessionsBanner = (
+    <SessionsSaveBanner
+      status={sessionsStatus}
+      error={sessionsError}
+      conflicts={sessionsConflicts}
+      onKeepMine={onKeepMineSessions}
+      onReload={onReloadSessions}
+    />
+  );
+
   // The editor takes over the whole view when open — it is not a peer of the grid or
   // the read view, and rendering both at once would mean two sources of truth for the
   // same drill's text.
@@ -105,12 +128,7 @@ export default function Catalogue({
   if (runSession) {
     return (
       <div>
-        <SessionsSaveBanner
-          status={sessionsStatus}
-          error={sessionsError}
-          onKeepMine={onKeepMineSessions}
-          onReload={onReloadSessions}
-        />
+        {sessionsBanner}
         <SessionRun
           session={runSession}
           drills={drills}
@@ -129,12 +147,7 @@ export default function Catalogue({
   if (selectedSession) {
     return (
       <div>
-        <SessionsSaveBanner
-          status={sessionsStatus}
-          error={sessionsError}
-          onKeepMine={onKeepMineSessions}
-          onReload={onReloadSessions}
-        />
+        {sessionsBanner}
         <SessionBuilder
           session={selectedSession}
           drills={drills}
@@ -150,6 +163,7 @@ export default function Catalogue({
   if (selected) {
     return (
       <div>
+        {sessionsBanner}
         <DrillView
           drill={selected}
           status={drillStatus}
@@ -168,6 +182,8 @@ export default function Catalogue({
 
   return (
     <>
+      {sessionsBanner}
+
       {duplicateFolders ? (
         <div className="banner warn">
           There is more than one <strong>BallIsLife</strong> folder in your Drive. Drills

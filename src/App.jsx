@@ -42,7 +42,9 @@ export default function App() {
     // can conflict on two plans, and a conflicted plan must stay unsent — with its edit
     // kept — until the owner resolves THAT plan, while the others go on saving.
     conflicts: [],
-    status: "idle", // idle | dirty | saving | conflict | failed
+    // Save state for the batch, not for any one plan: a conflict is per id (above), so a
+    // failure on one plan is still reported while another is waiting to be resolved.
+    status: "idle", // idle | dirty | saving | failed
     error: null,
   });
   // Reported once after the load that did the work: the blob split is invisible in Drive
@@ -221,7 +223,7 @@ export default function App() {
     const pending = dirty.filter((id) => !conflicts.includes(id));
     // A failure stops the automatic retry — it waits for the next edit, the same terms the
     // drill editor offers. A conflict on one plan stops only that plan.
-    const status = error ? "failed" : conflicts.length ? "conflict" : pending.length ? "dirty" : "idle";
+    const status = error ? "failed" : pending.length ? "dirty" : "idle";
     setSessionsState({ ...latest, meta, dirty, conflicts, status, error: error ?? null });
     if (pending.length && !error) sessionsSaveTimer.current = setTimeout(flushSessionsSave, SAVE_DEBOUNCE_MS);
   }, [setSessionsState]);
@@ -244,7 +246,7 @@ export default function App() {
       ...cur,
       data: nextData,
       dirty: cur.dirty.includes(updatedSession.id) ? cur.dirty : [...cur.dirty, updatedSession.id],
-      status: cur.conflicts.length ? "conflict" : "dirty",
+      status: "dirty",
     });
     scheduleSessionsSave();
   }, [setSessionsState, scheduleSessionsSave]);
@@ -262,7 +264,7 @@ export default function App() {
       ...cur,
       dirty: cur.dirty.includes(id) ? cur.dirty : [...cur.dirty, id],
       conflicts,
-      status: conflicts.length ? "conflict" : "dirty",
+      status: "dirty",
     });
     sessionsSaveTimer.current = setTimeout(flushSessionsSave, 0);
   }, [setSessionsState, flushSessionsSave]);
@@ -639,7 +641,6 @@ export default function App() {
       meta,
       dirty: cur.dirty.filter((d) => d !== id),
       conflicts,
-      status: conflicts.length ? cur.status : cur.status === "conflict" ? "idle" : cur.status,
     });
     setSelectedSessionId(null);
     location.hash = formatHash({ view: "sessions" });
@@ -715,13 +716,14 @@ export default function App() {
   }, [status, drills, resolveRoute]);
 
   const sessionsList = Object.values(sessionsState.data.sessions);
-  // "Keep mine" writes ONE file, so the conflict banner belongs on the plan that actually
-  // conflicted rather than on whichever plan happens to be open.
-  const visibleSessionId = runSessionId ?? selectedSessionId;
-  const sessionsStatus =
-    sessionsState.status === "conflict" && !sessionsState.conflicts.includes(visibleSessionId)
-      ? "idle"
-      : sessionsState.status;
+  // "Keep mine" writes ONE file, so every conflict is offered with the name of the plan it
+  // is about — on whatever screen the owner is on, since a conflict he never sees is a plan
+  // that never saves.
+  const sessionsConflicts = sessionsState.conflicts.map((id) => {
+    const sess = sessionsState.data.sessions[id];
+    const theme = sess?.theme?.trim();
+    return { id, label: sess?.date ? (theme ? `${sess.date} · ${theme}` : sess.date) : id };
+  });
   const selectedSession = selectedSessionId ? sessionsState.data.sessions[selectedSessionId] ?? null : null;
   const runSession = runSessionId ? sessionsState.data.sessions[runSessionId] ?? null : null;
 
@@ -763,13 +765,14 @@ export default function App() {
         onSessionChange={onSessionChange}
         onSessionBack={onSessionBack}
         onDeleteSession={onDeleteSession}
-        sessionsStatus={sessionsStatus}
+        sessionsStatus={sessionsState.status}
+        sessionsConflicts={sessionsConflicts}
         sessionsError={sessionsState.error}
         sessionsMigrated={sessionsMigrated}
         sessionsFailed={sessionsFailed}
         sessionsUnmigrated={sessionsUnmigrated}
         sessionsLoadError={sessionsLoadError}
-        onKeepMineSessions={() => onKeepMineSessions(visibleSessionId)}
+        onKeepMineSessions={onKeepMineSessions}
         onReloadSessions={onReloadSessions}
         runSession={runSession}
         runTexts={runTexts}

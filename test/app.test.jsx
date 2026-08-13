@@ -528,6 +528,15 @@ describe("App sessions", () => {
       });
     };
 
+    // Only what the banners say — the plan being edited shows its own date in an input, so
+    // asserting on the whole document cannot tell "s1 conflicted" from "s1 is on screen".
+    const banners = () => [...container.querySelectorAll(".banner")].map((b) => b.textContent).join(" ");
+
+    // Finds the resolution button ("Keep mine" / "Reload") belonging to ONE named plan.
+    const conflictButton = (label, plan) =>
+      [...container.querySelectorAll("button")]
+        .find((b) => b.textContent.includes(label) && b.textContent.includes(plan));
+
     const twoPlans = (extra = {}) => sessionsLoad(
       { s1: initial(), s2: session("s2", "2026-08-14") },
       {
@@ -575,8 +584,12 @@ describe("App sessions", () => {
 
       const byId = Object.fromEntries(drive.saveSession.mock.calls.map(([c]) => [c.id, c]));
       expect(byId.s2.session.turnout).toBe(9); // saved despite s1 conflicting
-      // s1's conflict does not belong on s2's screen: "Keep mine" writes one file.
-      expect(container.textContent).not.toMatch(/changed in drive|changed on drive/i);
+      // s1's conflict IS shown while s2 is open — an unresolved conflict the owner never
+      // sees is how Drive gets overwritten — but it names s1, because "Keep mine" writes
+      // one file and must never read as an offer about the plan on screen.
+      expect(banners()).toMatch(/changed in drive|changed on drive/i);
+      expect(banners()).toContain("2026-08-12");
+      expect(banners()).not.toContain("2026-08-14");
       // And s1's own edit is untouched, waiting for the owner to choose.
       await goToHash("#/session/s1");
       expect(Number(minutesInput().value)).toBe(17);
@@ -676,6 +689,51 @@ describe("App sessions", () => {
       expect(drive.deleteSession).toHaveBeenCalledWith({ id: "s2", fileId: "f-s2" });
       expect(drive.saveSession.mock.calls.map(([c]) => c.id)).not.toContain("s2");
       expect(container.textContent).not.toContain("2026-08-14"); // and it stays gone
+    });
+
+    it("shows a conflict that lands after the builder was left, naming the plan", async () => {
+      // Back flushes, so the conflict arrives while the owner is on the session list. A
+      // banner rendered only inside the builder and the run view meant he never saw it —
+      // and an unresolved conflict he cannot see is one he can never resolve.
+      drive.saveSession.mockResolvedValue({ ok: false, conflict: true, id: "s1", modifiedTime: "S9" });
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+
+      await act(async () => { findButton("← Back").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(location.hash).toBe("#/sessions"); // on the list, not the builder
+      expect(banners()).toMatch(/changed in drive|changed on drive/i);
+      expect(banners()).toContain("2026-08-12");
+      expect(conflictButton("Keep mine", "2026-08-12")).toBeTruthy();
+    });
+
+    it("two conflicts in one flush are both offered, and each is resolved on its own", async () => {
+      drive.loadSessions.mockResolvedValue(twoPlans());
+      drive.saveSession.mockImplementation(({ id }) => Promise.resolve(
+        { ok: false, conflict: true, id, modifiedTime: id === "s1" ? "A9" : "B9" },
+      ));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+      await goToHash("#/session/s2");
+      await setNumber(0, "9");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+      // Both are named: keeping only the last conflictId lost the first one entirely.
+      expect(banners()).toContain("2026-08-12");
+      expect(banners()).toContain("2026-08-14");
+
+      drive.saveSession.mockImplementation(saveSessionOk("A10"));
+      await act(async () => { conflictButton("Keep mine", "2026-08-12").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      // Only the plan whose button was pressed is written…
+      expect(drive.saveSession.mock.calls.slice(2).map(([c]) => c.id)).toEqual(["s1"]);
+      // …and the other plan's conflict is still there, still unwritten.
+      expect(banners()).toContain("2026-08-14");
+      expect(banners()).not.toContain("2026-08-12");
     });
   });
 });

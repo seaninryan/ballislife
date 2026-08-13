@@ -253,7 +253,7 @@ describe("Catalogue sessions switch", () => {
     expect(html).not.toMatch(/still listed here/i);
   });
 
-  it("surfaces a sessions save conflict the way the editor does", () => {
+  it("names the plan a sessions save conflict is about, wherever it is shown", () => {
     const session = { id: "s1", date: "2026-08-12", squad: "", theme: "", length: 75,
       blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },
         { slot: "skill", drill: null, minutes: null, note: "" },
@@ -262,10 +262,24 @@ describe("Catalogue sessions switch", () => {
         { slot: "fun", drill: null, minutes: null, note: "" }] };
     const html = render({
       status: "ready", drills: [], mode: "sessions", selectedSession: session,
-      sessionsStatus: "conflict",
+      sessionsConflicts: [{ id: "s1", label: "2026-08-12" }],
     });
     expect(html).toMatch(/changed in drive|changed on drive/i);
     expect(html).toMatch(/keep mine/i);
     expect(html).toMatch(/reload/i);
+    // The name is the point: the banner shows on every view now, so it has to say which
+    // plan "Keep mine" would write.
+    expect(html).toContain("2026-08-12");
+  });
+
+  it("shows a sessions conflict on the session list too, not only on the plan itself", () => {
+    // It used to render inside the builder and the run view only, so a conflict landing
+    // after Back was never seen — and never resolved.
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", sessions: [],
+      sessionsConflicts: [{ id: "s1", label: "2026-08-12" }],
+    });
+    expect(html).toMatch(/changed in drive|changed on drive/i);
+    expect(html).toContain("2026-08-12");
   });
 });
