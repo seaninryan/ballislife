@@ -1016,6 +1016,37 @@ describe("SessionRun marks follow the drill, not the position", () => {
     expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-summary").textContent)
       .toContain("Done");
   });
+
+  it("repairs an index-keyed session file when the plan is reordered under it", () => {
+    // The effect's remoteKey is built from the MIGRATED marks, not the raw ones. Raw, the
+    // key would be identical before and after a reorder — index 0 either way — so the
+    // effect would not re-run and the stale index-keyed marks would stay in Drive, where
+    // another device would read index 0 as whichever drill now sits there. Migrating first
+    // makes the key change, which re-runs the reconciliation and reports the slot-keyed
+    // correction upward.
+    const s = { ...session(twoBlocks()), progress: {
+      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("19:00") },
+    } };
+    const onProgress = vi.fn();
+    root = createRoot(container);
+    act(() => { root.render(<SessionRun session={s} drills={runDrills()} texts={{}} today="2026-08-13" onProgress={onProgress} now={now} />); });
+    // Index 0 was the warm-up when the mark was made, so that is where it lands.
+    expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-summary").textContent)
+      .toContain("Done");
+    onProgress.mockClear();
+
+    // Now the blocks are swapped in place, as moveBlock does.
+    const swapped = { ...s, blocks: [s.blocks[1], s.blocks[0]] };
+    act(() => { root.render(<SessionRun session={swapped} drills={runDrills()} texts={{}} today="2026-08-13" onProgress={onProgress} now={now} />); });
+    const rows = container.querySelectorAll(".run-block");
+    // The mark stays on the warm-up, which is now the second row. The skill block, which
+    // moved into position 0, is emphatically NOT done.
+    expect(rows[0].querySelector(".run-block-summary").textContent).toContain("skill");
+    expect(rows[0].querySelector(".run-block-now-badge")).not.toBeNull();
+    expect(rows[1].querySelector(".run-block-summary").textContent).toContain("Done");
+    // And Drive is told to store it by slot, so the next device to read it agrees.
+    expect(onProgress).toHaveBeenCalledWith("2026-08-13", { warmup: DONE }, at("19:00"));
+  });
 });
 
 describe("SessionRun print stylesheet", () => {
