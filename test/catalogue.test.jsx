@@ -194,6 +194,19 @@ describe("Catalogue sessions switch", () => {
     expect(html).toMatch(/tried again|retried/i);
   });
 
+  it("says a plan is still in the old file because its own file cannot be read", () => {
+    // Not the "tried again when you next save" wording: saving this one is refused, because
+    // writing its file now would leave two claiming the plan. Only Drive can fix it.
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", sessions: [],
+      sessionsUnmigrated: [{ id: "2026-08-13", reason: "unreadable-file", error: null }],
+    });
+    expect(html).toContain("2026-08-13");
+    expect(html).toMatch(/could not be read/i);
+    expect(html).toMatch(/in Drive/i);
+    expect(html).not.toMatch(/tried again when you next save/i);
+  });
+
   it("keeps the drills usable when the sessions load failed outright", () => {
     const drills = [
       { id: "a", slug: "rondo", title: "Rondo", category: "warmup", minutes: 10,

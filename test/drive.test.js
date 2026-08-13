@@ -680,6 +680,68 @@ describe("migrating the sessions.json blob", () => {
     expect(api.writeFile.mock.calls.map((c) => c[1])).toEqual(["idx"]);
   });
 
+  it("does not count a file it cannot parse as proof the plan already moved", async () => {
+    // a.json exists but holds broken JSON, so the plan is nowhere the app can show it.
+    // Counting the file by NAME renamed the blob aside — the last readable copy of a — and
+    // closed the very recovery path the rename gate exists for.
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      sessions: [file("FA", "a.json", "T1")],
+      read: { BLOB: blob({ a: sess("a"), b: sess("b") }), FA: "{{{ half-written" },
+    });
+    const { sessions, migrated, unmigrated } = await loadSessions("F1");
+
+    expect(migrated).toBe(1); // b only
+    expect(api.createFile.mock.calls.map((c) => c[2])).toEqual(["b.json", "index.json"]);
+    // a is still shown, out of the blob, and the blob stays findable so a later load — after
+    // the owner repairs a.json — can migrate it for real.
+    expect(sessions.a).toBeTruthy();
+    expect(api.renameFile).not.toHaveBeenCalled();
+    expect(unmigrated).toEqual([
+      expect.objectContaining({ id: "a", reason: "unreadable-file" }),
+    ]);
+  });
+
+  it("does not write a second file for a plan whose own file merely failed to download", async () => {
+    // A flaky read is not proof the file is broken. Writing a.json again would leave two
+    // files claiming the plan, which blocks saving it at all.
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      sessions: [file("FA", "a.json", "T1")],
+      read: { BLOB: blob({ a: sess("a") }) },
+    });
+    const good = api.readFile.getMockImplementation();
+    api.readFile.mockImplementation(async (t, id) => {
+      if (id === "FA") throw Object.assign(new Error("flaky"), { code: 500 });
+      return good(t, id);
+    });
+
+    const { migrated, unmigrated } = await loadSessions("F1");
+    expect(migrated).toBe(0);
+    expect(api.createFile.mock.calls.map((c) => c[2])).toEqual(["index.json"]);
+    expect(unmigrated.map((u) => u.id)).toEqual(["a"]);
+    expect(api.renameFile).not.toHaveBeenCalled();
+  });
+
+  it("refuses to save a plan shown from the blob because its own file is unreadable", async () => {
+    // Its edit stays in memory, where the caller holds it. Creating the file now would make
+    // the second file claiming this plan — the state that blocks saving it entirely.
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      sessions: [file("FA", "a.json", "T1")],
+      read: { BLOB: blob({ a: sess("a") }), FA: "{{{ half-written" },
+    });
+    await loadSessions("F1");
+    api.createFile.mockClear();
+    api.writeFile.mockClear();
+
+    const r = await saveSession({ folder: "F1", id: "a", session: sess("a"), baseModifiedTime: null });
+    expect(r.ok).toBe(false);
+    expect(r.conflict).toBeFalsy();
+    expect(api.createFile).not.toHaveBeenCalled();
+    expect(api.writeFile).not.toHaveBeenCalled();
+  });
+
   it("still loads the migrated plans when the rename fails", async () => {
     // The rename is only tidying — every plan is already safe in its own file.
     mockSessionsDrive({

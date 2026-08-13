@@ -90,8 +90,13 @@ export default function Catalogue({
   // A plan two files claim. It IS shown, so it does not belong with the unreadable ones.
   const duplicated = sessionsFailed.filter((f) => f.reason === "duplicate");
   // A plan still in the blob but shown from it: its file will be written by its next save.
-  const notMoved = sessionsUnmigrated.filter((u) => u.reason !== "unsafe-id");
+  const notMoved = sessionsUnmigrated.filter(
+    (u) => u.reason !== "unsafe-id" && u.reason !== "unreadable-file",
+  );
   const unnameable = sessionsUnmigrated.filter((u) => u.reason === "unsafe-id");
+  // Shown from the blob too, but saving it is refused rather than pending: a file already
+  // claims its name, so writing one now would leave two claiming the plan.
+  const fileUnreadable = sessionsUnmigrated.filter((u) => u.reason === "unreadable-file");
 
   // Rendered on every view below except the drill editor, which has a conflict prompt of
   // its own for the drill being typed into: two identically shaped "Keep mine" offers about
@@ -222,6 +227,19 @@ export default function Catalogue({
           file{notMoved.length === 1 ? "" : "s"} yet
           ({notMoved.map((u) => u.id).join(", ")}). They are still listed here and nothing
           has been lost — it will be tried again when you next save them or reload.
+        </div>
+      ) : null}
+
+      {fileUnreadable.length ? (
+        <div className="banner err">
+          {fileUnreadable.length === 1 ? "A plan is" : `${fileUnreadable.length} plans are`} still
+          only in your old <strong>sessions.json</strong>
+          ({fileUnreadable.map((u) => u.id).join(", ")}), because the file that should hold
+          {fileUnreadable.length === 1 ? " it" : " them"} in your <strong>sessions</strong> folder
+          could not be read. {fileUnreadable.length === 1 ? "It is" : "They are"} listed here and
+          nothing has been lost, but saving {fileUnreadable.length === 1 ? "it" : "them"} is
+          blocked so a second file cannot end up claiming the same plan — fix or delete that
+          file in Drive, then reload.
         </div>
       ) : null}
 

@@ -149,6 +149,12 @@ const sessionFileIds = new Map();
 // here.
 const ambiguousSessionIds = new Set();
 
+// Ids shown out of the old blob because the file that should hold them could not be read. A
+// save would have to CREATE the file, making the second one claiming the plan — the state
+// ambiguousSessionIds above exists to refuse. Replaced by every load, so repairing the file in
+// Drive and reloading clears it.
+const unreadableSessionIds = new Set();
+
 // Drops every baseline, session file id and resolved folder. None of it survives a sign-out
 // (another account's Drive shares none of it) and none of it should survive a test: a
 // leftover baseline for a reused literal id made a test pass alone and fail in file order.
@@ -156,6 +162,7 @@ export function forgetDriveState() {
   known.clear();
   sessionFileIds.clear();
   ambiguousSessionIds.clear();
+  unreadableSessionIds.clear();
   sessionsFolders.clear();
 }
 
@@ -272,7 +279,12 @@ const sessionBody = (id, session) => JSON.stringify({ ...session, id }, null, 2)
 // halfway (or retried by withRetry after a 401) resumes rather than clobbering a per-file
 // edit made since. The blob is then renamed aside, so it is no longer found by name and the
 // migration does not repeat.
-async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) {
+//
+// `haveFile` is the ids whose file was actually READ as a plan this load, and `claimedByFile`
+// the ids some file in the folder is named for whether it could be read or not. The
+// difference is the point: a file counted by name alone let a broken a.json pass as "already
+// migrated" and the blob — the last readable copy of that plan — be renamed aside.
+async function migrateBlob(token, folder, sessionsFolder, parentFiles, { haveFile, claimedByFile }) {
   const blob = parentFiles.find((f) => f.name === SESSIONS_NAME) ?? null;
   if (!blob) return { migrated: 0, entries: {}, failed: [], unmigrated: [] };
 
@@ -308,12 +320,21 @@ async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) 
     };
   }
   const sessions = parsed.sessions;
-  const haveFile = new Set(listing.map((f) => sessionIdFromFileName(f.name)).filter(Boolean));
   const entries = {};
   const unmigrated = [];
 
   for (const [id, session] of Object.entries(sessions)) {
     if (haveFile.has(id)) continue;
+    if (claimedByFile.has(id)) {
+      // A file of this name is there but yielded no plan — broken JSON, or a download that
+      // failed this load. Writing a second file under the same name would leave two claiming
+      // the plan, which blocks saving it at all, and overwriting the one that is there could
+      // destroy a version the owner wants. So nothing is written: the plan is shown from the
+      // blob, the blob stays findable (see the rename guard below), and the next load — once
+      // the file is repaired or the download works — migrates or adopts it for real.
+      unmigrated.push({ id, session, reason: "unreadable-file", error: null });
+      continue;
+    }
     let name;
     try {
       name = sessionFileName(id);
@@ -366,9 +387,12 @@ async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) 
 //                same reporting as drills. `reason`: "read" a flaky download, "parse" a file
 //                whose JSON is broken, "unnamed" a .json file whose name is not a legal id,
 //                "blob" a sessions.json that could not be read at all.
-//    unmigrated: [{ id, reason, error }] — plans read out of the blob that have no file yet.
-//                `reason` "write" is shown all the same; "unsafe-id" cannot be, having no
-//                name it could ever live under. Either way the blob is left findable.
+//    unmigrated: [{ id, reason, error }] — plans read out of the blob that have no readable
+//                file yet. `reason`: "write" a file the migration could not create, shown all
+//                the same and written by its first save; "unreadable-file" a file that exists
+//                under this plan's name but yielded nothing, shown but not saveable until it
+//                is fixed in Drive; "unsafe-id" an id no file name could ever hold, so it
+//                cannot be shown at all. In every case the blob is left findable.
 export async function loadSessions(folder) {
   return withRetry(async () => {
     const token = getAccessToken();
@@ -381,14 +405,10 @@ export async function loadSessions(folder) {
       ? readSessionsIndex(await api.readFile(token, indexFile.id))
       : readSessionsIndex(null);
 
-    const { migrated, entries: fromBlob, failed: blobFailed, unmigrated } = await migrateBlob(
-      token, folder, sessionsFolder, parentFiles, files,
-    );
-
     const { keep, refetch, dropped, unnamed } = diffSessionsIndex(cached, files);
 
-    const built = { ...fromBlob };
-    const failed = [...blobFailed];
+    const built = {};
+    const failed = [];
     for (const file of refetch) {
       try {
         const text = await api.readFile(token, file.id);
@@ -405,6 +425,22 @@ export async function loadSessions(folder) {
         if (previous) built[file.id] = previous;
       }
     }
+
+    // The blob is split only now, after every existing file has been read: "this plan already
+    // has a file" has to mean a file that actually yielded a plan, and that is not known until
+    // the reads are done.
+    const haveFile = new Set();
+    for (const e of Object.values({ ...keep, ...built })) {
+      const id = sessionIdFromFileName(e?.name);
+      if (id && e?.session) haveFile.add(id);
+    }
+    const claimedByFile = new Set(files.map((f) => sessionIdFromFileName(f.name)).filter(Boolean));
+
+    const { migrated, entries: fromBlob, failed: blobFailed, unmigrated } = await migrateBlob(
+      token, folder, sessionsFolder, parentFiles, { haveFile, claimedByFile },
+    );
+    Object.assign(built, fromBlob);
+    failed.unshift(...blobFailed);
 
     // A .json file in the sessions folder that cannot yield an id. Nothing can be loaded
     // from it, but it is named rather than only skipped.
@@ -466,7 +502,9 @@ export async function loadSessions(folder) {
     // knew: a plan deleted on another device must not leave a file id behind to save into.
     sessionFileIds.clear();
     ambiguousSessionIds.clear();
+    unreadableSessionIds.clear();
     for (const dupe of duplicates) ambiguousSessionIds.add(dupe.id);
+    for (const u of unmigrated) if (u.reason === "unreadable-file") unreadableSessionIds.add(u.id);
     for (const [id, m] of Object.entries(meta)) {
       known.set(m.fileId, m.modifiedTime);
       sessionFileIds.set(id, m.fileId);
@@ -505,6 +543,18 @@ export async function saveSession({ folder, id, session, baseModifiedTime }) {
       id,
       error: new Error(
         `More than one file in Drive is the plan "${id}". Rename or delete one in the sessions folder, then reload.`,
+      ),
+    };
+  }
+  if (unreadableSessionIds.has(id)) {
+    // This plan is on screen out of the old blob because its own file could not be read.
+    // Saving would create a second file claiming it — exactly what the check above refuses —
+    // so refuse here too and leave the edit in memory where the caller holds it.
+    return {
+      ok: false,
+      id,
+      error: new Error(
+        `The file for the plan "${id}" in Drive could not be read, so it is being shown from your old sessions.json. Fix or delete that file in the sessions folder, then reload.`,
       ),
     };
   }
