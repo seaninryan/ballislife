@@ -782,6 +782,56 @@ describe("App sessions", () => {
 
       expect(container.textContent).not.toMatch(/not moved into its own file/i);
     });
+
+    // A save that resolves while the plan has been edited again reports a plan Drive does
+    // NOT have. Without the identity check at the end of the loop the id would be marked
+    // clean and that edit would never be written — the same class of bug as the drill
+    // editor's "a save burst mis-reported which edit landed".
+    it("an edit made while the save was in flight is written by a second save", async () => {
+      let release;
+      drive.saveSession.mockImplementation(({ id }) => new Promise((resolve) => {
+        release = () => resolve({ ok: true, id, fileId: `f-${id}`, modifiedTime: "S2" });
+      }));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "12");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+
+      await setNumber(2, "20"); // the owner keeps editing; this write has not answered yet
+      drive.saveSession.mockImplementation(saveSessionOk("S3"));
+      await act(async () => { release(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+      expect(drive.saveSession).toHaveBeenCalledTimes(2);
+      const second = drive.saveSession.mock.calls[1][0];
+      expect(second.session.blocks[1].minutes).toBe(20);
+      expect(second.baseModifiedTime).toBe("S2"); // against what the first write left
+    });
+
+    // Two flushes overlapping would send the same plan twice against the same baseline,
+    // and Drive reports the second as a conflict against our own first write — a conflict
+    // prompt for a plan nobody else touched.
+    it("does not start a second flush while one is still in flight", async () => {
+      let release;
+      drive.saveSession.mockImplementation(({ id }) => new Promise((resolve) => {
+        release = () => resolve({ ok: true, id, fileId: `f-${id}`, modifiedTime: "S2" });
+      }));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "12");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+
+      // Back flushes on the way out, with the first write still unanswered.
+      await act(async () => { findButton("← Back").click(); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+
+      await act(async () => { release(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSession.mock.calls.map(([c]) => c.baseModifiedTime)).toEqual(["S1"]);
+      expect(container.textContent).not.toMatch(/changed in drive|changed on drive/i);
+    });
   });
 });
 
