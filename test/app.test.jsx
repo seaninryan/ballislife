@@ -345,6 +345,26 @@ describe("App sessions", () => {
     expect(container.textContent).toMatch(/sessions-before-split\.json/);
   });
 
+  it("keeps the drills on screen when the sessions load fails outright", async () => {
+    // One flaky request during the one-time migration used to replace the whole app with
+    // an error screen, drills included — all of them already loaded.
+    drive.loadSessions.mockRejectedValue(Object.assign(new Error("boom"), { code: 500 }));
+    await mount();
+    expect(container.textContent).toContain("Alpha");
+    expect(container.textContent).toContain("Bravo");
+    expect(container.textContent).toMatch(/session plans could not be loaded/i);
+  });
+
+  it("reports the plans the migration could not move yet", async () => {
+    drive.loadSessions.mockResolvedValue(sessionsLoad(
+      { s1: session("s1", "2026-08-12") },
+      { migrated: 0, unmigrated: [{ id: "s1", reason: "write", error: new Error("boom") }] },
+    ));
+    await mount();
+    expect(container.textContent).toMatch(/not moved into its own file/i);
+    expect(container.textContent).toContain("s1");
+  });
+
   it("says nothing about migration on an ordinary load", async () => {
     drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: session("s1", "2026-08-12") }));
     await mount();

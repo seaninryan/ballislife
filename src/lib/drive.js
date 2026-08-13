@@ -267,7 +267,7 @@ const sessionBody = (id, session) => JSON.stringify({ ...session, id }, null, 2)
 // migration does not repeat.
 async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) {
   const blob = parentFiles.find((f) => f.name === SESSIONS_NAME) ?? null;
-  if (!blob) return { migrated: 0, entries: {}, failed: [] };
+  if (!blob) return { migrated: 0, entries: {}, failed: [], unmigrated: [] };
 
   // A blob we cannot read is NOT an empty one. Either way nothing is written and nothing is
   // renamed, so the blob stays findable by name and a later load — after the owner repairs
@@ -279,13 +279,19 @@ async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) 
   } catch (error) {
     // A 401 must still reach withRetry, which reauths and retries the whole load.
     if (error?.code === 401) throw error;
-    return { migrated: 0, entries: {}, failed: [{ id: blob.id, name: SESSIONS_NAME, error, reason: "blob" }] };
+    return {
+      migrated: 0,
+      entries: {},
+      unmigrated: [],
+      failed: [{ id: blob.id, name: SESSIONS_NAME, error, reason: "blob" }],
+    };
   }
   const parsed = parseSessionsBlob(raw);
   if (!parsed.ok) {
     return {
       migrated: 0,
       entries: {},
+      unmigrated: [],
       failed: [{
         id: blob.id,
         name: SESSIONS_NAME,
@@ -297,7 +303,7 @@ async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) 
   const sessions = parsed.sessions;
   const haveFile = new Set(listing.map((f) => sessionIdFromFileName(f.name)).filter(Boolean));
   const entries = {};
-  let unmigrated = 0;
+  const unmigrated = [];
 
   for (const [id, session] of Object.entries(sessions)) {
     if (haveFile.has(id)) continue;
@@ -307,10 +313,22 @@ async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) 
     } catch {
       // An id the blob accepted that cannot be a file name. Nothing can be written for it,
       // so the blob must stay: see the rename guard below.
-      unmigrated += 1;
+      unmigrated.push({ id, session: null, reason: "unsafe-id", error: null });
       continue;
     }
-    const created = await api.createFile(token, sessionsFolder, name, sessionBody(id, session));
+    let created;
+    try {
+      created = await api.createFile(token, sessionsFolder, name, sessionBody(id, session));
+    } catch (error) {
+      // A 401 must still reach withRetry, which reauths and retries the whole load.
+      if (error?.code === 401) throw error;
+      // One flaky request during the one-time migration must not cost this plan. It was
+      // already read out of the blob, so it is still shown; its file is created on its
+      // first save (drive.js has no file id for it, so saveSession takes the create
+      // branch), or by the next load, which finds the blob still here.
+      unmigrated.push({ id, session, reason: "write", error });
+      continue;
+    }
     known.set(created.id, created.modifiedTime);
     entries[created.id] = {
       name,
@@ -321,7 +339,7 @@ async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) 
 
   // Keep the blob findable while any plan still lives only in it — a repeated read costs one
   // request, whereas renaming it away would hide a plan the app cannot show.
-  if (!unmigrated) {
+  if (!unmigrated.length) {
     try {
       await api.renameFile(token, blob.id, SESSIONS_BACKUP_NAME);
     } catch {
@@ -330,16 +348,18 @@ async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) 
     }
   }
 
-  return { migrated: Object.keys(entries).length, entries, failed: [] };
+  return { migrated: Object.keys(entries).length, entries, failed: [], unmigrated };
 }
 
-// -> { sessions, meta, migrated, failed }
-//    sessions: { [id]: session }                    the map the app renders
-//    meta:     { [id]: { fileId, modifiedTime } }   per-file conflict baselines
-//    migrated: how many plans came out of the old blob this load
-//    failed:   [{ id, name, error, reason }] — everything that could not be read, for the
-//              same reporting as drills. `reason` is "read" for a flaky download and
-//              "blob" for a sessions.json that could not be read at all.
+// -> { sessions, meta, migrated, failed, unmigrated }
+//    sessions:   { [id]: session }                    the map the app renders
+//    meta:       { [id]: { fileId, modifiedTime } }   per-file conflict baselines
+//    migrated:   how many plans came out of the old blob this load
+//    failed:     [{ id, name, error, reason }] — everything that could not be read, for the
+//                same reporting as drills. `reason` is "read" for a flaky download and
+//                "blob" for a sessions.json that could not be read at all.
+//    unmigrated: [{ id, reason, error }] — plans read out of the blob that have no file
+//                yet. Shown all the same; the blob is left findable so a later load retries.
 export async function loadSessions(folder) {
   return withRetry(async () => {
     const token = getAccessToken();
@@ -352,7 +372,7 @@ export async function loadSessions(folder) {
       ? readSessionsIndex(await api.readFile(token, indexFile.id))
       : readSessionsIndex(null);
 
-    const { migrated, entries: fromBlob, failed: blobFailed } = await migrateBlob(
+    const { migrated, entries: fromBlob, failed: blobFailed, unmigrated } = await migrateBlob(
       token, folder, sessionsFolder, parentFiles, files,
     );
 
@@ -396,7 +416,20 @@ export async function loadSessions(folder) {
       sessionFileIds.set(id, m.fileId);
     }
 
-    return { sessions, meta, migrated, failed };
+    // A plan whose file could not be written is shown from what the blob held. It gets no
+    // meta entry and no file id on purpose: with nothing to save into, its first save takes
+    // saveSession's create branch and finally gives it the file the migration could not.
+    for (const { id, session } of unmigrated) {
+      if (session && !sessions[id]) sessions[id] = { ...session, id };
+    }
+
+    return {
+      sessions,
+      meta,
+      migrated,
+      failed,
+      unmigrated: unmigrated.map(({ id, reason, error }) => ({ id, reason, error })),
+    };
   });
 }
 

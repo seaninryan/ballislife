@@ -183,6 +183,31 @@ describe("Catalogue sessions switch", () => {
     expect(html).toContain("b.json");
   });
 
+  it("says which plans have not moved into their own files yet", () => {
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", sessions: [],
+      sessionsMigrated: 1,
+      sessionsUnmigrated: [{ id: "2026-08-13", reason: "write", error: new Error("x") }],
+    });
+    expect(html).toContain("2026-08-13");
+    expect(html).toMatch(/not.*moved|have not been moved|still/i);
+    expect(html).toMatch(/tried again|retried/i);
+  });
+
+  it("keeps the drills usable when the sessions load failed outright", () => {
+    const drills = [
+      { id: "a", slug: "rondo", title: "Rondo", category: "warmup", minutes: 10,
+        players: null, tags: [], thumb: null, invalid: null },
+    ];
+    const html = render({
+      status: "ready", drills,
+      sessionsLoadError: Object.assign(new Error("drive 500"), { code: 500 }),
+    });
+    expect(html).toContain("Rondo");
+    expect(html).toMatch(/session plans could not be loaded/i);
+    expect(html).toMatch(/having trouble/i);
+  });
+
   it("surfaces a sessions save conflict the way the editor does", () => {
     const session = { id: "s1", date: "2026-08-12", squad: "", theme: "", length: 75,
       blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },

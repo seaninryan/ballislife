@@ -46,6 +46,11 @@ export default function App() {
   // otherwise, and the owner should know his plans moved and where the backup is.
   const [sessionsMigrated, setSessionsMigrated] = useState(0);
   const [sessionsFailed, setSessionsFailed] = useState([]);
+  // Plans read out of the old blob that have no file of their own yet, and a sessions load
+  // that failed entirely. Both are reported next to the drills rather than as an error
+  // screen: the catalogue is already loaded by then, and hiding it costs more than it saves.
+  const [sessionsUnmigrated, setSessionsUnmigrated] = useState([]);
+  const [sessionsLoadError, setSessionsLoadError] = useState(null);
   const folderRef = useRef(null);
   // A monotonic token, not the drill id: reopening the SAME drill starts a second
   // request that an id check cannot tell from the first, so the slower response won.
@@ -278,17 +283,30 @@ export default function App() {
       setDuplicateFolders(Boolean(dupes));
       // Sessions load after drills: they reference drills by slug, so nothing about
       // resolving a session needs the catalogue to still be loading.
-      const { sessions, meta, migrated, failed: unreadable } = await loadSessions(folderId);
-      setSessionsState({
-        data: { version: 1, sessions },
-        meta: meta ?? {},
-        dirty: [],
-        status: "idle",
-        error: null,
-        conflictId: null,
-      });
-      setSessionsMigrated(migrated ?? 0);
-      setSessionsFailed(unreadable ?? []);
+      //
+      // Its own try/catch, deliberately: this ran inside the one below, so a single flaky
+      // request during the one-time blob migration replaced the whole app — drills
+      // included, all of them already loaded — with an error screen.
+      try {
+        const { sessions, meta, migrated, failed: unreadable, unmigrated } =
+          await loadSessions(folderId);
+        setSessionsState({
+          data: { version: 1, sessions },
+          meta: meta ?? {},
+          dirty: [],
+          status: "idle",
+          error: null,
+          conflictId: null,
+        });
+        setSessionsMigrated(migrated ?? 0);
+        setSessionsFailed(unreadable ?? []);
+        setSessionsUnmigrated(unmigrated ?? []);
+        setSessionsLoadError(null);
+      } catch (e) {
+        // Nothing in Drive has been changed by a failed load, so the plans are still there
+        // to find on the next one. Say so, and leave the drills usable meanwhile.
+        setSessionsLoadError(e);
+      }
       setStatus("ready");
       return loaded;
     } catch (e) {
@@ -724,6 +742,8 @@ export default function App() {
         sessionsError={sessionsState.error}
         sessionsMigrated={sessionsMigrated}
         sessionsFailed={sessionsFailed}
+        sessionsUnmigrated={sessionsUnmigrated}
+        sessionsLoadError={sessionsLoadError}
         onKeepMineSessions={onKeepMineSessions}
         onReloadSessions={onReloadSessions}
         runSession={runSession}

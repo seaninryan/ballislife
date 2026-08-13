@@ -599,6 +599,59 @@ describe("migrating the sessions.json blob", () => {
     expect(Object.keys(sessions).sort()).toEqual(["a", "b"]);
   });
 
+  it("still shows a plan whose file could not be written, and reports it", async () => {
+    // One flaky request during the one-time migration, plausibly on bad signal. Hiding the
+    // plan would be worse than showing one whose file does not exist yet: it gets one on
+    // its first save, which is exactly what the migration would have done.
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: blob({ a: sess("a"), b: sess("b") }) },
+    });
+    api.createFile.mockImplementation(async (_t, _f, name) => {
+      if (name === "b.json") throw Object.assign(new Error("boom"), { code: 500 });
+      return { id: `F-${name}`, modifiedTime: "TN" };
+    });
+
+    const { sessions, migrated, unmigrated } = await loadSessions("F1");
+    expect(Object.keys(sessions).sort()).toEqual(["a", "b"]);
+    expect(migrated).toBe(1);
+    expect(unmigrated.map((u) => u.id)).toEqual(["b"]);
+    // The blob is the only copy of b, so it must stay findable for the next load to retry.
+    expect(api.renameFile).not.toHaveBeenCalled();
+  });
+
+  it("creates the file on the first save of a plan the migration could not write", async () => {
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: blob({ b: sess("b") }) },
+    });
+    api.createFile.mockRejectedValueOnce(Object.assign(new Error("boom"), { code: 500 }));
+    api.createFile.mockResolvedValue({ id: "F-b", modifiedTime: "TN" });
+    await loadSessions("F1");
+
+    api.createFile.mockClear();
+    const r = await saveSession({ folder: "F1", id: "b", session: sess("b"), baseModifiedTime: null });
+    expect(r).toMatchObject({ ok: true, id: "b", fileId: "F-b" });
+    expect(api.createFile.mock.calls[0][2]).toBe("b.json");
+  });
+
+  it("lets a 401 while writing a migrated plan reach the retry", async () => {
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: blob({ a: sess("a") }) },
+    });
+    let creates = 0;
+    api.createFile.mockImplementation(async (_t, _f, name) => {
+      creates += 1;
+      if (creates === 1) throw Object.assign(new Error("auth"), { code: 401 });
+      return { id: `F-${name}`, modifiedTime: "TN" };
+    });
+    const { sessions, migrated, unmigrated } = await loadSessions("F1");
+    expect(migrated).toBe(1);
+    expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(unmigrated).toEqual([]);
+  });
+
   it("never renames a blob it could not parse, and says so", async () => {
     // An upload interrupted mid-write leaves exactly this. Renaming it aside would make
     // the only copy of every plan unfindable by name, so the migration could never retry.

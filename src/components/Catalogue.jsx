@@ -52,7 +52,7 @@ export default function Catalogue({
   sessions = [], selectedSession, onOpenSession, onCreateSession,
   onSessionChange, onSessionBack, onDeleteSession,
   sessionsStatus, sessionsError, onKeepMineSessions, onReloadSessions,
-  sessionsMigrated = 0, sessionsFailed = [],
+  sessionsMigrated = 0, sessionsFailed = [], sessionsUnmigrated = [], sessionsLoadError,
   runSession, runTexts, onOpenRun, onRunBack, onRunSwap, onRunProgress,
 }) {
   if (status === "signed-out") {
@@ -72,6 +72,8 @@ export default function Catalogue({
   // it as one would tell the owner a plan is missing that never existed as a file.
   const blobUnreadable = sessionsFailed.some((f) => f.reason === "blob");
   const unloadable = sessionsFailed.filter((f) => f.reason !== "blob");
+  // A plan still in the blob but shown from it: its file will be written by its next save.
+  const notMoved = sessionsUnmigrated.filter((u) => u.reason !== "unsafe-id");
 
   // The editor takes over the whole view when open — it is not a peer of the grid or
   // the read view, and rendering both at once would mean two sources of truth for the
@@ -178,6 +180,23 @@ export default function Catalogue({
           moved out of it and nothing has been renamed. Any plan still only in that file is
           not listed below yet. It will be tried again next time you reload — if it keeps
           failing, check the file in Drive.
+        </div>
+      ) : null}
+
+      {sessionsLoadError ? (
+        <div className="banner err">
+          Your session plans could not be loaded: {friendlyError(sessionsLoadError)} Your
+          drills are below, and nothing in Drive has been changed. Reload to try again.
+        </div>
+      ) : null}
+
+      {notMoved.length ? (
+        <div className="banner warn">
+          {notMoved.length} session plan{notMoved.length === 1 ? " has" : "s have"} not
+          moved into {notMoved.length === 1 ? "its" : "their"} own
+          file{notMoved.length === 1 ? "" : "s"} yet
+          ({notMoved.map((u) => u.id).join(", ")}). They are still listed here and nothing
+          has been lost — it will be tried again when you next save them or reload.
         </div>
       ) : null}
 
