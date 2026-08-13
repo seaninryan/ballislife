@@ -2,7 +2,7 @@
 // DrillPicker is presentational: given drills and what the slot wants, it renders a
 // ranked, searchable, reorderable list and reports the chosen drill. All of the ordering
 // rules live in lib/picker.js and are tested there — these tests are about the controls.
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import React, { act } from "react";
 import DrillPicker from "../src/components/DrillPicker.jsx";
@@ -19,13 +19,23 @@ const drills = [
 ];
 
 let container;
+let root;
 const mount = (props) => {
   container = document.createElement("div");
   document.body.appendChild(container);
-  const root = createRoot(container);
+  root = createRoot(container);
   act(() => { root.render(<DrillPicker drills={drills} {...props} />); });
   return root;
 };
+
+// Every test mounts into a fresh container; without this each one stays mounted in the
+// document for the rest of the file, so a stray querySelector could find another test's
+// tree — and `container` would leak across tests as the file grows.
+afterEach(() => {
+  act(() => root?.unmount());
+  root = null;
+  container?.remove();
+});
 
 const options = () => [...container.querySelectorAll(".drill-picker-option")];
 const titles = () => options().map((b) => b.querySelector(".block-title").textContent);
@@ -99,7 +109,8 @@ describe("DrillPicker", () => {
   it("offers a way out when given one", () => {
     const onCancel = vi.fn();
     mount({ slot: "warmup", onCancel });
-    [...container.querySelectorAll("button")].find((b) => /cancel/i.test(b.textContent)).click();
+    const cancel = [...container.querySelectorAll("button")].find((b) => /cancel/i.test(b.textContent));
+    act(() => { cancel.click(); });
     expect(onCancel).toHaveBeenCalled();
   });
 });
