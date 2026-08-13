@@ -27,6 +27,16 @@ describe("emptySession", () => {
   it("a new session has a progress map, so the shape is the same before and after a run", () => {
     expect(emptySession("s1", "2026-08-13").progress).toEqual({});
   });
+
+  it("has exactly one block per slot, which is what makes a slot a stable key for progress", () => {
+    // lib/progress.js keys marks by slot so that reordering blocks cannot move a mark to
+    // another drill. If a future feature ever allows two blocks in one slot, this fails
+    // first and points at why.
+    const blocks = emptySession("s1", "2026-08-13").blocks;
+    const slots = blocks.map((b) => b.slot);
+    expect(new Set(slots).size).toBe(blocks.length);
+    expect(slots).toEqual(SLOTS);
+  });
 });
 
 describe("fitsSquad with session turnout", () => {

@@ -2,6 +2,13 @@
 // Tonight's progress through a session: which blocks are done, which were skipped, and
 // therefore which one is current.
 //
+// A mark is keyed by its block's SLOT, not by the block's position in the plan. Position
+// was the original key and was wrong: moveBlock reorders the blocks and leaves the marks
+// alone, so moving a block moved its "Done" onto whichever drill took its place — and
+// since the marks reached the session file, onto the coach's other device too. A session
+// has exactly one block per slot and reordering only permutes them, so a slot names the
+// same block for as long as the session exists. See blockKey and migrateMarks.
+//
 // Stored TWICE, deliberately. localStorage is written synchronously on the tap, so
 // marking a drill done never waits on signal and never fails — the original requirement
 // for this view, unchanged. The same marks are also folded into the session in
@@ -24,12 +31,14 @@ const readAll = (storage) => {
   }
 };
 
-// Only ever trust two states and integer indices, whichever file the marks came out of:
-// both stores are hand-editable — one is a JSON file the owner reads.
+// Only ever trust two states, whichever store the marks came out of: both are
+// hand-editable, and one is a JSON file the owner reads. Keys are NOT validated against
+// the session's slots, because this function does not have the session — a mark for a slot
+// that no longer exists is simply never read.
 function cleanMarks(raw) {
   const out = {};
   for (const [k, v] of Object.entries(raw && typeof raw === "object" ? raw : {})) {
-    if ((v === DONE || v === SKIPPED) && /^\d+$/.test(k)) out[Number(k)] = v;
+    if ((v === DONE || v === SKIPPED) && k !== "") out[k] = v;
   }
   return out;
 }
@@ -134,27 +143,64 @@ export function sameMarks(a, b) {
   return ka.every((k) => a[k] === b[k]);
 }
 
-export const mark = (marks, index, state) => ({ ...marks, [index]: state });
+export const mark = (marks, key, state) => ({ ...marks, [key]: state });
 
-export const reopen = (marks, index) => {
+export const reopen = (marks, key) => {
   const next = { ...marks };
-  delete next[index];
+  delete next[key];
   return next;
 };
 
+// A block's key in a marks map: its slot, which a reorder does not change — unlike its
+// index, which used to be the key and meant that moving a block moved its mark onto
+// whichever drill took its place. Every session has exactly one block per slot (asserted
+// in test/sessions.test.js), so a slot identifies a block for as long as the session
+// lives. The positional fallback is for a hand-edited session whose block has no slot: it
+// keeps such blocks individually markable rather than collapsing them onto one key.
+export const blockKey = (block, index) => {
+  const slot = typeof block?.slot === "string" ? block.slot.trim() : "";
+  return slot || `#${index}`;
+};
+
+// Index-keyed marks — every mark written before this change, in either store — to
+// slot-keyed. Kept indefinitely rather than run once: it costs a pass over at most a
+// handful of keys, and the alternative is a coach losing tonight's progress because a
+// deploy landed between two drills.
+export function migrateMarks(marks, blocks) {
+  const clean = cleanMarks(marks);
+  const out = {};
+  // Slot keys first, then index keys only where that slot has nothing yet, so a map
+  // holding both forms for one block resolves the same way whatever order its keys are in.
+  for (const [k, v] of Object.entries(clean)) if (!/^\d+$/.test(k)) out[k] = v;
+  for (const [k, v] of Object.entries(clean)) {
+    if (!/^\d+$/.test(k)) continue;
+    const index = Number(k);
+    const block = (blocks ?? [])[index];
+    if (!block) continue; // a mark pointing past the end of the plan
+    const key = blockKey(block, index);
+    if (!(key in out)) out[key] = v;
+  }
+  return out;
+}
+
 // The block to show expanded: the first one not yet settled. Everything settled collapses
 // but stays reopenable, so you can refer back to a drill you have already run.
-export function currentIndex(marks, blockCount) {
-  for (let i = 0; i < blockCount; i += 1) if (!marks[i]) return i;
+export function currentIndex(marks, blocks) {
+  const list = blocks ?? [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (!marks[blockKey(list[i], i)]) return i;
+  }
   return -1;
 }
 
-export function counts(marks, blockCount) {
+export function counts(marks, blocks) {
+  const list = blocks ?? [];
   let done = 0;
   let skipped = 0;
-  for (let i = 0; i < blockCount; i += 1) {
-    if (marks[i] === DONE) done += 1;
-    else if (marks[i] === SKIPPED) skipped += 1;
+  for (let i = 0; i < list.length; i += 1) {
+    const state = marks[blockKey(list[i], i)];
+    if (state === DONE) done += 1;
+    else if (state === SKIPPED) skipped += 1;
   }
-  return { done, skipped, remaining: blockCount - done - skipped };
+  return { done, skipped, remaining: list.length - done - skipped };
 }
