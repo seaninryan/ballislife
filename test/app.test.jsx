@@ -603,6 +603,49 @@ describe("App sessions", () => {
       expect(retry.session.blocks[1].minutes).toBe(17);
       expect(container.textContent).not.toMatch(/changed in drive|changed on drive/i);
     });
+
+    it("never re-sends a conflicted plan on a later edit — only Keep mine or Reload may", async () => {
+      // The clobber: App adopts Drive's modifiedTime as the new baseline when it reports
+      // the conflict, so a flush that gates only on "is anything dirty" would re-send the
+      // plan against that adopted baseline, succeed, and overwrite the other device's
+      // version without the owner ever choosing.
+      drive.saveSession.mockResolvedValue({ ok: false, conflict: true, id: "s1", modifiedTime: "S9" });
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+      expect(container.textContent).toMatch(/changed in drive|changed on drive/i);
+
+      await setNumber(2, "18");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+      expect(drive.saveSession).toHaveBeenCalledTimes(1); // still only the first attempt
+      // And the conflict is still on offer, with the owner's later edit kept.
+      expect(container.textContent).toMatch(/changed in drive|changed on drive/i);
+      expect(Number(minutesInput().value)).toBe(18);
+    });
+
+    it("an edit to another plan does not smuggle the conflicted one back to Drive", async () => {
+      drive.loadSessions.mockResolvedValue(twoPlans());
+      drive.saveSession.mockImplementation(({ id }) => Promise.resolve(
+        id === "s1"
+          ? { ok: false, conflict: true, id, modifiedTime: "A9" }
+          : { ok: true, id, fileId: "f-s2", modifiedTime: "B2" },
+      ));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+
+      await goToHash("#/session/s2");
+      await setNumber(0, "9"); // s2's turnout — a different plan entirely
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+      const sent = drive.saveSession.mock.calls.map(([c]) => c.id);
+      expect(sent).toEqual(["s1", "s2"]); // s1 attempted once, never re-sent
+    });
   });
 });
 
