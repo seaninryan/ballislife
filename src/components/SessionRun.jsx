@@ -120,7 +120,9 @@ function RunBlock({
               turnout={turnout}
               exclude={block.drill?.slug ?? null}
               onPick={onPick}
-              onCancel={onSwapToggle}
+              // No onCancel: the actions row directly above already says "Cancel swap",
+              // and the picker's list scrolls inside itself, so that button never leaves
+              // the screen. Passing one here put two cancel controls one line apart.
             />
           ) : (
             <BlockContent block={block} entry={entry} today={today} />
