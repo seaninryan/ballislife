@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import SessionRun from "../src/components/SessionRun.jsx";
-import { DONE, SKIPPED, writeProgress } from "../src/lib/progress.js";
+import { DONE, SKIPPED, readProgress, writeProgress } from "../src/lib/progress.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(join(here, "..", "src", "styles.css"), "utf8");
@@ -624,6 +624,93 @@ describe("SessionRun swapping a drill", () => {
     act(() => { swaps()[0].click(); });
     act(() => { swaps()[0].click(); }); // the remaining Swap belongs to the other block
     expect(container.querySelectorAll(".drill-picker")).toHaveLength(1);
+  });
+});
+
+// Catalogue renders <SessionRun> at the same position whichever session is being run,
+// so browser back/forward between #/session/a/run and #/session/b/run RE-RENDERS this
+// component rather than remounting it. Everything read once at mount — tonight's marks
+// above all — has to notice that the session underneath it changed.
+describe("SessionRun handed a different session", () => {
+  let container, root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+  });
+
+  const DAY = "2026-08-13";
+  const drills = () => [
+    { ...drill("a", "Alpha", 10, "warmup"), tags: [] },
+    { ...drill("b", "Bravo", 10, "skill"), tags: [] },
+    { ...drill("c", "Charlie", 5, "warmup"), tags: [] },
+  ];
+  const texts = {
+    a: { status: "ready", text: drillText("Alpha") },
+    b: { status: "ready", text: drillText("Bravo") },
+    c: { status: "ready", text: drillText("Charlie") },
+  };
+  const sessionA = () => session([
+    { slot: "warmup", drill: "a", minutes: null, note: "" },
+    { slot: "skill", drill: "b", minutes: null, note: "" },
+  ], "s1");
+  const sessionB = () => session([
+    { slot: "warmup", drill: "c", minutes: null, note: "" },
+    { slot: "skill", drill: "b", minutes: null, note: "" },
+  ], "s2");
+
+  // Renders into the SAME root, so the second call is a re-render of a mounted
+  // component — the whole point of this suite.
+  const show = (props) => {
+    root ??= createRoot(container);
+    act(() => { root.render(<SessionRun drills={drills()} texts={texts} today={DAY} {...props} />); });
+  };
+  const summaries = () => [...container.querySelectorAll(".run-block-summary")];
+
+  it("shows the new session's progress, not the old session's", () => {
+    writeProgress(localStorage, "s1", DAY, { 0: DONE, 1: SKIPPED });
+    show({ session: sessionA() });
+    expect(summaries()[0].textContent).toContain("Done");
+
+    show({ session: sessionB() }); // nothing marked for s2
+    expect(summaries()[0].textContent).not.toContain("Done");
+    expect(summaries()[1].textContent).not.toContain("Skipped");
+    expect(container.textContent).toContain("0 done · 0 skipped");
+  });
+
+  it("writes a mark under the new session's key, leaving the old session's untouched", () => {
+    writeProgress(localStorage, "s1", DAY, { 1: SKIPPED });
+    show({ session: sessionA() });
+    show({ session: sessionB() });
+    act(() => { [...container.querySelectorAll("button")].find((b) => b.textContent === "Done").click(); });
+    expect(readProgress(localStorage, "s2", DAY)).toEqual({ 0: DONE });
+    expect(readProgress(localStorage, "s1", DAY)).toEqual({ 1: SKIPPED });
+  });
+
+  it("drops what was peeked open and any half-finished swap", () => {
+    show({ session: sessionA(), onSwap: () => {} });
+    act(() => { summaries()[1].click(); }); // peek block 1 open
+    act(() => { [...container.querySelectorAll("button")].find((b) => b.textContent === "Swap").click(); });
+    expect(container.querySelector(".drill-picker")).not.toBeNull();
+
+    show({ session: sessionB(), onSwap: () => {} });
+    expect(container.querySelector(".drill-picker")).toBeNull();
+    expect(container.querySelectorAll(".run-block-open")).toHaveLength(1); // only the current one
+  });
+
+  it("reloads progress when the day changes under the same session", () => {
+    writeProgress(localStorage, "s1", DAY, { 0: DONE });
+    show({ session: sessionA() });
+    expect(summaries()[0].textContent).toContain("Done");
+    show({ session: sessionA(), today: "2026-08-14" }); // a new night, nothing settled
+    expect(summaries()[0].textContent).not.toContain("Done");
   });
 });
 
