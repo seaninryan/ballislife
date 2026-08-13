@@ -61,7 +61,9 @@ export function filterDrills(drills, { category, tag, query } = {}) {
   return (drills ?? []).filter((d) => {
     // Callers other than the catalogue (the picker, tests) hand us drills that need not
     // have been through drillsFromIndex, and a TypeError in here blanks the whole list.
-    const tags = d.tags ?? [];
+    // Not just null/undefined: `tags: possession` in hand-edited frontmatter is a
+    // string, which would throw on .some and silently substring-match on .includes.
+    const tags = Array.isArray(d.tags) ? d.tags : [];
     if (category && d.category !== category) return false;
     if (tag && !tags.includes(tag)) return false;
     if (!q) return true;

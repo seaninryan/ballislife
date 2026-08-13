@@ -146,4 +146,15 @@ describe("filterDrills", () => {
     expect(filterDrills(bare, { tag: "possession" })).toEqual([]);
     expect(filterDrills(bare, { query: "x" })).toHaveLength(1);
   });
+
+  it("does not throw on tags that are not an array either", () => {
+    // `tags: possession` in hand-edited frontmatter parses to a string, not a list.
+    // null/undefined is not the only shape a file can be in when it reaches us.
+    const odd = [{ slug: "x", title: "X", category: "skill", minutes: 5, tags: "possession" }];
+    expect(filterDrills(odd, { query: "zzz" })).toEqual([]);
+    // And a string must not match a tag filter by being a substring of itself: a tag
+    // filter asks for a tag, not for text.
+    expect(filterDrills(odd, { tag: "poss" })).toEqual([]);
+    expect(filterDrills(odd, { tag: "possession" })).toEqual([]);
+  });
 });

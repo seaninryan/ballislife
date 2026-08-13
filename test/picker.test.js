@@ -27,6 +27,14 @@ describe("scoreDrill / sharedTags", () => {
     expect(sharedTags({ tags: ["Possession"] }, ["possession"])).toEqual(["Possession"]);
   });
 
+  it("treats tags that are not a list as no tags at all, on both sides", () => {
+    // `tags: possession` in hand-edited frontmatter is a string. Iterating it would
+    // share single characters, and .filter would throw.
+    expect(sharedTags({ tags: "possession" }, ["possession"])).toEqual([]);
+    expect(sharedTags({ tags: ["possession"] }, "possession")).toEqual([]);
+    expect(scoreDrill({ category: "skill", tags: "possession" }, { slot: "fun", tags: ["possession"] })).toBe(0);
+  });
+
   it("is total: no drill, no slot and no tags all score 0 rather than throwing", () => {
     expect(scoreDrill(undefined, { slot: "skill" })).toBe(0);
     expect(scoreDrill(d("x", "X", "skill", 5), {})).toBe(0);
@@ -90,7 +98,10 @@ describe("rankDrills", () => {
 
   it("survives no drills at all and an unknown sort", () => {
     expect(rankDrills(undefined, { slot: "skill" })).toEqual([]);
-    expect(slugs(rankDrills(pool, { sort: "nonsense" }))).toEqual(slugs(rankDrills(pool, {})));
+    // With a slot on both sides, so that relevance order is NOT simply title order —
+    // otherwise this passes whatever an unknown sort falls back to.
+    expect(slugs(rankDrills(pool, { slot: "skill", sort: "nonsense" })))
+      .toEqual(slugs(rankDrills(pool, { slot: "skill" })));
   });
 
   it("exposes an order for every sort it accepts", () => {

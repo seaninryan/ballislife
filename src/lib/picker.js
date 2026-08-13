@@ -25,9 +25,12 @@ const TAG_SCORE = 10;
 // Returns the DRILL's spelling of each shared tag, not the query's, so the component
 // shows "Possession" if that is what the drill says.
 export function sharedTags(drill, tags) {
-  const want = new Set((tags ?? []).map((t) => String(t).toLowerCase()));
+  // Array.isArray rather than ?? []: a hand-edited `tags: possession` is a string, and
+  // iterating a string here would "share" single characters.
+  const want = new Set((Array.isArray(tags) ? tags : []).map((t) => String(t).toLowerCase()));
   if (!want.size) return [];
-  return (drill?.tags ?? []).filter((t) => want.has(String(t).toLowerCase()));
+  const own = Array.isArray(drill?.tags) ? drill.tags : [];
+  return own.filter((t) => want.has(String(t).toLowerCase()));
 }
 
 export function scoreDrill(drill, { slot, tags } = {}) {
