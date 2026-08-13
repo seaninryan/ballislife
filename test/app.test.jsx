@@ -646,6 +646,37 @@ describe("App sessions", () => {
       const sent = drive.saveSession.mock.calls.map(([c]) => c.id);
       expect(sent).toEqual(["s1", "s2"]); // s1 attempted once, never re-sent
     });
+
+    it("does not re-create a plan deleted while an earlier plan's save was in flight", async () => {
+      // The flush sends one plan at a time and awaits each. A delete that lands during
+      // that await used to be invisible to the rest of the loop, which sent the snapshot
+      // it took before starting — and drive.js, having just forgotten the file id, wrote a
+      // NEW file. The plan came back on the next load.
+      drive.loadSessions.mockResolvedValue(twoPlans());
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      drive.deleteSession.mockResolvedValue(undefined);
+      let releaseS1;
+      drive.saveSession.mockImplementation(({ id }) =>
+        id === "s1"
+          ? new Promise((resolve) => {
+              releaseS1 = () => resolve({ ok: true, id, fileId: "f-s1", modifiedTime: "A2" });
+            })
+          : Promise.resolve({ ok: true, id, fileId: `f-${id}`, modifiedTime: "B2" }));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "12");
+      await goToHash("#/session/s2");
+      await setNumber(0, "9");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1); // s1 in flight, s2 still queued
+
+      await act(async () => { findButton("Delete").click(); }); // s2 is the plan on screen
+      await act(async () => { releaseS1(); await vi.advanceTimersByTimeAsync(900); });
+
+      expect(drive.deleteSession).toHaveBeenCalledWith({ id: "s2", fileId: "f-s2" });
+      expect(drive.saveSession.mock.calls.map(([c]) => c.id)).not.toContain("s2");
+      expect(container.textContent).not.toContain("2026-08-14"); // and it stays gone
+    });
   });
 });
 
