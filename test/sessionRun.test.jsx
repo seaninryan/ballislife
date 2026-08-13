@@ -80,17 +80,6 @@ describe("SessionRun", () => {
     expect(html).toContain("ghost");
   });
 
-  it("shows a running so-far time beside each block", () => {
-    const s = session([
-      { slot: "warmup", drill: "a", minutes: 10, note: "" },
-      { slot: "skill", drill: "b", minutes: 15, note: "" },
-    ]);
-    const drills = [drill("a", "Rondo"), drill("b", "Possession")];
-    const html = render({ session: s, drills, texts: {} });
-    expect(html).toContain("10");
-    expect(html).toContain("25");
-  });
-
   it("shows a loading state while a block's drill is being fetched", () => {
     const s = session([{ slot: "warmup", drill: "a", minutes: null, note: "" }]);
     const drills = [drill("a", "Rondo")];
@@ -154,7 +143,7 @@ describe("SessionRun accordion (static shape)", () => {
     expect(html.split("Coaching points here").length - 1).toBe(1);
   });
 
-  it("a settled block's summary names its state and offers Reopen, without opening it", () => {
+  it("a settled block's summary names its state and offers Not done, without opening it", () => {
     const s = session([
       { slot: "warmup", drill: "a", minutes: 10, note: "" },
       { slot: "skill", drill: "b", minutes: 15, note: "" },
@@ -167,7 +156,7 @@ describe("SessionRun accordion (static shape)", () => {
     writeProgress(localStorage, "settled-summary", "2026-08-12", { 0: DONE });
     const html = render({ session: s, drills, texts, today: "2026-08-12" });
     expect(html).toMatch(/done/i);
-    expect(html).toMatch(/reopen/i);
+    expect(html).toMatch(/not done/i);
     // block a is settled and collapsed: its full body should not render
     expect(html.split("Coaching points here").length - 1).toBe(1); // only b, which is current
   });
@@ -198,42 +187,39 @@ describe("SessionRun accordion (static shape)", () => {
     expect(html).toMatch(/start over/i);
   });
 
-  it("tap targets for Done, Skip and Reopen reuse .chip-button, sized for a thumb", () => {
+  it("tap targets for Done, Skip and Not done reuse .chip-button, sized for a thumb", () => {
     const s = session([{ slot: "warmup", drill: "a", minutes: 10, note: "" }], "chip-check");
     const drills = [drill("a", "Rondo")];
     const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
-    expect(html).toMatch(/class="chip-button"[^>]*>Done</);
-    expect(html).toMatch(/class="chip-button"[^>]*>Skip</);
+    expect(html).toMatch(/class="chip-button[^"]*"[^>]*>Done</);
+    expect(html).toMatch(/class="chip-button[^"]*"[^>]*>Skip</);
   });
 
-  it("Reopen is a smaller secondary control than Done/Skip, not the same weight", () => {
+  it("Done and Skip are coloured — positive green for Done, muted amber for Skip — reusing the ok-chip/warn-chip recipe", () => {
+    const s = session([{ slot: "warmup", drill: "a", minutes: 10, note: "" }], "chip-colour-actions");
+    const drills = [drill("a", "Rondo")];
+    const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
+    expect(html).toMatch(/class="chip-button[^"]*chip-button-ok[^"]*"[^>]*>Done</);
+    expect(html).toMatch(/class="chip-button[^"]*chip-button-warn[^"]*"[^>]*>Skip</);
+  });
+
+  it("Done and Skip sit at the top of the expanded block, before the drill body", () => {
+    const s = session([{ slot: "warmup", drill: "a", minutes: 10, note: "" }], "actions-at-top");
+    const drills = [drill("a", "Rondo")];
+    const texts = { a: { status: "ready", text: drillText("Rondo") } };
+    const html = render({ session: s, drills, texts, today: "2026-08-12" });
+    expect(html.indexOf(">Done<")).toBeLessThan(html.indexOf("Coaching points here"));
+  });
+
+  it("Not done is normal button weight, not the small chip variant — it should be easy to find", () => {
     const s = session(
       [{ slot: "warmup", drill: "a", minutes: 10, note: "" }, { slot: "skill", drill: "b", minutes: 15, note: "" }],
-      "reopen-weight",
+      "not-done-weight",
     );
     const drills = [drill("a", "Rondo"), drill("b", "Possession")];
-    writeProgress(localStorage, "reopen-weight", "2026-08-12", { 0: DONE });
+    writeProgress(localStorage, "not-done-weight", "2026-08-12", { 0: DONE });
     const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
-    expect(html).toMatch(/class="chip-button small"[^>]*>Reopen</);
-  });
-
-  it("a skipped block's running total excludes its own minutes, so a common skip does not inflate what follows", () => {
-    // The owner's words: "skipping a drill happens often". With warmup done (3'), skill
-    // skipped (10'), tactical current (20') and match to come (25'), the column should
-    // read 3', then a dash for the skipped block itself, then 23', then 48' — never 33'.
-    const s = session([
-      { slot: "warmup", drill: "a", minutes: 3, note: "" },
-      { slot: "skill", drill: "b", minutes: 10, note: "" },
-      { slot: "tactical", drill: "c", minutes: 20, note: "" },
-      { slot: "match", drill: "d", minutes: 25, note: "" },
-    ], "sofar-skip");
-    const drills = [drill("a", "Warmup"), drill("b", "Skill"), drill("c", "Tactical"), drill("d", "Match")];
-    writeProgress(localStorage, "sofar-skip", "2026-08-12", { 0: DONE, 1: SKIPPED });
-    const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
-    expect(html).not.toContain("33′");
-    expect(html).toContain("3′ so far");
-    expect(html).toContain("23′ so far");
-    expect(html).toContain("48′ so far");
+    expect(html).toMatch(/class="chip-button"[^>]*>Not done</);
   });
 
   it("Done and Skipped state chips use distinct colour classes from a plain duration chip", () => {
@@ -246,6 +232,27 @@ describe("SessionRun accordion (static shape)", () => {
     const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
     expect(html).toMatch(/class="chip ok-chip"[^>]*>Done</);
     expect(html).toMatch(/class="chip warn-chip"[^>]*>Skipped</);
+  });
+
+  it("marks the current block with a NOW badge and a distinct class, even when it is the only block open", () => {
+    const s = session([{ slot: "warmup", drill: "a", minutes: 10, note: "" }], "now-badge");
+    const drills = [drill("a", "Rondo")];
+    const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
+    expect(html).toMatch(/run-block-current/);
+    expect(html).toMatch(/run-block-now-badge/);
+    expect(html).toMatch(/NOW/);
+  });
+});
+
+describe("SessionRun NOW badge motion", () => {
+  it("pulses the NOW badge but disables the animation under prefers-reduced-motion", () => {
+    expect(styles).toMatch(/run-block-now-badge/);
+    expect(styles).toMatch(/animation:/);
+    expect(styles).toMatch(/prefers-reduced-motion:\s*reduce/);
+    // The reduced-motion block must actually turn the animation off, not just exist.
+    const reducedMotionBlock = styles.match(/@media \(prefers-reduced-motion: reduce\)\s*{([^}]*)}/s);
+    expect(reducedMotionBlock).toBeTruthy();
+    expect(reducedMotionBlock[1]).toMatch(/animation:\s*none/);
   });
 });
 
@@ -327,7 +334,27 @@ describe("SessionRun accordion (interactive)", () => {
     expect(bodiesAfter[2].textContent).toContain("Coaching points here"); // now opened
     // block a is still the current one — opening c did not mark or advance anything
     expect(bodiesAfter[0].textContent).toContain("Coaching points here");
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Reopen")).toBe(false);
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Not done")).toBe(false);
+  });
+
+  it("peeking open a settled block while another is current leaves only the current one marked current", async () => {
+    await mountSession({
+      session: threeBlocks(), drills: threeDrills(), texts: threeTexts(), today: "2026-08-12",
+    });
+    const doneButtons = () => [...container.querySelectorAll("button")].filter((b) => b.textContent === "Done");
+    await act(async () => { doneButtons()[0].click(); }); // settle a; b becomes current
+
+    // Peek block a back open to refer to it, without touching what is marked.
+    const bodiesBefore = container.querySelectorAll(".run-block");
+    const toggleA = bodiesBefore[0].querySelector(".run-block-summary");
+    await act(async () => { toggleA.click(); });
+
+    const bodies = container.querySelectorAll(".run-block");
+    expect(bodies[0].textContent).toContain("Coaching points here"); // a is open again (peeked)
+    expect(bodies[1].textContent).toContain("Coaching points here"); // b (current) still open too
+    // Only b — the actually current block — carries the current marker; a is open but not current.
+    expect(bodies[0].classList.contains("run-block-current")).toBe(false);
+    expect(bodies[1].classList.contains("run-block-current")).toBe(true);
   });
 
   it("reopening a settled block makes it current again", async () => {
@@ -337,13 +364,13 @@ describe("SessionRun accordion (interactive)", () => {
     const doneButtons = () => [...container.querySelectorAll("button")].filter((b) => b.textContent === "Done");
     await act(async () => { doneButtons()[0].click(); }); // settle block a
 
-    const reopenButtons = [...container.querySelectorAll("button")].filter((b) => b.textContent === "Reopen");
-    expect(reopenButtons.length).toBe(1);
-    await act(async () => { reopenButtons[0].click(); });
+    const notDoneButtons = [...container.querySelectorAll("button")].filter((b) => b.textContent === "Not done");
+    expect(notDoneButtons.length).toBe(1);
+    await act(async () => { notDoneButtons[0].click(); });
 
     const bodies = container.querySelectorAll(".run-block");
     expect(bodies[0].textContent).toContain("Coaching points here"); // a is current again
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Reopen")).toBe(false);
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Not done")).toBe(false);
   });
 
   it("says the session is finished and offers to start over once every block is settled", async () => {
@@ -403,7 +430,7 @@ describe("SessionRun accordion (interactive)", () => {
 
     const bodies = container.querySelectorAll(".run-block");
     expect(bodies[0].textContent).toContain("Coaching points here"); // a is current again
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Reopen")).toBe(false);
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Not done")).toBe(false);
   });
 });
 

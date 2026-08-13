@@ -106,6 +106,11 @@ textarea, input, select {
    border + dark-enough text for contrast), for a settled-Done state chip that needs to
    read as distinct from a plain duration chip at a glance. */
 .ok-chip { background: #e2f3e8; color: #1a5c39; border-color: #bfe0cd; }
+/* Done/Skip as thumb-sized buttons rather than a plain chip: same colour recipe as
+   .ok-chip/.warn-chip (tinted bg + matching border + dark-enough text), just sized
+   like .chip-button so they read as clear, tappable actions rather than status labels. */
+.chip-button-ok { background: #e2f3e8; color: #1a5c39; border-color: #bfe0cd; }
+.chip-button-warn { background: #fdf2d0; color: #6e5400; border-color: #e7d9a4; }
 @media (max-width: 780px) {
   /* On a phone the source pane is the thing you scroll past to reach the diagram, so
      shrink it rather than stacking two full-height panes. */
@@ -191,8 +196,31 @@ textarea, input, select {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer;
   flex: 1; min-width: 0;
 }
-.run-block-actions { margin-top: 10px; }
+.run-block-actions { margin-top: 10px; margin-bottom: 10px; }
 .banner.ok { background: #e2f3e8; color: #1a5c39; }
+
+/* The current block must read as "the one to act on now" even when a settled block
+   has been peeked back open beside it (isOpen alone can't tell them apart — see
+   RunBlock). A static marker (coloured edge + badge) makes that true without motion;
+   the badge's pulse is a bonus for catching the eye at a glance, not the only signal. */
+.run-block-current {
+  border-left: 4px solid var(--accent);
+}
+.run-block-now-badge {
+  display: inline-block; flex: 0 0 auto; background: var(--accent); color: #fff;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; padding: 2px 7px;
+  border-radius: 99px; animation: run-block-now-pulse 1.6s ease-in-out infinite;
+}
+@keyframes run-block-now-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+/* A pulsing badge is exactly what this setting exists for: honour it by turning the
+   animation off outright rather than just slowing it down. The static marker above
+   (coloured edge + badge text) still reads current without any motion at all. */
+@media (prefers-reduced-motion: reduce) {
+  .run-block-now-badge { animation: none; }
+}
 
 /* Carried on paper at the side of a pitch: the back button and any other on-screen-
    only chrome are useless there, and a block split across a page break is worse than

@@ -77,7 +77,23 @@ describe("SessionBuilder", () => {
     s = setBlock(s, 2, { drill: "3v2" });
     mount({ session: s, drills });
     expect(container.textContent).toContain("25′");
-    expect(container.textContent).toContain("75′");
+    expect(container.textContent).toContain("60′");
+  });
+
+  it("the session length is editable and reports changes through onChange, like every other field", () => {
+    const onChange = vi.fn();
+    mount({ session: baseSession(), drills, onChange });
+    const lengthInput = [...container.querySelectorAll("input[type=number]")].find((i) => i.value === "60");
+    expect(lengthInput).toBeTruthy();
+
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(lengthInput, "90");
+      lengthInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenCalled();
+    const updated = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(updated.length).toBe(90);
   });
 
   it("warns when the total exceeds the length", () => {

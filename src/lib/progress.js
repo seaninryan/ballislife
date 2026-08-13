@@ -62,22 +62,6 @@ export function currentIndex(marks, blockCount) {
   return -1;
 }
 
-// The running "so far" total shown beside each block. A skipped block spent none of the
-// session, so it contributes zero minutes to everything after it — otherwise skipping a
-// 10' drill (the owner says this happens often) inflates the total for every block that
-// follows, making the coach think more time has passed than actually has. The skipped
-// block's own slot is `null` rather than the running number, because that number would
-// just repeat the previous block's total and read as a duplicate/glitch rather than as
-// "this contributed nothing" — the component shows a dash for `null`.
-export function soFarMinutes(blocks, marks) {
-  let sum = 0;
-  return (blocks ?? []).map((block, i) => {
-    const skipped = marks[i] === SKIPPED;
-    if (!skipped) sum += block.minutes;
-    return skipped ? null : sum;
-  });
-}
-
 export function counts(marks, blockCount) {
   let done = 0;
   let skipped = 0;

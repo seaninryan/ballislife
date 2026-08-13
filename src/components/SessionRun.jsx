@@ -15,7 +15,7 @@ import React, { useState } from "react";
 import { resolveBlocks, totalMinutes } from "../lib/sessions.js";
 import DrillPreview from "./DrillPreview.jsx";
 import {
-  DONE, SKIPPED, readProgress, writeProgress, mark, reopen, currentIndex, counts, soFarMinutes,
+  DONE, SKIPPED, readProgress, writeProgress, mark, reopen, currentIndex, counts,
 } from "../lib/progress.js";
 
 const storage = () => (typeof window !== "undefined" ? window.localStorage : null);
@@ -46,12 +46,22 @@ function BlockContent({ block, entry, today }) {
 
 // One block of the accordion. `isOpen` covers both reasons a block might be showing its
 // full content: it is the current one (the first not yet settled), or someone tapped
-// its summary to look at it without touching what is marked. `state` is only set once a
-// block is settled, and its Reopen control lives in the summary row itself so a settled
-// block never needs to be opened just to be reopened.
-function RunBlock({ block, soFar, entry, today, isOpen, state, onDone, onSkip, onReopen, onToggle }) {
+// its summary to look at it without touching what is marked. `isCurrent` is narrower —
+// true only for the actual current block — so that peeking a settled block open (to
+// refer back to it) never makes it look like the one to act on next: only the current
+// block gets the coloured edge and the NOW badge, whether or not anything else happens
+// to be open beside it. `state` is only set once a block is settled, and its Not done
+// control lives in the summary row itself so a settled block never needs to be opened
+// just to be un-marked.
+function RunBlock({ block, entry, today, isOpen, isCurrent, state, onDone, onSkip, onReopen, onToggle }) {
+  const classes = [
+    "card",
+    "run-block",
+    isOpen ? "run-block-open" : "run-block-collapsed",
+    isCurrent ? "run-block-current" : "",
+  ].filter(Boolean).join(" ");
   return (
-    <section className={`card run-block${isOpen ? " run-block-open" : " run-block-collapsed"}`}>
+    <section className={classes}>
       <div className="row run-block-header" style={{ justifyContent: "space-between" }}>
         <button
           type="button"
@@ -59,6 +69,7 @@ function RunBlock({ block, soFar, entry, today, isOpen, state, onDone, onSkip, o
           onClick={onToggle}
           aria-expanded={isOpen}
         >
+          {isCurrent ? <span className="run-block-now-badge">NOW</span> : null}
           <strong className="block-slot">{block.slot}</strong>
           {block.drill ? <span className="block-title">{block.drill.title}</span> : null}
           {block.drill ? <span className="chip">{block.minutes}′</span> : null}
@@ -69,22 +80,21 @@ function RunBlock({ block, soFar, entry, today, isOpen, state, onDone, onSkip, o
           ) : null}
         </button>
         <div className="row">
-          <span className="chip dim">{soFar === null ? "—" : `${soFar}′ so far`}</span>
           {state ? (
-            <button type="button" className="chip-button small" onClick={onReopen}>Reopen</button>
+            <button type="button" className="chip-button" onClick={onReopen}>Not done</button>
           ) : null}
         </div>
       </div>
 
       {isOpen ? (
         <>
-          <BlockContent block={block} entry={entry} today={today} />
           {!state ? (
             <div className="row run-block-actions">
-              <button type="button" className="chip-button" onClick={onDone}>Done</button>
-              <button type="button" className="chip-button" onClick={onSkip}>Skip</button>
+              <button type="button" className="chip-button chip-button-ok" onClick={onDone}>Done</button>
+              <button type="button" className="chip-button chip-button-warn" onClick={onSkip}>Skip</button>
             </div>
           ) : null}
+          <BlockContent block={block} entry={entry} today={today} />
         </>
       ) : null}
     </section>
@@ -139,22 +149,21 @@ export default function SessionRun({ session, drills = [], texts = {}, onBack, t
     });
   };
 
-  // A skipped block contributes zero to the running total — see soFarMinutes for why.
-  const soFarByIndex = soFarMinutes(blocks, marks);
   // The accordion's only section today is the block list. Once squads exist, Sean
   // wants a player list with attendance ticks as the FIRST collapsible section, above
   // `rows` — this loop is deliberately just the blocks so that section can be
   // prepended later without restructuring anything here.
   const rows = blocks.map((block, index) => {
-    const isOpen = index === current || opened.has(index);
+    const isCurrent = index === current;
+    const isOpen = isCurrent || opened.has(index);
     return (
       <RunBlock
         key={block.slot}
         block={block}
-        soFar={soFarByIndex[index]}
         entry={block.drill ? texts[block.drill.slug] : null}
         today={day}
         isOpen={isOpen}
+        isCurrent={isCurrent}
         state={marks[index]}
         onDone={() => handleMark(index, DONE)}
         onSkip={() => handleMark(index, SKIPPED)}

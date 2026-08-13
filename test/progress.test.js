@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  DONE, SKIPPED, readProgress, writeProgress, mark, reopen, currentIndex, counts, soFarMinutes,
+  DONE, SKIPPED, readProgress, writeProgress, mark, reopen, currentIndex, counts,
 } from "../src/lib/progress.js";
 
 const fakeStorage = () => {
@@ -42,31 +42,6 @@ describe("mark and reopen", () => {
 describe("counts", () => {
   it("counts done, skipped and remaining", () => {
     expect(counts({ 0: DONE, 1: SKIPPED }, 5)).toEqual({ done: 1, skipped: 1, remaining: 3 });
-  });
-});
-
-describe("soFarMinutes", () => {
-  const blocks = [{ minutes: 3 }, { minutes: 10 }, { minutes: 20 }, { minutes: 25 }];
-
-  it("sums planned minutes when nothing is settled yet", () => {
-    expect(soFarMinutes(blocks, {})).toEqual([3, 13, 33, 58]);
-  });
-
-  it("a skipped block contributes zero, so later totals reflect only what actually ran", () => {
-    // warmup done, skill skipped, tactical current, match to come — the owner's common
-    // case: skipping a 10' drill must not inflate the running total for what follows.
-    expect(soFarMinutes(blocks, { 0: DONE, 1: SKIPPED })).toEqual([3, null, 23, 48]);
-  });
-
-  it("a skipped block's own slot is null, not a duplicate of the previous total", () => {
-    const result = soFarMinutes(blocks, { 1: SKIPPED });
-    expect(result[1]).toBeNull();
-    expect(result[0]).toBe(3);
-    expect(result[2]).toBe(23);
-  });
-
-  it("multiple skips in a row still exclude each of their minutes", () => {
-    expect(soFarMinutes(blocks, { 1: SKIPPED, 2: SKIPPED })).toEqual([3, null, null, 28]);
   });
 });
 

@@ -330,9 +330,11 @@ describe("App sessions", () => {
 
     afterEach(() => { vi.useRealTimers(); });
 
-    // Number inputs in DOM order: turnout (always present), then the minutes override
-    // for the "skill" block, the only block with a drill assigned.
-    const minutesInput = () => container.querySelectorAll("input[type=number]")[1];
+    // Number inputs in DOM order: turnout, then session length (both always present),
+    // then the minutes override for the "skill" block, the only block with a drill
+    // assigned. Index shifted from 1 to 2 when the length input was added alongside
+    // turnout (owner asked for an editable session length).
+    const minutesInput = () => container.querySelectorAll("input[type=number]")[2];
 
     it("debounces: repeated edits call saveSessions once, not once per change", async () => {
       drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });

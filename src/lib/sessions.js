@@ -17,7 +17,7 @@ export function emptySession(id, date, squad = "") {
     date,
     squad,
     theme: "",
-    length: 75,
+    length: 60,
     turnout: null,
     blocks: SLOTS.map((slot) => ({ slot, drill: null, minutes: null, note: "" })),
   };

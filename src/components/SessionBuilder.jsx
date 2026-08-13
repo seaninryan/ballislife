@@ -103,6 +103,7 @@ export default function SessionBuilder({ session, drills = [], onChange, onBack,
   const patchBlock = (index, patch) => onChange?.(setBlock(session, index, patch));
   const move = (from, to) => onChange?.(moveBlock(session, from, to));
   const setTurnout = (v) => onChange?.({ ...session, turnout: v === "" ? null : Number(v) });
+  const setLength = (v) => onChange?.({ ...session, length: v === "" ? null : Number(v) });
 
   return (
     <div>
@@ -127,16 +128,28 @@ export default function SessionBuilder({ session, drills = [], onChange, onBack,
             {total}′ of {session.length}′
           </span>
         </div>
-        <label className="dim" style={{ marginTop: 6, display: "inline-block" }}>
-          Turnout tonight:{" "}
-          <input
-            type="number"
-            min="0"
-            value={turnout}
-            onChange={(e) => setTurnout(e.target.value)}
-            style={{ width: 64 }}
-          />
-        </label>
+        <div className="row" style={{ marginTop: 6 }}>
+          <label className="dim">
+            Turnout tonight:{" "}
+            <input
+              type="number"
+              min="0"
+              value={turnout}
+              onChange={(e) => setTurnout(e.target.value)}
+              style={{ width: 64 }}
+            />
+          </label>
+          <label className="dim">
+            Session length (minutes):{" "}
+            <input
+              type="number"
+              min="0"
+              value={session.length ?? ""}
+              onChange={(e) => setLength(e.target.value)}
+              style={{ width: 64 }}
+            />
+          </label>
+        </div>
       </div>
 
       {over ? (
