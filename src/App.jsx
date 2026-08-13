@@ -347,18 +347,29 @@ export default function App() {
 
   // Slugs with a read in flight for the current run visit, so a swap away and back does
   // not fire a second identical request.
-  const runFetching = useRef(new Set());
+  const runFetching = useRef(new Map());
+
+  // A read counts as in flight only if the visit that issued it is still the one on
+  // screen. An entry left over from a visit that has been left is worthless — its reply
+  // will be dropped by the token guard below — so it must not suppress a fresh read.
+  const runFetchInFlight = (slug) => runFetching.current.get(slug) === runRequestSeq.current;
+
+  // Settling clears the entry only if it is still this fetch's own: a stale read landing
+  // after a newer one was issued for the same slug must not un-track the newer one.
+  const runFetchSettled = (slug, token) => {
+    if (runFetching.current.get(slug) === token) runFetching.current.delete(slug);
+  };
 
   // Fetches one drill's text into runTexts, tagged with the run-visit token so a reply
   // landing after the run view has been left is dropped. Shared by openRun's opening
   // batch and by a mid-session swap.
   const fetchRunText = useCallback((drill, token) => {
-    runFetching.current.add(drill.slug);
+    runFetching.current.set(drill.slug, token);
     readDrill(drill.id, folderRef.current).then(
       ({ text }) => {
         const entry = { status: "ready", text };
         drillTextCache.current.set(drill.slug, entry);
-        runFetching.current.delete(drill.slug);
+        runFetchSettled(drill.slug, token);
         if (runRequestSeq.current !== token) return; // this run view has been left
         setRunTexts((prev) => ({ ...prev, [drill.slug]: entry }));
       },
@@ -366,7 +377,7 @@ export default function App() {
         // Deliberately not cached: a flaky read is ordinary on a phone at the side of a
         // pitch (same reasoning as loadCatalogue's per-drill failure), and the next
         // visit should try again rather than remembering the failure forever.
-        runFetching.current.delete(drill.slug);
+        runFetchSettled(drill.slug, token);
         if (runRequestSeq.current !== token) return;
         setRunTexts((prev) => ({ ...prev, [drill.slug]: { status: "error", error } }));
       },
@@ -416,7 +427,7 @@ export default function App() {
     if (!drill) return;
     const cached = drillTextCache.current.get(drill.slug);
     if (cached) { setRunTexts((prev) => ({ ...prev, [drill.slug]: cached })); return; }
-    if (runFetching.current.has(drill.slug)) return;
+    if (runFetchInFlight(drill.slug)) return;
     setRunTexts((prev) => ({ ...prev, [drill.slug]: { status: "loading" } }));
     fetchRunText(drill, runRequestSeq.current);
   }, [runSessionId, drills, onSessionChange, fetchRunText]);

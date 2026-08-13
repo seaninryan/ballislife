@@ -606,6 +606,47 @@ describe("App session run mode", () => {
     expect(container.textContent).toContain("body b");
   });
 
+  it("swapping in a drill whose read is left over from an abandoned run visit still loads it", async () => {
+    // The in-flight set must be scoped to the visit that issued the read. Otherwise:
+    // leave session A's run view with A's read of "a" still pending, enter session B's
+    // run view, swap a block to "a" — the swap sees "a" as already in flight and does
+    // nothing, while the old reply is dropped as stale. The block waits forever.
+    drive.loadSessions.mockResolvedValue({
+      fileId: "sess",
+      data: { version: 1, sessions: {
+        s1: session("s1", "2026-08-12", [{ slot: "warmup", drill: "a", minutes: null, note: "" }]),
+        s2: session("s2", "2026-08-14", [{ slot: "warmup", drill: "b", minutes: null, note: "" }]),
+      } },
+      modifiedTime: "S1",
+    });
+    drive.saveSessions.mockResolvedValue({ ok: true, modifiedTime: "S2" });
+    const resolvers = {};
+    drive.readDrill.mockImplementation((id) => new Promise((resolve) => {
+      (resolvers[id] ??= []).push(resolve);
+    }));
+
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    await act(async () => { findButton("Back to plan").click(); }); // "a" still pending
+
+    await act(async () => { findButton("← Back").click(); }); // builder → session list
+    await act(async () => { findButton("2026-08-14").click(); });
+    await act(async () => { findButton("Run this session").click(); });
+    await act(async () => { findButton("Swap").click(); });
+    const alpha = [...container.querySelectorAll(".drill-picker-option")]
+      .find((b) => b.textContent.includes("Alpha"));
+    await act(async () => { alpha.click(); });
+
+    // The abandoned visit's reply lands and is correctly ignored…
+    await act(async () => { resolvers.a[0]({ text: bodyText("a"), modifiedTime: "T" }); });
+    // …so the swap must have issued a read of its own for the block to ever fill in.
+    expect(resolvers.a).toHaveLength(2);
+    await act(async () => { resolvers.a[1]({ text: bodyText("a"), modifiedTime: "T" }); });
+    expect(container.textContent).toContain("body a");
+    expect(container.textContent).not.toContain("Loading…");
+  });
+
   it("returns to the builder from Back to plan even when run mode was entered directly via the /run hash (not through a click)", async () => {
     // Mirrors the owner's report as closely as this harness allows: land on the run
     // view via #/session/<id>/run directly — the same route the report's address bar
