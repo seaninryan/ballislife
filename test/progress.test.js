@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DONE, SKIPPED, readProgress, writeProgress, mark, reopen, currentIndex, counts,
-  readStamp, sessionProgress, withSessionProgress, mergeProgress, sameMarks,
+  readStamp, localProgress, sessionProgress, withSessionProgress, mergeProgress, sameMarks,
 } from "../src/lib/progress.js";
 
 const fakeStorage = () => {
@@ -73,6 +73,21 @@ describe("storage", () => {
     expect(readProgress(s, "x", "d")).toEqual({});
   });
 
+  it("a stamped clear stays as an empty entry, so this device knows WHEN it was cleared", () => {
+    const s = fakeStorage();
+    writeProgress(s, "x", "2026-08-13", { 0: DONE }, "2026-08-13T19:00:00.000Z");
+    writeProgress(s, "x", "2026-08-13", {}, "2026-08-13T20:00:00.000Z");
+    expect(localProgress(s, "x", "2026-08-13"))
+      .toEqual({ marks: {}, updatedAt: "2026-08-13T20:00:00.000Z" });
+  });
+
+  it("an unstamped clear forgets the day entirely: there is no time worth remembering", () => {
+    const s = fakeStorage();
+    writeProgress(s, "x", "2026-08-13", { 0: DONE }, "2026-08-13T19:00:00.000Z");
+    writeProgress(s, "x", "2026-08-13", {});
+    expect(localProgress(s, "x", "2026-08-13")).toBe(null);
+  });
+
   it("ignores states it does not recognise", () => {
     const s = fakeStorage();
     writeProgress(s, "x", "d", { 0: "weird", 1: DONE });
@@ -114,6 +129,38 @@ describe("local entries carry a timestamp", () => {
   });
 });
 
+describe("localProgress", () => {
+  it("reads one session-day as a merge-ready side", () => {
+    const store = fakeStorage();
+    writeProgress(store, "s1", "2026-08-13", { 0: DONE }, "2026-08-13T19:00:00.000Z");
+    expect(localProgress(store, "s1", "2026-08-13"))
+      .toEqual({ marks: { 0: DONE }, updatedAt: "2026-08-13T19:00:00.000Z" });
+  });
+
+  it("is null when this device has nothing for the day, so the other side can simply win", () => {
+    const store = fakeStorage();
+    expect(localProgress(store, "s1", "2026-08-13")).toBe(null);
+    writeProgress(store, "s1", "2026-08-12", { 0: DONE }, "2026-08-12T19:00:00.000Z");
+    expect(localProgress(store, "s1", "2026-08-13")).toBe(null);
+    expect(localProgress(null, "s1", "2026-08-13")).toBe(null);
+  });
+
+  it("distinguishes a cleared day from an untouched one", () => {
+    const store = fakeStorage();
+    writeProgress(store, "s1", "2026-08-13", {}, "2026-08-13T20:00:00.000Z");
+    expect(localProgress(store, "s1", "2026-08-13"))
+      .toEqual({ marks: {}, updatedAt: "2026-08-13T20:00:00.000Z" });
+  });
+
+  it("reads an entry written before stamps existed, with no stamp", () => {
+    const store = fakeStorage();
+    store.setItem("ballislife_progress", JSON.stringify({
+      s1: { date: "2026-08-13", marks: { 0: DONE } },
+    }));
+    expect(localProgress(store, "s1", "2026-08-13")).toEqual({ marks: { 0: DONE }, updatedAt: null });
+  });
+});
+
 describe("progress stored on the session itself", () => {
   const session = (progress) => ({ id: "s1", date: "2026-08-13", blocks: [], progress });
 
@@ -146,10 +193,12 @@ describe("progress stored on the session itself", () => {
     expect(s.progress["2026-08-13"]).toBeUndefined(); // the input is not mutated
   });
 
-  it("clearing every mark removes the day rather than storing an empty object", () => {
+  it("clearing every mark leaves a stamped empty entry, so the clear can beat the other device", () => {
+    // A deleted day and a day nobody has touched are indistinguishable, and the other
+    // device's older marks would then win the merge and come back.
     const s = session({ "2026-08-13": { marks: { 0: DONE }, updatedAt: "2026-08-13T19:00:00.000Z" } });
     const next = withSessionProgress(s, "2026-08-13", {}, "2026-08-13T20:00:00.000Z");
-    expect(next.progress["2026-08-13"]).toBeUndefined();
+    expect(next.progress["2026-08-13"]).toEqual({ marks: {}, updatedAt: "2026-08-13T20:00:00.000Z" });
   });
 
   it("works on a session that has no progress key yet", () => {

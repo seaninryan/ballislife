@@ -739,6 +739,54 @@ describe("App session run mode", () => {
     expect(blocks[1].querySelector(".run-block-now-badge")).not.toBeNull();
   });
 
+  it("a mark cleared on the laptop stays cleared when the phone comes back to it", async () => {
+    // The reported bug: "every mark cleared" used to be stored exactly like "no marks
+    // yet", so the phone's older stamped mark won the merge and the block came back Done.
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    const PROGRESS_KEY = "ballislife_progress";
+    let phoneStorage;
+    let sentToDrive;
+
+    // "The phone": mark block 0 Done and let the save land.
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      await act(async () => { findButton("Done").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      sentToDrive = drive.saveSessions.mock.calls.at(-1)[0].data;
+      phoneStorage = localStorage.getItem(PROGRESS_KEY);
+
+      // "The laptop": its own empty storage, adopting the phone's mark and then un-marking.
+      act(() => root.unmount());
+      localStorage.clear();
+      location.hash = "";
+      drive.loadSessions.mockResolvedValue({ fileId: "sess", data: sentToDrive, modifiedTime: "S2" });
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      await act(async () => { findButton("Not done").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      sentToDrive = drive.saveSessions.mock.calls.at(-1)[0].data;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // "The phone" again: its own storage still holds the earlier Done.
+    act(() => root.unmount());
+    localStorage.setItem(PROGRESS_KEY, phoneStorage);
+    location.hash = "";
+    drive.loadSessions.mockResolvedValue({ fileId: "sess", data: sentToDrive, modifiedTime: "S2" });
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    const blocks = container.querySelectorAll(".run-block");
+    expect(blocks[0].querySelector(".run-block-summary").textContent).not.toContain("Done");
+    expect(blocks[0].querySelector(".run-block-now-badge")).not.toBeNull();
+  });
+
   it("returns to the builder from Back to plan even when run mode was entered directly via the /run hash (not through a click)", async () => {
     // Mirrors the owner's report as closely as this harness allows: land on the run
     // view via #/session/<id>/run directly — the same route the report's address bar

@@ -54,8 +54,12 @@ export function writeProgress(storage, sessionId, today, marks, updatedAt = null
   for (const [k, v] of Object.entries(marks ?? {})) {
     if (v === DONE || v === SKIPPED) clean[k] = v;
   }
-  if (Object.keys(clean).length === 0) delete store[sessionId];
-  else store[sessionId] = { date: today, marks: clean, updatedAt: cleanStamp(updatedAt) };
+  const stamp = cleanStamp(updatedAt);
+  // A stamped clear is kept as an empty entry, not deleted: "cleared at 20:00" has to
+  // outrank the other device's "done at 19:00", and a missing entry cannot say when.
+  // An unstamped clear has no time worth remembering, so it just forgets the day.
+  if (Object.keys(clean).length === 0 && !stamp) delete store[sessionId];
+  else store[sessionId] = { date: today, marks: clean, updatedAt: stamp };
   for (const [k, v] of Object.entries(store)) if (v?.date !== today) delete store[k];
   try {
     storage?.setItem(KEY, JSON.stringify(store));
@@ -65,9 +69,20 @@ export function writeProgress(storage, sessionId, today, marks, updatedAt = null
   return store;
 }
 
+// This device's side of the merge: null when it has nothing at all for the day, an entry
+// with empty marks when the day was deliberately cleared here. The two must be told apart
+// for the same reason sessionProgress tells them apart — otherwise the other device's
+// older marks win and Not done undoes itself.
+export function localProgress(storage, sessionId, today) {
+  const entry = readAll(storage)[sessionId];
+  if (!entry || entry.date !== today) return null;
+  return { marks: cleanMarks(entry.marks), updatedAt: cleanStamp(entry.updatedAt) };
+}
+
 // The session-file half of the same information. Returns null rather than an empty entry
 // when there is nothing for this day, so mergeProgress can tell "no marks yet" apart from
-// "every mark was cleared" — which is the difference between Not done working and not.
+// "every mark was cleared" — which is the difference between Not done working and not. A
+// day cleared everywhere is therefore kept as an empty stamped entry, never deleted.
 export function sessionProgress(session, day) {
   const entry = session?.progress?.[day];
   if (!entry || typeof entry !== "object") return null;
@@ -76,9 +91,9 @@ export function sessionProgress(session, day) {
 
 export function withSessionProgress(session, day, marks, updatedAt) {
   const progress = { ...(session?.progress ?? {}) };
-  const clean = cleanMarks(marks);
-  if (Object.keys(clean).length === 0) delete progress[day];
-  else progress[day] = { marks: clean, updatedAt: cleanStamp(updatedAt) };
+  // An empty day is stored, not deleted — see sessionProgress. Deleting it made a clear
+  // indistinguishable from an untouched day, so the other device re-uploaded its marks.
+  progress[day] = { marks: cleanMarks(marks), updatedAt: cleanStamp(updatedAt) };
   return { ...session, progress };
 }
 
