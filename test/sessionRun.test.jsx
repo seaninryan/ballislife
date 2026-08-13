@@ -710,6 +710,27 @@ describe("SessionRun handed a different session", () => {
     expect(container.querySelectorAll(".run-block-open")).toHaveLength(1); // only the current one
   });
 
+  it("keeps the day it opened on when midnight passes mid-session", () => {
+    // A run view's day is fixed when it opens. Recomputing it per render meant a session
+    // still going at 23:59 restarted from block 0 at 00:00, and split the night's marks
+    // across two day keys in sessions.json.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-13T23:59:00.000Z"));
+      show({ session: sessionA(), today: undefined });
+      act(() => { [...container.querySelectorAll("button")].find((b) => b.textContent === "Done").click(); });
+      expect(summaries()[0].textContent).toContain("Done");
+
+      vi.setSystemTime(new Date("2026-08-14T00:01:00.000Z"));
+      show({ session: sessionA(), today: undefined });
+      expect(summaries()[0].textContent).toContain("Done");
+      expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 0: DONE });
+      expect(readProgress(localStorage, "s1", "2026-08-14")).toEqual({});
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reloads progress when the day changes under the same session", () => {
     writeProgress(localStorage, "s1", DAY, { 0: DONE });
     show({ session: sessionA() });
