@@ -36,6 +36,10 @@ beforeEach(() => {
   auth.isSignedIn.mockReturnValue(true);
   auth.getAccessToken.mockReturnValue("tok");
   auth.startTokenKeepAlive.mockImplementation(() => {});
+  // The run view now keeps tonight's progress in localStorage (lib/progress.js),
+  // keyed by session id — several tests below reuse session id "s1", so without
+  // clearing it a mark made in one test would leak into the next.
+  localStorage.clear();
   api.aboutEmail.mockResolvedValue("owner@example.com");
   owner.isOwner.mockResolvedValue(true);
   drive.loadCatalogue.mockResolvedValue({
@@ -442,7 +446,11 @@ describe("App session run mode", () => {
     await openSession("2026-08-12");
     await act(async () => { findButton("Run this session").click(); });
     expect(drive.readDrill).toHaveBeenCalledTimes(2);
-    expect(container.textContent).toContain("body a");
+    expect(container.textContent).toContain("body a"); // block a is current, so open
+    // The run view is now an accordion: block b is fetched (readDrill ran for it too)
+    // but starts collapsed since block a is current. Open it to prove it was in fact
+    // fetched and renders, not just requested.
+    await act(async () => { container.querySelectorAll(".run-block-summary")[1].click(); });
     expect(container.textContent).toContain("body b");
   });
 
@@ -462,9 +470,16 @@ describe("App session run mode", () => {
     await mount();
     await openSession("2026-08-12");
     await act(async () => { findButton("Run this session").click(); });
+    // Block 0 (the broken reference) is current, since nothing is marked yet, so it
+    // is the one open by default.
     expect(container.textContent).toMatch(/missing/i);
     expect(container.textContent).toContain("ghost");
+    // Blocks 1 (no drill) and 2 (a) are collapsed until opened — open each in turn to
+    // confirm they still render sensibly rather than crashing.
+    const summaries = () => container.querySelectorAll(".run-block-summary");
+    await act(async () => { summaries()[1].click(); });
     expect(container.textContent).toMatch(/no drill/i);
+    await act(async () => { summaries()[2].click(); });
     expect(container.textContent).toContain("body a");
   });
 
@@ -508,6 +523,9 @@ describe("App session run mode", () => {
     await openSession("2026-08-12");
     await act(async () => { findButton("Run this session").click(); });
     expect(container.textContent).toMatch(/could not load|failed|trouble/i);
+    // Block a (errored) is current and open; block b is collapsed. Open it to confirm
+    // a's failure did not stop b from loading and rendering fine.
+    await act(async () => { container.querySelectorAll(".run-block-summary")[1].click(); });
     expect(container.textContent).toContain("body b");
   });
 
@@ -515,7 +533,8 @@ describe("App session run mode", () => {
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
     location.hash = "#/session/s1/run";
     await mount();
-    expect(container.textContent).toContain("body a");
+    expect(container.textContent).toContain("body a"); // block a is current, so open
+    await act(async () => { container.querySelectorAll(".run-block-summary")[1].click(); });
     expect(container.textContent).toContain("body b");
   });
 

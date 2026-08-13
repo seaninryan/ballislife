@@ -170,9 +170,25 @@ textarea, input, select {
   padding: 8px; overflow-x: auto; font-size: 12.5px; margin: 4px 0 0;
 }
 
-/* Run view: a header (date/squad/total + back control) then one card per block. */
+/* Run view: a header (date/squad/total/progress + back control) then one card per
+   block, accordion-style — the current block open, the rest collapsed to their
+   summary row. .run-block-collapsed only affects spacing below the summary row;
+   the summary row itself (slot, title, duration, state, Reopen) is always visible
+   so a settled block never needs opening just to be reopened. */
 .run-block { break-inside: avoid; }
 .run-block-header { margin-bottom: 8px; }
+.run-block-collapsed .run-block-header { margin-bottom: 0; }
+/* Reset from `button`: this is a summary row, not a call to action, so it should read
+   like the old plain header — but it is still a real button (not a div) so it is
+   keyboard- and screen-reader-operable. Sized for a thumb like .chip-button: this is
+   the control that opens a block to refer back, tapped at the side of a pitch. */
+.run-block-summary {
+  background: none; border: none; padding: 8px 0; margin: 0; text-align: left;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer;
+  flex: 1; min-width: 0;
+}
+.run-block-actions { margin-top: 10px; }
+.banner.ok { background: #e2f3e8; color: #1a5c39; }
 
 /* Carried on paper at the side of a pitch: the back button and any other on-screen-
    only chrome are useless there, and a block split across a page break is worse than

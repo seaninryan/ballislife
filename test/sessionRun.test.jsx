@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 // SessionRun is presentational, like SessionBuilder/SessionList: given a session, the
 // catalogue's lightweight drill metadata, and a map of each referenced drill's full
-// text (fetched separately by App), it renders the plan block by block for use at the
-// pitch side. It never fetches anything itself and never writes to Drive.
+// text (fetched separately by App), it renders the plan as an accordion for use at the
+// pitch side — the current block expanded, the rest collapsed but reopenable. It never
+// fetches anything itself and never writes to Drive; tonight's progress goes through
+// lib/progress.js into localStorage only, exactly like DrillPreview's checklist ticks.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
@@ -11,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import SessionRun from "../src/components/SessionRun.jsx";
+import { DONE, SKIPPED, writeProgress } from "../src/lib/progress.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(join(here, "..", "src", "styles.css"), "utf8");
@@ -24,11 +27,15 @@ const drillText = (title, checklistItems = []) => {
   return `---\ntitle: ${title}\n---\n\n${list ? list + "\n\n" : ""}Coaching points here.\n\n\`\`\`pitch\narea: 20x20 plain\nred: A@5,5\n\`\`\`\n`;
 };
 
-const session = (blocks) => ({
-  id: "s1", date: "2026-08-12", squad: "U12s", theme: "pressing", length: 75, blocks,
+const session = (blocks, id = "s1") => ({
+  id, date: "2026-08-12", squad: "U12s", theme: "pressing", length: 75, blocks,
 });
 
 const render = (props) => renderToStaticMarkup(<SessionRun {...props} />);
+
+beforeEach(() => {
+  localStorage.clear();
+});
 
 describe("SessionRun", () => {
   it("renders a section per block, in plan order, labelled with its slot", () => {
@@ -92,7 +99,13 @@ describe("SessionRun", () => {
     expect(html).toMatch(/loading/i);
   });
 
-  it("a drill that fails to load says so for that block only, leaving the rest usable", () => {
+  // Shape change from the flat layout: block b is no longer current (block a, unsettled,
+  // is), so it collapses to a one-line summary instead of rendering fully. "The rest is
+  // usable" is still true — b's title is right there and it did not crash because a
+  // failed — but "usable" now means "collapsed and reachable", not "fully rendered".
+  // Interactive coverage below (accordion > "opening a collapsed block") proves opening
+  // it still shows the full text.
+  it("a drill that fails to load says so for that block only; the rest collapses but stays reachable", () => {
     const s = session([
       { slot: "warmup", drill: "a", minutes: null, note: "" },
       { slot: "skill", drill: "b", minutes: null, note: "" },
@@ -104,12 +117,251 @@ describe("SessionRun", () => {
     };
     const html = render({ session: s, drills, texts });
     expect(html).toMatch(/could not load|failed|trouble/i);
-    expect(html).toContain("Coaching points here"); // block b still renders fully
+    expect(html).toContain("Possession"); // block b's title is visible, collapsed
+    expect(html).not.toContain("Coaching points here"); // but not opened
   });
 
   it("offers a way back to the plan", () => {
     const s = session([{ slot: "warmup", drill: null, minutes: null, note: "" }]);
     expect(render({ session: s, drills: [], texts: {}, onBack: () => {} })).toMatch(/back/i);
+  });
+});
+
+describe("SessionRun accordion (static shape)", () => {
+  it("only the current block renders fully; the rest collapse to slot, title and duration", () => {
+    const s = session([
+      { slot: "warmup", drill: "a", minutes: 10, note: "" },
+      { slot: "skill", drill: "b", minutes: 15, note: "" },
+      { slot: "tactical", drill: "c", minutes: 20, note: "" },
+    ]);
+    const drills = [drill("a", "Rondo"), drill("b", "Possession"), drill("c", "Shape")];
+    const texts = {
+      a: { status: "ready", text: drillText("Rondo") },
+      b: { status: "ready", text: drillText("Possession") },
+      c: { status: "ready", text: drillText("Shape") },
+    };
+    const html = render({ session: s, drills, texts, today: "2026-08-12" });
+    // block a (current, first unsettled) is fully open
+    expect(html).toContain("Coaching points here");
+    // b and c are named with slot/title/duration but not opened
+    expect(html).toContain("Possession");
+    expect(html).toContain("Shape");
+    expect(html).toContain("skill");
+    expect(html).toContain("tactical");
+    expect(html).toContain("15");
+    expect(html).toContain("20");
+    // only one full drill body rendered (a's "Coaching points here" occurs once)
+    expect(html.split("Coaching points here").length - 1).toBe(1);
+  });
+
+  it("a settled block's summary names its state and offers Reopen, without opening it", () => {
+    const s = session([
+      { slot: "warmup", drill: "a", minutes: 10, note: "" },
+      { slot: "skill", drill: "b", minutes: 15, note: "" },
+    ], "settled-summary");
+    const drills = [drill("a", "Rondo"), drill("b", "Possession")];
+    const texts = {
+      a: { status: "ready", text: drillText("Rondo") },
+      b: { status: "ready", text: drillText("Possession") },
+    };
+    writeProgress(localStorage, "settled-summary", "2026-08-12", { 0: DONE });
+    const html = render({ session: s, drills, texts, today: "2026-08-12" });
+    expect(html).toMatch(/done/i);
+    expect(html).toMatch(/reopen/i);
+    // block a is settled and collapsed: its full body should not render
+    expect(html.split("Coaching points here").length - 1).toBe(1); // only b, which is current
+  });
+
+  it("a header summary shows done, skipped and remaining", () => {
+    const s = session([
+      { slot: "warmup", drill: "a", minutes: 10, note: "" },
+      { slot: "skill", drill: "b", minutes: 15, note: "" },
+      { slot: "tactical", drill: "c", minutes: 20, note: "" },
+    ], "counts-summary");
+    const drills = [drill("a", "Rondo"), drill("b", "Possession"), drill("c", "Shape")];
+    writeProgress(localStorage, "counts-summary", "2026-08-12", { 0: DONE, 1: SKIPPED });
+    const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
+    expect(html).toMatch(/1\D+done/i);
+    expect(html).toMatch(/1\D+skipped/i);
+    expect(html).toMatch(/1\D+remaining/i);
+  });
+
+  it("says the session is finished and offers to start over once every block is settled", () => {
+    const s = session([
+      { slot: "warmup", drill: "a", minutes: 10, note: "" },
+      { slot: "skill", drill: "b", minutes: 15, note: "" },
+    ], "finished");
+    const drills = [drill("a", "Rondo"), drill("b", "Possession")];
+    writeProgress(localStorage, "finished", "2026-08-12", { 0: DONE, 1: SKIPPED });
+    const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
+    expect(html).toMatch(/finished/i);
+    expect(html).toMatch(/start over/i);
+  });
+
+  it("tap targets for Done, Skip and Reopen reuse .chip-button, sized for a thumb", () => {
+    const s = session([{ slot: "warmup", drill: "a", minutes: 10, note: "" }], "chip-check");
+    const drills = [drill("a", "Rondo")];
+    const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
+    expect(html).toMatch(/class="chip-button"[^>]*>Done</);
+    expect(html).toMatch(/class="chip-button"[^>]*>Skip</);
+  });
+});
+
+describe("SessionRun accordion (interactive)", () => {
+  let container, root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    container.remove();
+  });
+
+  const mountSession = async (props) => {
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<SessionRun {...props} />);
+    });
+  };
+
+  const threeBlocks = () =>
+    session([
+      { slot: "warmup", drill: "a", minutes: 10, note: "" },
+      { slot: "skill", drill: "b", minutes: 15, note: "" },
+      { slot: "tactical", drill: "c", minutes: 20, note: "" },
+    ], "interactive");
+
+  const threeDrills = () => [drill("a", "Rondo"), drill("b", "Possession"), drill("c", "Shape")];
+  const threeTexts = () => ({
+    a: { status: "ready", text: drillText("Rondo") },
+    b: { status: "ready", text: drillText("Possession") },
+    c: { status: "ready", text: drillText("Shape") },
+  });
+
+  it("marking the current block Done collapses it and opens the next unsettled block", async () => {
+    await mountSession({
+      session: threeBlocks(), drills: threeDrills(), texts: threeTexts(), today: "2026-08-12",
+    });
+    expect(container.textContent).toContain("Coaching points here"); // block a open
+
+    const doneButtons = [...container.querySelectorAll("button")].filter((b) => b.textContent === "Done");
+    await act(async () => { doneButtons[0].click(); });
+
+    // block a is now settled and collapsed; block b (next unsettled) is open
+    expect(container.querySelector(".run-block")).toBeTruthy();
+    const bodies = container.querySelectorAll(".run-block");
+    expect(bodies[0].textContent).toMatch(/done/i);
+    expect(bodies[0].textContent).not.toContain("Coaching points here");
+    expect(bodies[1].textContent).toContain("Coaching points here");
+  });
+
+  it("Skip advances the session the same way Done does", async () => {
+    await mountSession({
+      session: threeBlocks(), drills: threeDrills(), texts: threeTexts(), today: "2026-08-12",
+    });
+    const skipButtons = [...container.querySelectorAll("button")].filter((b) => b.textContent === "Skip");
+    await act(async () => { skipButtons[0].click(); });
+
+    const bodies = container.querySelectorAll(".run-block");
+    expect(bodies[0].textContent).toMatch(/skipped/i);
+    expect(bodies[1].textContent).toContain("Coaching points here");
+  });
+
+  it("opening a collapsed block shows it in full without changing what is marked", async () => {
+    await mountSession({
+      session: threeBlocks(), drills: threeDrills(), texts: threeTexts(), today: "2026-08-12",
+    });
+    const bodiesBefore = container.querySelectorAll(".run-block");
+    expect(bodiesBefore[2].textContent).not.toContain("Coaching points here"); // block c collapsed
+
+    const toggle = bodiesBefore[2].querySelector(".run-block-summary");
+    await act(async () => { toggle.click(); });
+
+    const bodiesAfter = container.querySelectorAll(".run-block");
+    expect(bodiesAfter[2].textContent).toContain("Coaching points here"); // now opened
+    // block a is still the current one — opening c did not mark or advance anything
+    expect(bodiesAfter[0].textContent).toContain("Coaching points here");
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Reopen")).toBe(false);
+  });
+
+  it("reopening a settled block makes it current again", async () => {
+    await mountSession({
+      session: threeBlocks(), drills: threeDrills(), texts: threeTexts(), today: "2026-08-12",
+    });
+    const doneButtons = () => [...container.querySelectorAll("button")].filter((b) => b.textContent === "Done");
+    await act(async () => { doneButtons()[0].click(); }); // settle block a
+
+    const reopenButtons = [...container.querySelectorAll("button")].filter((b) => b.textContent === "Reopen");
+    expect(reopenButtons.length).toBe(1);
+    await act(async () => { reopenButtons[0].click(); });
+
+    const bodies = container.querySelectorAll(".run-block");
+    expect(bodies[0].textContent).toContain("Coaching points here"); // a is current again
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Reopen")).toBe(false);
+  });
+
+  it("says the session is finished and offers to start over once every block is settled", async () => {
+    await mountSession({
+      session: threeBlocks(), drills: threeDrills(), texts: threeTexts(), today: "2026-08-12",
+    });
+    for (let i = 0; i < 3; i += 1) {
+      const doneButtons = [...container.querySelectorAll("button")].filter((b) => b.textContent === "Done");
+      await act(async () => { doneButtons[0].click(); });
+    }
+    expect(container.textContent).toMatch(/finished/i);
+    const startOver = [...container.querySelectorAll("button")].find((b) => b.textContent === "Start over");
+    expect(startOver).toBeTruthy();
+  });
+
+  it("progress survives a remount on the same day", async () => {
+    await mountSession({
+      session: threeBlocks(), drills: threeDrills(), texts: threeTexts(), today: "2026-08-12",
+    });
+    const doneButtons = [...container.querySelectorAll("button")].filter((b) => b.textContent === "Done");
+    await act(async () => { doneButtons[0].click(); }); // settle a
+    const skipButtons = [...container.querySelectorAll("button")].filter((b) => b.textContent === "Skip");
+    await act(async () => { skipButtons[0].click(); }); // skip b (now current)
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SessionRun
+          session={threeBlocks()} drills={threeDrills()} texts={threeTexts()} today="2026-08-12"
+        />,
+      );
+    });
+
+    const bodies = container.querySelectorAll(".run-block");
+    expect(bodies[0].textContent).toMatch(/done/i);
+    expect(bodies[1].textContent).toMatch(/skipped/i);
+    expect(bodies[2].textContent).toContain("Coaching points here"); // c is now current
+  });
+
+  it("a new day starts clean, from the first block", async () => {
+    await mountSession({
+      session: threeBlocks(), drills: threeDrills(), texts: threeTexts(), today: "2026-08-12",
+    });
+    const doneButtons = [...container.querySelectorAll("button")].filter((b) => b.textContent === "Done");
+    await act(async () => { doneButtons[0].click(); });
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SessionRun
+          session={threeBlocks()} drills={threeDrills()} texts={threeTexts()} today="2026-08-13"
+        />,
+      );
+    });
+
+    const bodies = container.querySelectorAll(".run-block");
+    expect(bodies[0].textContent).toContain("Coaching points here"); // a is current again
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Reopen")).toBe(false);
   });
 });
 
