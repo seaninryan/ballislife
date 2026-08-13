@@ -840,6 +840,21 @@ describe("SessionRun progress reconciliation", () => {
     expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-now-badge")).not.toBeNull();
   });
 
+  it("adopts the other device's marks even when this device's clock is wildly fast", () => {
+    // A local stamp in 2027 beat every real stamp forever, so the other device could never
+    // be adopted and the stale local marks were re-reported on every reconcile.
+    writeProgress(localStorage, "s1", "2026-08-13", { 0: SKIPPED }, "2027-01-01T00:00:00.000Z");
+    const onProgress = vi.fn();
+    const s = { ...session(twoBlocks()), progress: {
+      "2026-08-13": { marks: { 0: DONE }, updatedAt: at("20:00") },
+    } };
+    mount({ session: s, drills: runDrills(), texts: {}, today: "2026-08-13", onProgress, now });
+    expect(container.querySelectorAll(".run-block")[0].querySelector(".run-block-summary").textContent)
+      .toContain("Done");
+    expect(readProgress(localStorage, "s1", "2026-08-13")).toEqual({ 0: DONE });
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
   // The owner reads and hand-edits sessions.json, so an entry he typed himself — with no
   // stamp, or a stamp we cannot parse — must still be shown and must above all SURVIVE.
   // Reporting {} upward for it made App save the session with the entry emptied out.

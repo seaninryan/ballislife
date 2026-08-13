@@ -249,6 +249,37 @@ describe("mergeProgress", () => {
     const good = { marks: { 1: DONE }, updatedAt: at("19:00") };
     expect(mergeProgress(bad, good).marks).toEqual({ 1: DONE });
   });
+
+  describe("a device with a badly wrong clock", () => {
+    const now = Date.parse(at("21:00"));
+
+    it("cannot silence the other device forever with a stamp far in the future", () => {
+      // Otherwise the fast device's marks win every reconcile, permanently, and the coach
+      // has no way to notice — so a wild stamp counts as no stamp at all.
+      const fast = { marks: { 0: DONE }, updatedAt: "2027-01-01T00:00:00.000Z" };
+      const real = { marks: { 1: DONE }, updatedAt: at("21:00") };
+      expect(mergeProgress(fast, real, now).marks).toEqual({ 1: DONE });
+      expect(mergeProgress(real, fast, now).marks).toEqual({ 1: DONE });
+    });
+
+    it("still trusts a stamp only slightly ahead: clocks are routinely a little off", () => {
+      const ahead = { marks: { 0: DONE }, updatedAt: "2026-08-14T02:00:00.000Z" };
+      const real = { marks: { 1: DONE }, updatedAt: at("21:00") };
+      expect(mergeProgress(real, ahead, now).marks).toEqual({ 0: DONE });
+    });
+
+    it("falls back to local when both sides are impossible, rather than picking at random", () => {
+      const fast = { marks: { 0: DONE }, updatedAt: "2027-01-01T00:00:00.000Z" };
+      const faster = { marks: { 1: DONE }, updatedAt: "2028-01-01T00:00:00.000Z" };
+      expect(mergeProgress(fast, faster, now).marks).toEqual({ 0: DONE });
+    });
+
+    it("judges against the real clock when no time is given", () => {
+      const fast = { marks: { 0: DONE }, updatedAt: "2999-01-01T00:00:00.000Z" };
+      const real = { marks: { 1: DONE }, updatedAt: new Date().toISOString() };
+      expect(mergeProgress(fast, real).marks).toEqual({ 1: DONE });
+    });
+  });
 });
 
 describe("sameMarks", () => {

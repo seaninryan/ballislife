@@ -102,12 +102,25 @@ export function withSessionProgress(session, day, marks, updatedAt) {
 // the other device. A stamped side always beats an unstamped one (an entry written before
 // this feature existed has no stamp), and a tie prefers local so that opening a run view
 // does not schedule a save that changes nothing.
-export function mergeProgress(local, remote) {
+//
+// A stamp more than a day in the future is treated as no stamp: a phone whose clock is set
+// to next year would otherwise win every comparison forever, silencing the other device
+// with no way for the coach to notice. A day of slack is deliberate — clocks are routinely
+// minutes or hours out, and this is a mitigation for the pathological case only, not an
+// attempt to correct skew.
+const FUTURE_SLACK_MS = 24 * 60 * 60 * 1000;
+
+export function mergeProgress(local, remote, now = Date.now()) {
   if (!local && !remote) return { marks: {}, updatedAt: null };
   if (!local) return remote;
   if (!remote) return local;
-  const l = Date.parse(local.updatedAt ?? "");
-  const r = Date.parse(remote.updatedAt ?? "");
+  const limit = (Number.isFinite(now) ? now : Date.now()) + FUTURE_SLACK_MS;
+  const at = (side) => {
+    const t = Date.parse(side.updatedAt ?? "");
+    return t <= limit ? t : NaN;
+  };
+  const l = at(local);
+  const r = at(remote);
   if (!Number.isFinite(l) && !Number.isFinite(r)) return local;
   if (!Number.isFinite(l)) return remote;
   if (!Number.isFinite(r)) return local;
