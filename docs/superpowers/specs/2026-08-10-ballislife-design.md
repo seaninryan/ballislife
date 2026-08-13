@@ -135,7 +135,8 @@ which is not an authorised origin and will fail sign-in. Run one at a time, or a
 A visible `/BallIsLife` folder in the owner's Drive, found-or-created by name
 (`mimeType = 'application/vnd.google-apps.folder'`, `trashed = false`).
 
-One `.md` file per drill, **flat, no subfolders.** Category is frontmatter, not
+One `.md` file per drill, **flat: the only subfolder is `sessions/`** (see Session plans
+below). Category is frontmatter, not
 directory structure, so re-filing a drill is a field edit and never a file move.
 The filename slug is the drill's stable id (`3v2-to-end-line.md`); renaming a drill
 renames the Drive file.
@@ -206,6 +207,39 @@ drill directly in Drive. It also makes concurrent writes from two devices a
 non-issue — latest write wins, and the next load repairs any loss.
 
 `index.json` is excluded from the drill listing by extension.
+
+### Session plans
+
+One JSON file per plan, `sessions/<id>.json`, and that file is authoritative. The id is
+the file name (`2026-08-13-pressing.json`); `lib/sessions.js` owns the id ↔ file name rule
+and refuses an id that could escape the folder or collide with the cache.
+
+Per file rather than one `sessions.json` because every cost of the blob grows with the
+plan count: at two sessions a week, a year is ~100 plans in one file, every Done tap
+during a session rewrites all of it, a conflict on any plan blocks saving every plan, and
+the file is a single point of loss. Per file, a plan is also something the owner can open
+and read in Drive on its own.
+
+`sessions/index.json` caches every plan under the same **disposable and never
+authoritative** invariant as the drill index: one `files.list` per load, diffed on id and
+`modifiedTime`, refetch on drift, drop what is gone, rebuild if unusable, and write the
+cache back only when it actually changed. It holds whole session objects — which sounds
+like the blob again, but losing or corrupting it costs nothing, because it is rebuilt from
+the per-session files. Without it, an app open would cost one request per plan.
+
+**Migration.** The pre-split `sessions.json` is read on first load and each plan it holds
+that has no file yet is written as one; the blob is then renamed to
+`sessions-before-split.json`, so it is no longer found by name and the migration does not
+repeat. It stays visible in Drive as a backup only the owner deletes — it is the only copy
+of every plan as it stood before the split. Only a plan with no file is written, never an
+overwrite, so a migration interrupted halfway resumes rather than clobbering a per-file
+edit. A blob still holding a plan that cannot be written (an id no file name allows) is
+deliberately left findable rather than renamed away.
+
+In memory a plan is unchanged: `sessionsState.data.sessions` is a map of id → session, so
+the list, builder, run view and route resolver know nothing about files. What is per file
+is loading, and saving — one dirty id at a time, each against its own `modifiedTime`
+baseline, so one plan's conflict never touches another's pending edit.
 
 ### Saving
 
@@ -325,7 +359,8 @@ Vitest in the node environment, no jsdom — the same split as fancystats.
 
 - **Session builder.** Slot-based (warmup → skill → tactical → match → fun),
   drag-and-drop, drill picker filtered by category and by tonight's squad size,
-  running duration total against session length. **Sessions store as JSON, not
+  running duration total against session length. **Since built — the storage it landed on
+  is under Session plans above.** **Sessions store as JSON, not
   markdown** — they are ordered lists of drill references plus future structured
   fields like attendance, not prose documents. Sessions reference drills by slug
   rather than copying content, so correcting a drill retroactively fixes every session

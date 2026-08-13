@@ -29,9 +29,9 @@ first; the version renders in the footer and is the user's cache tell.
 
 ## What this is
 
-A personal soccer drill catalogue. Client-only React app, no server. Drills are
-markdown files in the owner's Google Drive `/BallIsLife` folder. Only the owner
-signs in.
+A personal soccer drill catalogue and session planner. Client-only React app, no server.
+Drills are markdown files in the owner's Google Drive `/BallIsLife` folder; each session
+plan is a JSON file in `/BallIsLife/sessions/`. Only the owner signs in.
 
 ## Architecture
 
@@ -51,9 +51,15 @@ belong in lib with tests, not in components.
   equals `scene`, and `serialise` is stable under re-parse. This is what makes a future
   drag-to-edit canvas possible without changing stored files. It is NOT byte-identical
   to arbitrary source — canonicalisation reorders lines and splits multi-action lines.
-- **`index.json` in Drive is disposable and never authoritative** (Plan 2). Every load
-  validates it against a `files.list` of ids and `modifiedTime`s and repairs any drift.
-  Never trust it without that check.
+- **Both Drive index caches are disposable and never authoritative** (Plan 2, and the
+  session-files plan): `index.json` for drills, `sessions/index.json` for plans. Every load
+  validates each against a `files.list` of ids and `modifiedTime`s and repairs any drift.
+  Never trust either without that check.
+- **One file per session plan is the authority:** `sessions/<id>.json`, id ↔ file name via
+  `sessions.js`. A Done tap rewrites one small file, a conflict on tonight's plan cannot
+  block saving another, and one corrupt file costs one plan. The pre-split `sessions.json`
+  blob is migrated on first load and renamed to `sessions-before-split.json` — a visible
+  backup only the owner deletes. Never re-introduce a whole-folder or whole-blob write.
 - **Nothing derived is stored in a drill file.** Diagrams render from the `pitch`
   source at display time.
 
