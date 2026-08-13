@@ -15,7 +15,7 @@ import React, { useState } from "react";
 import { resolveBlocks, totalMinutes } from "../lib/sessions.js";
 import DrillPreview from "./DrillPreview.jsx";
 import {
-  DONE, SKIPPED, readProgress, writeProgress, mark, reopen, currentIndex, counts,
+  DONE, SKIPPED, readProgress, writeProgress, mark, reopen, currentIndex, counts, soFarMinutes,
 } from "../lib/progress.js";
 
 const storage = () => (typeof window !== "undefined" ? window.localStorage : null);
@@ -62,12 +62,16 @@ function RunBlock({ block, soFar, entry, today, isOpen, state, onDone, onSkip, o
           <strong className="block-slot">{block.slot}</strong>
           {block.drill ? <span className="block-title">{block.drill.title}</span> : null}
           {block.drill ? <span className="chip">{block.minutes}′</span> : null}
-          {state ? <span className="chip">{STATE_LABEL[state]}</span> : null}
+          {state ? (
+            <span className={`chip ${state === DONE ? "ok-chip" : "warn-chip"}`}>
+              {STATE_LABEL[state]}
+            </span>
+          ) : null}
         </button>
         <div className="row">
-          <span className="chip dim">{soFar}′ so far</span>
+          <span className="chip dim">{soFar === null ? "—" : `${soFar}′ so far`}</span>
           {state ? (
-            <button type="button" className="chip-button" onClick={onReopen}>Reopen</button>
+            <button type="button" className="chip-button small" onClick={onReopen}>Reopen</button>
           ) : null}
         </div>
       </div>
@@ -135,19 +139,19 @@ export default function SessionRun({ session, drills = [], texts = {}, onBack, t
     });
   };
 
-  let soFar = 0;
+  // A skipped block contributes zero to the running total — see soFarMinutes for why.
+  const soFarByIndex = soFarMinutes(blocks, marks);
   // The accordion's only section today is the block list. Once squads exist, Sean
   // wants a player list with attendance ticks as the FIRST collapsible section, above
   // `rows` — this loop is deliberately just the blocks so that section can be
   // prepended later without restructuring anything here.
   const rows = blocks.map((block, index) => {
-    soFar += block.minutes;
     const isOpen = index === current || opened.has(index);
     return (
       <RunBlock
         key={block.slot}
         block={block}
-        soFar={soFar}
+        soFar={soFarByIndex[index]}
         entry={block.drill ? texts[block.drill.slug] : null}
         today={day}
         isOpen={isOpen}

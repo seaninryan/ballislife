@@ -205,6 +205,48 @@ describe("SessionRun accordion (static shape)", () => {
     expect(html).toMatch(/class="chip-button"[^>]*>Done</);
     expect(html).toMatch(/class="chip-button"[^>]*>Skip</);
   });
+
+  it("Reopen is a smaller secondary control than Done/Skip, not the same weight", () => {
+    const s = session(
+      [{ slot: "warmup", drill: "a", minutes: 10, note: "" }, { slot: "skill", drill: "b", minutes: 15, note: "" }],
+      "reopen-weight",
+    );
+    const drills = [drill("a", "Rondo"), drill("b", "Possession")];
+    writeProgress(localStorage, "reopen-weight", "2026-08-12", { 0: DONE });
+    const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
+    expect(html).toMatch(/class="chip-button small"[^>]*>Reopen</);
+  });
+
+  it("a skipped block's running total excludes its own minutes, so a common skip does not inflate what follows", () => {
+    // The owner's words: "skipping a drill happens often". With warmup done (3'), skill
+    // skipped (10'), tactical current (20') and match to come (25'), the column should
+    // read 3', then a dash for the skipped block itself, then 23', then 48' — never 33'.
+    const s = session([
+      { slot: "warmup", drill: "a", minutes: 3, note: "" },
+      { slot: "skill", drill: "b", minutes: 10, note: "" },
+      { slot: "tactical", drill: "c", minutes: 20, note: "" },
+      { slot: "match", drill: "d", minutes: 25, note: "" },
+    ], "sofar-skip");
+    const drills = [drill("a", "Warmup"), drill("b", "Skill"), drill("c", "Tactical"), drill("d", "Match")];
+    writeProgress(localStorage, "sofar-skip", "2026-08-12", { 0: DONE, 1: SKIPPED });
+    const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
+    expect(html).not.toContain("33′");
+    expect(html).toContain("3′ so far");
+    expect(html).toContain("23′ so far");
+    expect(html).toContain("48′ so far");
+  });
+
+  it("Done and Skipped state chips use distinct colour classes from a plain duration chip", () => {
+    const s = session([
+      { slot: "warmup", drill: "a", minutes: 10, note: "" },
+      { slot: "skill", drill: "b", minutes: 15, note: "" },
+    ], "chip-colour");
+    const drills = [drill("a", "Rondo"), drill("b", "Possession")];
+    writeProgress(localStorage, "chip-colour", "2026-08-12", { 0: DONE, 1: SKIPPED });
+    const html = render({ session: s, drills, texts: {}, today: "2026-08-12" });
+    expect(html).toMatch(/class="chip ok-chip"[^>]*>Done</);
+    expect(html).toMatch(/class="chip warn-chip"[^>]*>Skipped</);
+  });
 });
 
 describe("SessionRun accordion (interactive)", () => {

@@ -102,6 +102,10 @@ textarea, input, select {
 .editor-preview { min-width: 0; }
 .warn-chip { background: #fdf2d0; color: #6e5400; border-color: #e7d9a4; }
 .err-chip { background: #fbdcd7; color: #8c1d18; border-color: #f0c2ba; }
+/* Positive counterpart to .warn-chip/.err-chip, same recipe (tinted bg + matching
+   border + dark-enough text for contrast), for a settled-Done state chip that needs to
+   read as distinct from a plain duration chip at a glance. */
+.ok-chip { background: #e2f3e8; color: #1a5c39; border-color: #bfe0cd; }
 @media (max-width: 780px) {
   /* On a phone the source pane is the thing you scroll past to reach the diagram, so
      shrink it rather than stacking two full-height panes. */
