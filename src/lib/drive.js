@@ -79,8 +79,17 @@ export async function loadCatalogue() {
     // cost a write.
     if (refetch.length || dropped.length || !indexFile) {
       const body = JSON.stringify(index);
-      if (indexFile) await api.writeFile(token, indexFile.id, body);
-      else await api.createFile(token, folder, INDEX_NAME, body);
+      try {
+        if (indexFile) await api.writeFile(token, indexFile.id, body);
+        else await api.createFile(token, folder, INDEX_NAME, body);
+      } catch {
+        // Best-effort, for the same reason as the sessions index below: this cache is
+        // disposable and is diffed against a real listing on every load, so failing to
+        // write it costs one wasted refetch next time. Every drill has already been read
+        // by this point, so failing the catalogue over the cache would hide the whole
+        // catalogue for the sake of an optimisation — on the connection where that write
+        // is the likeliest thing to fail.
+      }
     }
 
     // Seed the conflict baseline from what Drive just reported, so saveDrill can be

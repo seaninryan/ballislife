@@ -54,6 +54,23 @@ describe("loadCatalogue", () => {
     expect(drills.map((d) => d.id).sort()).toEqual(["a", "b"]);
   });
 
+  it("still returns the catalogue when the index cannot be written", async () => {
+    // The index is a disposable cache. Failing to write it must not hide every drill —
+    // and at the side of a pitch that write is among the likeliest things to fail. Same
+    // rule as the sessions index.
+    api.findAllFolders.mockResolvedValue(["F1"]);
+    api.listFiles.mockResolvedValue([
+      { id: "idx", name: INDEX_NAME, modifiedTime: "T" },
+      { id: "a", name: "a.md", modifiedTime: "T1" },
+    ]);
+    api.readFile.mockImplementation(async (_t, id) => (id === "idx" ? "{" : DRILL));
+    api.writeFile.mockRejectedValue(new Error("offline"));
+
+    const { drills, failed } = await loadCatalogue();
+    expect(drills.map((d) => d.id)).toEqual(["a"]);
+    expect(failed).toEqual([]);
+  });
+
   it("rebuilds from scratch when the index is unreadable", async () => {
     api.findAllFolders.mockResolvedValue(["F1"]);
     api.listFiles.mockResolvedValue([
