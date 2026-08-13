@@ -691,6 +691,85 @@ describe("App sessions", () => {
       expect(container.textContent).not.toContain("2026-08-14"); // and it stays gone
     });
 
+    it("refuses to delete a plan the old blob still holds, rather than undoing itself", async () => {
+      // It has no file to trash and nothing here removes it from sessions.json, so the next
+      // load migrated it straight back. A delete that appears to work and then reverses
+      // itself is worse than one that says why it cannot.
+      drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: initial() }, {
+        meta: {}, // no file of its own yet
+        unmigrated: [{ id: "s1", reason: "write", error: new Error("boom") }],
+      }));
+      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      await mount();
+      await openSession("2026-08-12");
+
+      await act(async () => { findButton("Delete").click(); });
+
+      expect(alertSpy).toHaveBeenCalled();
+      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(drive.deleteSession).not.toHaveBeenCalled();
+      expect(container.textContent).toContain("2026-08-12"); // still on the builder, still there
+    });
+
+    it("a plan deleted while it was queued leaves nothing scheduled behind it", async () => {
+      // A deleted plan's id has to leave `dirty` — the flush marks it done when it finds the
+      // plan gone, and the delete drops it as well. Lose BOTH and the id stays dirty for
+      // good, re-arming the flush timer every 900ms for the rest of the app's life over a
+      // write that can never happen.
+      drive.loadSessions.mockResolvedValue(twoPlans());
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      drive.deleteSession.mockResolvedValue(undefined);
+      let releaseS1;
+      drive.saveSession.mockImplementation(({ id }) =>
+        id === "s1"
+          ? new Promise((resolve) => {
+              releaseS1 = () => resolve({ ok: true, id, fileId: "f-s1", modifiedTime: "A2" });
+            })
+          : Promise.resolve({ ok: true, id, fileId: `f-${id}`, modifiedTime: "B2" }));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "12");
+      await goToHash("#/session/s2");
+      await setNumber(0, "9");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1); // s1 in flight, s2 still queued
+
+      await act(async () => { findButton("Delete").click(); }); // s2 is the plan on screen
+      await act(async () => { releaseS1(); await vi.advanceTimersByTimeAsync(2000); });
+
+      expect(drive.saveSession.mock.calls.map(([c]) => c.id)).not.toContain("s2");
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("deleting the plan whose own save is in flight leaves nothing scheduled behind it", async () => {
+      // The save answers about a plan that has since gone, so the identity check at the end
+      // of the flush cannot mark it done. Unless the delete takes the id out of `dirty`
+      // itself, it stays there and the timer re-arms for a plan that no longer exists.
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      drive.deleteSession.mockResolvedValue(undefined);
+      let release;
+      drive.saveSession.mockImplementation(({ id }) => new Promise((resolve) => {
+        release = () => resolve({ ok: true, id, fileId: `f-${id}`, modifiedTime: "S2" });
+      }));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "12");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+
+      await act(async () => { findButton("Delete").click(); });
+      const scheduled = vi.getTimerCount();
+      await act(async () => { release(); });
+
+      // The flush ends with nothing pending, so it does not arm itself again: an id left in
+      // `dirty` for a plan that no longer exists re-arms the timer for the rest of the
+      // session, every 900ms, over a write that can never happen.
+      expect(vi.getTimerCount()).toBe(scheduled);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+    });
+
     it("shows a conflict that lands after the builder was left, naming the plan", async () => {
       // Back flushes, so the conflict arrives while the owner is on the session list. A
       // banner rendered only inside the builder and the run view meant he never saw it —

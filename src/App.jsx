@@ -681,6 +681,18 @@ export default function App() {
   const onDeleteSession = useCallback(async () => {
     const id = selectedSessionId;
     if (!id) return;
+    // A plan the old blob still holds has no file of its own to trash, and nothing here
+    // rewrites the blob — so the next load migrated it straight back. Refusing with a reason
+    // beats a delete that appears to work and then undoes itself. Once its own file exists
+    // (its next save writes one) and the app has been reloaded, this plan deletes normally.
+    if (sessionsUnmigrated.some((u) => u.id === id)) {
+      window.alert(
+        "This plan is still only in your old sessions.json, so deleting it here would not "
+        + "stick — it would come back the next time the app loads. Save it first so it gets "
+        + "its own file, reload, then delete it. Or remove it from sessions.json in Drive.",
+      );
+      return;
+    }
     if (!window.confirm("Delete this session plan?")) return;
     const cur = sessionsStateRef.current;
     const rest = { ...cur.data.sessions };
@@ -703,7 +715,7 @@ export default function App() {
     location.hash = formatHash({ view: "sessions" });
     // A plan created and deleted before its first save has no file to trash.
     if (fileId) await deleteSession({ id, fileId });
-  }, [selectedSessionId, setSessionsState]);
+  }, [selectedSessionId, sessionsUnmigrated, setSessionsState]);
 
   // Resolves the current route against the loaded drills and sessions, once the
   // catalogue is ready. A slug/id that matches nothing falls back to browse/sessions
