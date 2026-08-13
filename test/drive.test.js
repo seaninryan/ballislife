@@ -3,7 +3,8 @@ import * as api from "../src/lib/driveApi.js";
 import * as auth from "../src/lib/driveAuth.js";
 import {
   loadCatalogue, saveDrill, noteModifiedTime, knownModifiedTime, readDrill, FOLDER_NAME, INDEX_NAME,
-  createDrill, deleteDrill, loadSessions, saveSessions, SESSIONS_NAME,
+  createDrill, deleteDrill, loadSessions, saveSession, deleteSession, forgetDriveState,
+  SESSIONS_NAME, SESSIONS_BACKUP_NAME,
 } from "../src/lib/drive.js";
 
 vi.mock("../src/lib/driveApi.js");
@@ -13,6 +14,9 @@ const DRILL = "---\ntitle: A\n---\n\nbody\n";
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // drive.js keeps module-level conflict baselines and file ids. Left alone they leak between
+  // tests — which is how a test here once passed alone and failed in file order.
+  forgetDriveState();
   auth.getAccessToken.mockReturnValue("tok");
   auth.ensureFreshToken.mockResolvedValue(undefined);
 });
@@ -321,67 +325,291 @@ describe("createDrill", () => {
   });
 });
 
-describe("sessions storage", () => {
-  it("reads sessions.json and remembers its modifiedTime", async () => {
-    api.findAllFolders.mockResolvedValue(["F1"]);
-    api.listFiles.mockResolvedValue([{ id: "sess", name: SESSIONS_NAME, modifiedTime: "T5" }]);
-    api.readFile.mockResolvedValue(JSON.stringify({ version: 1, sessions: { a: { id: "a" } } }));
+// -- sessions: one file per plan ----------------------------------------------
+// "F1" is the BallIsLife folder, "SF" the sessions subfolder inside it.
+const sess = (id) => ({ id, date: id, squad: "", theme: "", length: 60, turnout: null, blocks: [] });
+const file = (id, name, modifiedTime) => ({ id, name, modifiedTime });
+const indexOf = (entries) => JSON.stringify({ version: 1, entries });
+const entry = (name, modifiedTime, session) => ({ name, modifiedTime, session });
+
+// `parent` is the BallIsLife listing (where the old blob lives), `sessions` the subfolder's,
+// and `read` the text each file id returns. An unlisted read is a test bug, not a Drive
+// failure, so it throws loudly rather than quietly returning "".
+function mockSessionsDrive({ parent = [], sessions = [], read = {}, sessionsFolder = "SF" } = {}) {
+  api.findChildFolder.mockResolvedValue(sessionsFolder);
+  api.createFolder.mockResolvedValue("SF");
+  api.listFiles.mockImplementation(async (_t, folder) => (folder === "SF" ? sessions : parent));
+  api.readFile.mockImplementation(async (_t, id) => {
+    if (!(id in read)) throw new Error(`test read of an unexpected file: ${id}`);
+    return read[id];
+  });
+  api.writeFile.mockResolvedValue("TW");
+  api.createFile.mockImplementation(async (_t, _f, name) => ({ id: `F-${name}`, modifiedTime: "TN" }));
+  api.renameFile.mockResolvedValue("TR");
+  api.trashFile.mockResolvedValue(undefined);
+}
+
+const readIds = () => api.readFile.mock.calls.map((c) => c[1]);
+const writtenIndex = () => JSON.parse(api.writeFile.mock.calls[0][2]);
+
+// One session already in Drive, loaded so drive.js holds its file id and baseline — which is
+// what saveSession and deleteSession need, since the caller does not pass either.
+async function loadOneSession() {
+  mockSessionsDrive({
+    sessions: [file("idx", "index.json", "T"), file("FA", "a.json", "T1")],
+    read: { idx: indexOf({ FA: entry("a.json", "T1", sess("a")) }) },
+  });
+  return loadSessions("F1");
+}
+
+describe("loadSessions", () => {
+  it("creates the sessions subfolder on a first-ever load", async () => {
+    mockSessionsDrive({ sessionsFolder: null });
     const r = await loadSessions("F1");
-    expect(r.data.sessions.a.id).toBe("a");
-    expect(r.modifiedTime).toBe("T5");
-    expect(r.fileId).toBe("sess");
+    expect(api.createFolder).toHaveBeenCalledWith("tok", "sessions", "F1");
+    expect(r.sessions).toEqual({});
+    expect(r.migrated).toBe(0);
   });
 
-  it("reports an empty set when the file does not exist yet", async () => {
-    api.findAllFolders.mockResolvedValue(["F1"]);
-    api.listFiles.mockResolvedValue([]);
-    const r = await loadSessions("F1");
-    expect(r.data).toEqual({ version: 1, sessions: {} });
-    expect(r.fileId).toBe(null);
-    expect(api.readFile).not.toHaveBeenCalled();
+  it("reads only the index when the index already matches the listing", async () => {
+    mockSessionsDrive({
+      sessions: [file("idx", "index.json", "T"), file("FA", "a.json", "T1")],
+      read: { idx: indexOf({ FA: entry("a.json", "T1", sess("a")) }) },
+    });
+    const { sessions, meta } = await loadSessions("F1");
+    expect(readIds()).toEqual(["idx"]);
+    expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(meta.a).toEqual({ fileId: "FA", modifiedTime: "T1" });
   });
 
-  it("falls back to empty rather than throwing on a corrupt file", async () => {
-    api.findAllFolders.mockResolvedValue(["F1"]);
-    api.listFiles.mockResolvedValue([{ id: "sess", name: SESSIONS_NAME, modifiedTime: "T5" }]);
-    api.readFile.mockResolvedValue("{{{ not json");
-    expect((await loadSessions("F1")).data).toEqual({ version: 1, sessions: {} });
+  it("does not rewrite the index when nothing changed", async () => {
+    // Opening the app at the side of a pitch and changing nothing must not cost a write.
+    mockSessionsDrive({
+      sessions: [file("idx", "index.json", "T"), file("FA", "a.json", "T1")],
+      read: { idx: indexOf({ FA: entry("a.json", "T1", sess("a")) }) },
+    });
+    await loadSessions("F1");
+    expect(api.writeFile).not.toHaveBeenCalled();
+    expect(api.createFile).not.toHaveBeenCalled();
   });
 
-  it("creates the file on first save", async () => {
-    api.createFile.mockResolvedValue({ id: "sess", modifiedTime: "T1" });
-    const r = await saveSessions({ folder: "F1", fileId: null, data: { version: 1, sessions: {} }, baseModifiedTime: null });
-    expect(r).toMatchObject({ ok: true, fileId: "sess", modifiedTime: "T1" });
-    expect(api.createFile.mock.calls[0][2]).toBe(SESSIONS_NAME);
+  it("re-reads only the plan whose modifiedTime moved", async () => {
+    mockSessionsDrive({
+      sessions: [file("idx", "index.json", "T"), file("FA", "a.json", "T1"), file("FB", "b.json", "T9")],
+      read: {
+        idx: indexOf({
+          FA: entry("a.json", "T1", sess("a")),
+          FB: entry("b.json", "T2", sess("b")),
+        }),
+        FB: JSON.stringify({ ...sess("b"), theme: "edited elsewhere" }),
+      },
+    });
+    const { sessions } = await loadSessions("F1");
+    expect(readIds()).toEqual(["idx", "FB"]);
+    expect(sessions.b.theme).toBe("edited elsewhere");
+    expect(Object.keys(sessions).sort()).toEqual(["a", "b"]);
   });
 
-  it("writes an existing file and returns the new modifiedTime", async () => {
-    noteModifiedTime("sess", "T5"); // seed the baseline; without it, leftover state from
-    // an earlier test in this file ("creates the file on first save" sets known="T1" for
-    // this same literal id) makes this test spuriously conflict.
+  it("forgets a plan whose file was deleted in Drive", async () => {
+    mockSessionsDrive({
+      sessions: [file("idx", "index.json", "T"), file("FA", "a.json", "T1")],
+      read: {
+        idx: indexOf({
+          FA: entry("a.json", "T1", sess("a")),
+          FB: entry("b.json", "T2", sess("b")),
+        }),
+      },
+    });
+    const { sessions } = await loadSessions("F1");
+    expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(Object.keys(writtenIndex().entries)).toEqual(["FA"]);
+  });
+
+  it("keeps the other plans when one file fails to download", async () => {
+    // One flaky read on a phone must not cost every plan.
+    mockSessionsDrive({
+      sessions: [file("FA", "a.json", "T1"), file("FB", "b.json", "T1")],
+      read: { FA: JSON.stringify(sess("a")) },
+    });
+    const { sessions, failed } = await loadSessions("F1");
+    expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(failed.map((f) => f.name)).toEqual(["b.json"]);
+  });
+
+  it("keeps a stale cached plan when its refetch fails, and retries next load", async () => {
+    mockSessionsDrive({
+      sessions: [file("idx", "index.json", "T"), file("FB", "b.json", "T2")],
+      read: { idx: indexOf({ FB: entry("b.json", "T1", { ...sess("b"), theme: "cached" }) }) },
+    });
+    const { sessions } = await loadSessions("F1");
+    expect(sessions.b.theme).toBe("cached");
+    // The OLD modifiedTime is kept, so the next load notices the mismatch and retries.
+    expect(writtenIndex().entries.FB.modifiedTime).toBe("T1");
+  });
+
+  it("lets a 401 during a plan read reach the retry rather than failing that plan", async () => {
+    mockSessionsDrive({ sessions: [file("FA", "a.json", "T1")] });
+    let reads = 0;
+    api.readFile.mockImplementation(async () => {
+      reads += 1;
+      if (reads === 1) throw Object.assign(new Error("auth"), { code: 401 });
+      return JSON.stringify(sess("a"));
+    });
+    const { sessions, failed } = await loadSessions("F1");
+    expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(failed).toEqual([]);
+    expect(auth.ensureFreshToken).toHaveBeenCalled();
+  });
+
+  it("costs one plan, not the load, when a plan's JSON is broken", async () => {
+    mockSessionsDrive({
+      sessions: [file("FA", "a.json", "T1"), file("FB", "b.json", "T1")],
+      read: { FA: JSON.stringify(sess("a")), FB: "{{{ hand-edited badly" },
+    });
+    const { sessions } = await loadSessions("F1");
+    expect(Object.keys(sessions)).toEqual(["a"]);
+  });
+});
+
+describe("saveSession", () => {
+  it("creates a file in the sessions folder for a plan Drive has never seen", async () => {
+    mockSessionsDrive();
+    const r = await saveSession({
+      folder: "F1", id: "2026-08-13", session: sess("2026-08-13"), baseModifiedTime: null,
+    });
+    expect(r).toEqual({ ok: true, id: "2026-08-13", fileId: "F-2026-08-13.json", modifiedTime: "TN" });
+    const [, folder, name, body] = api.createFile.mock.calls[0];
+    expect(folder).toBe("SF");
+    expect(name).toBe("2026-08-13.json");
+    expect(JSON.parse(body).id).toBe("2026-08-13");
+  });
+
+  it("writes the plan's own file and returns its new modifiedTime", async () => {
+    await loadOneSession();
     api.writeFile.mockResolvedValue("T6");
-    const r = await saveSessions({ folder: "F1", fileId: "sess", data: { version: 1, sessions: {} }, baseModifiedTime: "T5" });
-    expect(r).toMatchObject({ ok: true, modifiedTime: "T6" });
-    expect(api.writeFile).toHaveBeenCalledWith("tok", "sess", expect.any(String));
+    const r = await saveSession({ folder: "F1", id: "a", session: sess("a"), baseModifiedTime: "T1" });
+    expect(r).toEqual({ ok: true, id: "a", fileId: "FA", modifiedTime: "T6" });
+    expect(api.writeFile).toHaveBeenCalledWith("tok", "FA", expect.any(String));
   });
 
-  it("refuses to overwrite when the file moved underneath it", async () => {
-    // sessions.json is the only copy of the plans, so a blind overwrite would destroy
-    // work done on another device.
-    noteModifiedTime("sess", "T9");
-    const r = await saveSessions({ folder: "F1", fileId: "sess", data: { version: 1, sessions: {} }, baseModifiedTime: "T5" });
-    expect(r).toMatchObject({ ok: false, conflict: true, modifiedTime: "T9" });
+  it("refuses to overwrite when that one file moved underneath it", async () => {
+    await loadOneSession();
+    noteModifiedTime("FA", "T9");
+    const r = await saveSession({ folder: "F1", id: "a", session: sess("a"), baseModifiedTime: "T1" });
+    expect(r).toEqual({ ok: false, conflict: true, id: "a", modifiedTime: "T9" });
     expect(api.writeFile).not.toHaveBeenCalled();
   });
 
+  it("reports a failed write against the id that failed", async () => {
+    // The caller is saving several plans at once, so a failure has to say which one.
+    await loadOneSession();
+    api.writeFile.mockRejectedValue(Object.assign(new Error("boom"), { code: 500 }));
+    const r = await saveSession({ folder: "F1", id: "a", session: sess("a"), baseModifiedTime: "T1" });
+    expect(r.ok).toBe(false);
+    expect(r.id).toBe("a");
+    expect(r.error.code).toBe(500);
+  });
+
   it("retries once on a 401", async () => {
+    await loadOneSession();
     api.writeFile
       .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
       .mockResolvedValue("T7");
-    noteModifiedTime("sess", "T5");
-    const r = await saveSessions({ folder: "F1", fileId: "sess", data: { version: 1, sessions: {} }, baseModifiedTime: "T5" });
-    expect(r.ok).toBe(true);
-    expect(api.writeFile).toHaveBeenCalledTimes(2);
+    const r = await saveSession({ folder: "F1", id: "a", session: sess("a"), baseModifiedTime: "T1" });
+    expect(r).toMatchObject({ ok: true, modifiedTime: "T7" });
+  });
+});
+
+describe("deleteSession", () => {
+  it("trashes that plan's file and forgets its baseline", async () => {
+    await loadOneSession();
+    await deleteSession({ id: "a", fileId: "FA" });
+    expect(api.trashFile).toHaveBeenCalledWith("tok", "FA");
+    expect(knownModifiedTime("FA")).toBe(null);
+  });
+
+  it("retries once on a 401", async () => {
+    mockSessionsDrive();
+    api.trashFile
+      .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
+      .mockResolvedValue(undefined);
+    await expect(deleteSession({ id: "a", fileId: "FA" })).resolves.toBeUndefined();
+    expect(api.trashFile).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("migrating the sessions.json blob", () => {
+  const blob = (sessions) => JSON.stringify({ version: 1, sessions });
+
+  it("writes one file per plan and renames the blob aside", async () => {
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: blob({ a: sess("a"), b: sess("b") }) },
+    });
+    const { sessions, migrated } = await loadSessions("F1");
+    expect(migrated).toBe(2);
+    expect(Object.keys(sessions).sort()).toEqual(["a", "b"]);
+    const names = api.createFile.mock.calls.map((c) => c[2]);
+    expect(names).toEqual(["a.json", "b.json", "index.json"]);
+    expect(api.renameFile).toHaveBeenCalledWith("tok", "BLOB", SESSIONS_BACKUP_NAME);
+    // The plans were already in memory: reading back what we just wrote would be wasted.
+    expect(readIds()).toEqual(["BLOB"]);
+  });
+
+  it("does not run again once the blob has been renamed aside", async () => {
+    mockSessionsDrive({
+      parent: [file("BAK", SESSIONS_BACKUP_NAME, "T0")],
+      sessions: [file("idx", "index.json", "T"), file("FA", "a.json", "T1")],
+      read: { idx: indexOf({ FA: entry("a.json", "T1", sess("a")) }) },
+    });
+    const { migrated } = await loadSessions("F1");
+    expect(migrated).toBe(0);
+    expect(api.createFile).not.toHaveBeenCalled();
+    expect(api.writeFile).not.toHaveBeenCalled();
+    expect(api.renameFile).not.toHaveBeenCalled();
+  });
+
+  it("resumes a half-done migration without overwriting the file already written", async () => {
+    // A migration interrupted by a closed tab must not replace a plan edited since.
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      sessions: [file("idx", "index.json", "T"), file("FA", "a.json", "T1")],
+      read: {
+        BLOB: blob({ a: sess("a"), b: sess("b") }),
+        idx: indexOf({ FA: entry("a.json", "T1", { ...sess("a"), theme: "already migrated" }) }),
+      },
+    });
+    const { sessions, migrated } = await loadSessions("F1");
+    expect(migrated).toBe(1);
+    expect(api.createFile.mock.calls.map((c) => c[2])).toEqual(["b.json"]);
+    expect(sessions.a.theme).toBe("already migrated");
+    // Only the index was rewritten; a.json itself was never touched.
+    expect(api.writeFile.mock.calls.map((c) => c[1])).toEqual(["idx"]);
+  });
+
+  it("still loads the migrated plans when the rename fails", async () => {
+    // The rename is only tidying — every plan is already safe in its own file.
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: blob({ a: sess("a"), b: sess("b") }) },
+    });
+    api.renameFile.mockRejectedValue(Object.assign(new Error("boom"), { code: 500 }));
+    const { sessions, migrated } = await loadSessions("F1");
+    expect(migrated).toBe(2);
+    expect(Object.keys(sessions).sort()).toEqual(["a", "b"]);
+  });
+
+  it("keeps the blob findable when a plan's id cannot be a file name", async () => {
+    // The blob accepted any key; a file name cannot. Renaming the blob away would hide a
+    // plan the app has nowhere to show.
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: blob({ a: sess("a"), "13/08/2026": sess("13/08/2026") }) },
+    });
+    const { sessions, migrated } = await loadSessions("F1");
+    expect(migrated).toBe(1);
+    expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(api.renameFile).not.toHaveBeenCalled();
   });
 });
 
