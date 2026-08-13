@@ -461,13 +461,42 @@ describe("loadSessions", () => {
     expect(auth.ensureFreshToken).toHaveBeenCalled();
   });
 
-  it("costs one plan, not the load, when a plan's JSON is broken", async () => {
+  it("costs one plan, not the load, when a plan's JSON is broken — and says which", async () => {
     mockSessionsDrive({
       sessions: [file("FA", "a.json", "T1"), file("FB", "b.json", "T1")],
       read: { FA: JSON.stringify(sess("a")), FB: "{{{ hand-edited badly" },
     });
-    const { sessions } = await loadSessions("F1");
+    const { sessions, failed } = await loadSessions("F1");
     expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(failed).toEqual([
+      expect.objectContaining({ id: "FB", name: "b.json", reason: "parse" }),
+    ]);
+  });
+
+  it("keeps reporting a broken plan on the loads that only read the cache", async () => {
+    // The index caches the skip, so without this the plan is gone on every later load with
+    // nothing said about it at all.
+    mockSessionsDrive({
+      sessions: [file("idx", "index.json", "T"), file("FB", "b.json", "T1")],
+      read: { idx: indexOf({ FB: entry("b.json", "T1", null) }) },
+    });
+    const { sessions, failed } = await loadSessions("F1");
+    expect(sessions).toEqual({});
+    expect(failed.map((f) => f.reason)).toEqual(["parse"]);
+    expect(readIds()).toEqual(["idx"]); // still not refetched
+  });
+
+  it("names a file whose name cannot be a plan id instead of hiding it", async () => {
+    // Drive's own "Copy of a.json", made by a duplicate in the web UI.
+    mockSessionsDrive({
+      sessions: [file("FA", "a.json", "T1"), file("FC", "Copy of a.json", "T1")],
+      read: { FA: JSON.stringify(sess("a")) },
+    });
+    const { sessions, failed } = await loadSessions("F1");
+    expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(failed).toEqual([
+      expect.objectContaining({ id: "FC", name: "Copy of a.json", reason: "unnamed" }),
+    ]);
   });
 });
 
@@ -715,10 +744,15 @@ describe("migrating the sessions.json blob", () => {
       parent: [file("BLOB", SESSIONS_NAME, "T0")],
       read: { BLOB: blob({ a: sess("a"), "13/08/2026": sess("13/08/2026") }) },
     });
-    const { sessions, migrated } = await loadSessions("F1");
+    const { sessions, migrated, unmigrated } = await loadSessions("F1");
     expect(migrated).toBe(1);
     expect(Object.keys(sessions)).toEqual(["a"]);
     expect(api.renameFile).not.toHaveBeenCalled();
+    // Reported, not merely counted: the banner used to say the others had moved and say
+    // nothing at all about the plan that had not.
+    expect(unmigrated).toEqual([
+      expect.objectContaining({ id: "13/08/2026", reason: "unsafe-id" }),
+    ]);
   });
 });
 

@@ -356,10 +356,12 @@ async function migrateBlob(token, folder, sessionsFolder, parentFiles, listing) 
 //    meta:       { [id]: { fileId, modifiedTime } }   per-file conflict baselines
 //    migrated:   how many plans came out of the old blob this load
 //    failed:     [{ id, name, error, reason }] — everything that could not be read, for the
-//                same reporting as drills. `reason` is "read" for a flaky download and
-//                "blob" for a sessions.json that could not be read at all.
-//    unmigrated: [{ id, reason, error }] — plans read out of the blob that have no file
-//                yet. Shown all the same; the blob is left findable so a later load retries.
+//                same reporting as drills. `reason`: "read" a flaky download, "parse" a file
+//                whose JSON is broken, "unnamed" a .json file whose name is not a legal id,
+//                "blob" a sessions.json that could not be read at all.
+//    unmigrated: [{ id, reason, error }] — plans read out of the blob that have no file yet.
+//                `reason` "write" is shown all the same; "unsafe-id" cannot be, having no
+//                name it could ever live under. Either way the blob is left findable.
 export async function loadSessions(folder) {
   return withRetry(async () => {
     const token = getAccessToken();
@@ -376,7 +378,7 @@ export async function loadSessions(folder) {
       token, folder, sessionsFolder, parentFiles, files,
     );
 
-    const { keep, refetch, dropped } = diffSessionsIndex(cached, files);
+    const { keep, refetch, dropped, unnamed } = diffSessionsIndex(cached, files);
 
     const built = { ...fromBlob };
     const failed = [...blobFailed];
@@ -391,13 +393,37 @@ export async function loadSessions(folder) {
         // Any other failure costs one plan, not the lot. Keep the previous cached entry if
         // there is one, so the plan still shows: its OLD modifiedTime stays in the index, so
         // the next load sees the mismatch and retries by itself.
-        failed.push({ id: file.id, name: file.name, error });
+        failed.push({ id: file.id, name: file.name, error, reason: "read" });
         const previous = cached.entries[file.id];
         if (previous) built[file.id] = previous;
       }
     }
 
+    // A .json file in the sessions folder that cannot yield an id. Nothing can be loaded
+    // from it, but it is named rather than only skipped.
+    for (const file of unnamed) {
+      failed.push({
+        id: file.id,
+        name: file.name,
+        error: new Error(`"${file.name}" is not a valid session file name`),
+        reason: "unnamed",
+      });
+    }
+
     const index = applySessionsDiff(keep, built);
+
+    // Read off the finished index rather than off `refetch`, because the index CACHES the
+    // skip: a plan whose JSON is broken is not refetched on any later load, so reporting it
+    // only when it was read would mean it silently stayed gone forever.
+    for (const [fileId, e] of Object.entries(index.entries)) {
+      if (e?.session || failed.some((f) => f.id === fileId)) continue;
+      failed.push({
+        id: fileId,
+        name: e?.name ?? null,
+        error: new Error(`"${e?.name}" is not a readable session plan`),
+        reason: "parse",
+      });
+    }
 
     // Only rewrite the cache when it actually changed — opening the app on a phone with
     // nothing new must not cost a write.

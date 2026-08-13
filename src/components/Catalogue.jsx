@@ -71,9 +71,14 @@ export default function Catalogue({
   // The old blob failing to read is not "one plan failed": no plan was lost, and counting
   // it as one would tell the owner a plan is missing that never existed as a file.
   const blobUnreadable = sessionsFailed.some((f) => f.reason === "blob");
-  const unloadable = sessionsFailed.filter((f) => f.reason !== "blob");
+  // Split by whether reloading can help. A flaky download will fix itself; a file whose
+  // JSON or whose name is broken will not, and telling the owner to wait would be a lie.
+  const needsDrive = new Set(["parse", "unnamed", "duplicate"]);
+  const unloadable = sessionsFailed.filter((f) => f.reason !== "blob" && !needsDrive.has(f.reason));
+  const unfixable = sessionsFailed.filter((f) => needsDrive.has(f.reason));
   // A plan still in the blob but shown from it: its file will be written by its next save.
   const notMoved = sessionsUnmigrated.filter((u) => u.reason !== "unsafe-id");
+  const unnameable = sessionsUnmigrated.filter((u) => u.reason === "unsafe-id");
 
   // The editor takes over the whole view when open — it is not a peer of the grid or
   // the read view, and rendering both at once would mean two sources of truth for the
@@ -205,6 +210,26 @@ export default function Catalogue({
           {unloadable.length} session plan{unloadable.length === 1 ? "" : "s"} could
           not be loaded: {unloadable.map((f) => f.name).join(", ")}. They will be
           retried next time you reload.
+        </div>
+      ) : null}
+
+      {unfixable.length ? (
+        <div className="banner err">
+          {unfixable.length} file{unfixable.length === 1 ? "" : "s"} in your{" "}
+          <strong>sessions</strong> folder could not be read as a plan:{" "}
+          {unfixable.map((f) => f.name).join(", ")}. Nothing has been changed or deleted, but
+          reloading will not help — fix or rename {unfixable.length === 1 ? "it" : "them"} in
+          Drive.
+        </div>
+      ) : null}
+
+      {unnameable.length ? (
+        <div className="banner err">
+          {unnameable.length} plan{unnameable.length === 1 ? "" : "s"} in your old{" "}
+          <strong>sessions.json</strong> cannot be given a file name
+          ({unnameable.map((u) => u.id).join(", ")}), so {unnameable.length === 1 ? "it is" : "they are"}{" "}
+          not listed here. That file has been left exactly where it is — rename those ids in
+          Drive to look like <strong>2026-08-13</strong> and reload.
         </div>
       ) : null}
 

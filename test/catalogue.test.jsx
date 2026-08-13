@@ -208,6 +208,36 @@ describe("Catalogue sessions switch", () => {
     expect(html).toMatch(/having trouble/i);
   });
 
+  it("separates plans that need fixing in Drive from ones a reload would retry", () => {
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", sessions: [],
+      sessionsFailed: [
+        { id: "FB", name: "b.json", reason: "read", error: new Error("x") },
+        { id: "FC", name: "c.json", reason: "parse", error: new Error("x") },
+        { id: "FD", name: "Copy of a.json", reason: "unnamed", error: new Error("x") },
+      ],
+    });
+    expect(html).toMatch(/1 session plan could not be loaded/i);
+    expect(html).toContain("b.json");
+    // The other two will never come back on their own, so they must not be reported as
+    // something a reload fixes.
+    expect(html).toContain("c.json");
+    expect(html).toContain("Copy of a.json");
+    expect(html).toMatch(/in Drive/i);
+  });
+
+  it("names a plan the old blob holds under an id no file can be called", () => {
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", sessions: [],
+      sessionsMigrated: 1,
+      sessionsUnmigrated: [{ id: "13/08/2026", reason: "unsafe-id", error: null }],
+    });
+    expect(html).toContain("13/08/2026");
+    expect(html).toContain("sessions.json");
+    // It is not listed, so it must not be claimed as still shown.
+    expect(html).not.toMatch(/still listed here/i);
+  });
+
   it("surfaces a sessions save conflict the way the editor does", () => {
     const session = { id: "s1", date: "2026-08-12", squad: "", theme: "", length: 75,
       blocks: [{ slot: "warmup", drill: null, minutes: null, note: "" },

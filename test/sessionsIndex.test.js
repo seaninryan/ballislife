@@ -62,8 +62,24 @@ describe("diffSessionsIndex", () => {
     expect(refetch.map((f) => f.name)).toEqual(["a.json"]);
   });
 
+  it("names the .json files it cannot take an id from, rather than only dropping them", () => {
+    // Drive's own "Copy of a.json" is the reachable case. Filtering it out silently makes a
+    // file the owner can see in Drive simply not exist in the app.
+    const files = [
+      file("I", "index.json", "T"),
+      file("N", "notes.txt", "T"),
+      file("C", "Copy of a.json", "T1"),
+      file("F1", "a.json", "T1"),
+    ];
+    const { refetch, unnamed } = diffSessionsIndex(EMPTY_SESSIONS_INDEX, files);
+    expect(refetch.map((f) => f.name)).toEqual(["a.json"]);
+    // index.json is the cache and notes.txt was never meant to be a plan; neither is a loss.
+    expect(unnamed.map((f) => f.name)).toEqual(["Copy of a.json"]);
+  });
+
   it("survives a junk listing", () => {
     expect(diffSessionsIndex(EMPTY_SESSIONS_INDEX, null).refetch).toEqual([]);
+    expect(diffSessionsIndex(EMPTY_SESSIONS_INDEX, null).unnamed).toEqual([]);
     expect(diffSessionsIndex(null, [file("F1", "a.json", "T")]).refetch.map((f) => f.id)).toEqual(["F1"]);
   });
 });

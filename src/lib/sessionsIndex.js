@@ -5,7 +5,7 @@
 // INVARIANT: the index is disposable and never authoritative; the per-session files are.
 // Every load diffs it against a real listing, so it cannot serve a stale plan after one is
 // edited directly in the Drive web UI. Anything unparseable rebuilds from scratch.
-import { sessionIdFromFileName } from "./sessions.js";
+import { sessionIdFromFileName, SESSIONS_INDEX_NAME } from "./sessions.js";
 
 const VERSION = 1;
 export const EMPTY_SESSIONS_INDEX = Object.freeze({ version: VERSION, entries: {} });
@@ -26,12 +26,26 @@ export function readSessionsIndex(raw) {
 // An entry is {name, modifiedTime, session}: the whole plan is cached, because that is what
 // every view needs and a plan is small.
 //
-// index + live listing -> what to keep, what to refetch, what to drop.
+// index + live listing -> what to keep, what to refetch, what to drop, and what looked
+// like a plan but could not be one.
 // A changed NAME forces a refetch as well as a changed modifiedTime: Drive does not
 // always bump modifiedTime on a rename, and the name is what the id comes from.
+//
+// `unnamed` is the .json files in the sessions folder whose name yields no id — Drive's own
+// "Copy of a.json" is the reachable case. They cannot be loaded, but they are reported
+// rather than only filtered out: a file the owner can see in Drive must not simply not
+// exist in the app. index.json is the cache and a non-.json file was never meant to be a
+// plan, so neither counts.
 export function diffSessionsIndex(index, files) {
   const entries = index?.entries ?? {};
-  const plans = (files ?? []).filter((f) => f && sessionIdFromFileName(f.name) !== null);
+  const listing = (files ?? []).filter(Boolean);
+  const plans = listing.filter((f) => sessionIdFromFileName(f.name) !== null);
+  const unnamed = listing.filter((f) => {
+    const name = String(f.name ?? "").toLowerCase();
+    return name.endsWith(".json")
+      && name !== SESSIONS_INDEX_NAME.toLowerCase()
+      && sessionIdFromFileName(f.name) === null;
+  });
   const keep = {};
   const refetch = [];
 
@@ -46,7 +60,7 @@ export function diffSessionsIndex(index, files) {
 
   const live = new Set(plans.map((f) => f.id));
   const dropped = Object.keys(entries).filter((id) => !live.has(id));
-  return { keep, refetch, dropped };
+  return { keep, refetch, dropped, unnamed };
 }
 
 // kept entries + newly read entries -> the index to write back.
