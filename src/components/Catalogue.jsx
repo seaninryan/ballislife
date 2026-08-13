@@ -52,6 +52,7 @@ export default function Catalogue({
   sessions = [], selectedSession, onOpenSession, onCreateSession,
   onSessionChange, onSessionBack, onDeleteSession,
   sessionsStatus, sessionsError, onKeepMineSessions, onReloadSessions,
+  sessionsMigrated = 0, sessionsFailed = [],
   runSession, runTexts, onOpenRun, onRunBack, onRunSwap, onRunProgress,
 }) {
   if (status === "signed-out") {
@@ -155,6 +156,22 @@ export default function Catalogue({
         <div className="banner warn">
           There is more than one <strong>BallIsLife</strong> folder in your Drive. Drills
           may be split between them — merge them in Drive to be safe.
+        </div>
+      ) : null}
+
+      {sessionsMigrated ? (
+        <div className="banner warn">
+          Moved {sessionsMigrated} session plan{sessionsMigrated === 1 ? "" : "s"} into
+          their own files in the <strong>sessions</strong> folder. The old file is kept as{" "}
+          <strong>sessions-before-split.json</strong> until you delete it.
+        </div>
+      ) : null}
+
+      {sessionsFailed.length ? (
+        <div className="banner warn">
+          {sessionsFailed.length} session plan{sessionsFailed.length === 1 ? "" : "s"} could
+          not be loaded: {sessionsFailed.map((f) => f.name).join(", ")}. They will be
+          retried next time you reload.
         </div>
       ) : null}
 

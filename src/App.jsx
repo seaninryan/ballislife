@@ -5,7 +5,7 @@ import { aboutEmail } from "./lib/driveApi.js";
 import { isOwner } from "./lib/owner.js";
 import {
   loadCatalogue, readDrill, saveDrill, createDrill, deleteDrill, knownModifiedTime,
-  loadSessions, saveSessions,
+  loadSessions, saveSession, deleteSession,
 } from "./lib/drive.js";
 import { openEditor, reduce, shouldSave } from "./lib/editor.js";
 import { emptySession, resolveBlocks, setBlock } from "./lib/sessions.js";
@@ -30,16 +30,22 @@ export default function App() {
   const [editor, setEditor] = useState(null);
   const [mode, setMode] = useState("drills");
   const [selectedSessionId, setSelectedSessionId] = useState(null);
-  // The whole sessions.json blob is one save unit — unlike drills there is no per-file
-  // id to key state by, so status/error/fileId/baseModifiedTime travel together with
-  // the data itself, the same shape the editor uses for one drill.
+  // Each plan is its own Drive file, so the save state is per session: `meta` holds each
+  // one's file and conflict baseline and `dirty` the ids still awaiting a write. `data`
+  // stays the id-keyed map every session view already renders — only loading and saving
+  // are per file.
   const [sessionsState, setSessionsStateRaw] = useState({
     data: { version: 1, sessions: {} },
-    fileId: null,
-    baseModifiedTime: null,
+    meta: {},       // id -> { fileId, modifiedTime }: the per-file conflict baseline
+    dirty: [],      // ids awaiting a save, in the order they were touched
     status: "idle", // idle | dirty | saving | conflict | failed
     error: null,
+    conflictId: null,
   });
+  // Reported once after the load that did the work: the blob split is invisible in Drive
+  // otherwise, and the owner should know his plans moved and where the backup is.
+  const [sessionsMigrated, setSessionsMigrated] = useState(0);
+  const [sessionsFailed, setSessionsFailed] = useState([]);
   const folderRef = useRef(null);
   // A monotonic token, not the drill id: reopening the SAME drill starts a second
   // request that an id check cannot tell from the first, so the slower response won.
@@ -127,39 +133,78 @@ export default function App() {
 
   useEffect(() => () => clearTimeout(saveTimer.current), []);
 
-  // Writes the whole sessions.json blob if it is currently dirty. Mirrors flushSave's
-  // contract: conflict-checked, never overwrites silently, and adopts the returned
-  // modifiedTime on every success.
+  // Guards against two flushes overlapping and writing the same file twice with the same
+  // baseline, which Drive would report as a conflict against ourselves. The flush in
+  // flight rechecks `dirty` when it ends, so nothing is stranded by the early return.
+  const sessionsSaving = useRef(false);
+
+  // Writes every dirty plan, one file each, against that plan's own baseline. Each result
+  // is applied to its own id: a conflict or a failure on tonight's plan must leave every
+  // other plan's pending edit exactly where it was, which is the whole point of the split.
   const flushSessionsSave = useCallback(async () => {
-    const state = sessionsStateRef.current;
-    if (state.status !== "dirty") return;
-    const sent = state.data;
-    setSessionsState({ ...state, status: "saving" });
-    const result = await saveSessions({
-      folder: folderRef.current,
-      fileId: state.fileId,
-      data: sent,
-      baseModifiedTime: state.baseModifiedTime,
-    });
-    const latest = sessionsStateRef.current;
-    if (result.ok) {
-      // The data may have moved on again while this save was in flight — that's still
-      // dirty and needs another save, the same way a coalesced drill save can be.
-      const stillCurrent = latest.data === sent;
-      setSessionsState({
-        ...latest,
-        fileId: result.fileId ?? latest.fileId,
-        baseModifiedTime: result.modifiedTime,
-        status: stillCurrent ? "idle" : "dirty",
-        error: null,
-      });
-      if (!stillCurrent) sessionsSaveTimer.current = setTimeout(flushSessionsSave, SAVE_DEBOUNCE_MS);
-    } else if (result.conflict) {
-      // Never touch `data`: the user's plan is the one thing that must survive.
-      setSessionsState({ ...latest, baseModifiedTime: result.modifiedTime, status: "conflict" });
-    } else {
-      setSessionsState({ ...latest, status: "failed", error: result.error });
+    if (sessionsSaving.current) return;
+    const start = sessionsStateRef.current;
+    const ids = start.dirty;
+    if (!ids.length) return;
+    sessionsSaving.current = true;
+    setSessionsState({ ...start, status: "saving" });
+
+    // What each save is sending, so an edit that lands mid-flight is recognised as a new
+    // dirty state rather than reported as the one that was written.
+    const sent = new Map(ids.map((id) => [id, start.data.sessions[id]]));
+    const metaUpdates = {};
+    const done = new Set();
+    let conflictId = null;
+    let error = null;
+
+    try {
+      for (const id of ids) {
+        const session = sent.get(id);
+        // Deleted while it was waiting for its write. Saving it would resurrect the file.
+        if (!session) { done.add(id); continue; }
+        const result = await saveSession({
+          folder: folderRef.current,
+          id,
+          session,
+          baseModifiedTime: sessionsStateRef.current.meta[id]?.modifiedTime ?? null,
+        });
+        if (result.ok) {
+          // The fileId only arrives with the save that created the file, so keep the known
+          // one otherwise: it is what a later delete has to trash.
+          metaUpdates[id] = {
+            fileId: result.fileId ?? sessionsStateRef.current.meta[id]?.fileId ?? null,
+            modifiedTime: result.modifiedTime,
+          };
+          if (sessionsStateRef.current.data.sessions[id] === session) done.add(id);
+        } else if (result.conflict) {
+          // Adopt what Drive reports so "Keep mine" can write over it, and leave the id
+          // dirty: never touch `data`, since the owner's plan is what must survive.
+          metaUpdates[id] = {
+            ...sessionsStateRef.current.meta[id],
+            modifiedTime: result.modifiedTime,
+          };
+          conflictId = id;
+        } else {
+          error = result.error;
+        }
+      }
+    } finally {
+      sessionsSaving.current = false;
     }
+
+    const latest = sessionsStateRef.current;
+    const meta = { ...latest.meta };
+    for (const [id, m] of Object.entries(metaUpdates)) {
+      // A plan deleted mid-flush must not get its file id back.
+      if (latest.data.sessions[id]) meta[id] = m;
+    }
+    const dirty = latest.dirty.filter((id) => !done.has(id));
+    // A conflict or a failure stops the automatic retry but not the other plans: each was
+    // attempted above, and what is left waits for "Keep mine", a reload, or the next edit
+    // — the same terms the drill editor offers.
+    const status = conflictId ? "conflict" : error ? "failed" : dirty.length ? "dirty" : "idle";
+    setSessionsState({ ...latest, meta, dirty, status, error: error ?? null, conflictId });
+    if (status === "dirty") sessionsSaveTimer.current = setTimeout(flushSessionsSave, SAVE_DEBOUNCE_MS);
   }, [setSessionsState]);
 
   const scheduleSessionsSave = useCallback(() => {
@@ -167,32 +212,49 @@ export default function App() {
     sessionsSaveTimer.current = setTimeout(flushSessionsSave, SAVE_DEBOUNCE_MS);
   }, [flushSessionsSave]);
 
-  // A block/date/theme/etc change from the builder: merge it into the sessions map by
-  // id and mark the whole file dirty. A conflict is not cleared by editing further —
-  // Drive is still ahead of us — only keepMine or reload resolves it, same as the
-  // drill editor.
+  // A block/date/theme/etc change from the builder: merge it into the sessions map by id
+  // and mark THAT id dirty. A conflict is not cleared by editing further — Drive is still
+  // ahead of us — only keepMine or reload resolves it, same as the drill editor.
   const onSessionChange = useCallback((updatedSession) => {
     const cur = sessionsStateRef.current;
     const nextData = {
       ...cur.data,
       sessions: { ...cur.data.sessions, [updatedSession.id]: updatedSession },
     };
-    setSessionsState({ ...cur, data: nextData, status: cur.status === "conflict" ? "conflict" : "dirty" });
+    setSessionsState({
+      ...cur,
+      data: nextData,
+      dirty: cur.dirty.includes(updatedSession.id) ? cur.dirty : [...cur.dirty, updatedSession.id],
+      status: cur.status === "conflict" ? "conflict" : "dirty",
+    });
     scheduleSessionsSave();
   }, [setSessionsState, scheduleSessionsSave]);
 
   const onKeepMineSessions = useCallback(() => {
     const cur = sessionsStateRef.current;
     if (cur.status !== "conflict") return;
-    // baseModifiedTime was already updated to Drive's current value when the conflict
-    // was reported, so this save now passes the conflict check while keeping our data.
-    setSessionsState({ ...cur, status: "dirty" });
+    // The conflicted id's baseline was already moved to Drive's current value when the
+    // conflict was reported, so it is still dirty and now passes the conflict check while
+    // keeping our plan.
+    setSessionsState({ ...cur, status: "dirty", conflictId: null });
     sessionsSaveTimer.current = setTimeout(flushSessionsSave, 0);
   }, [setSessionsState, flushSessionsSave]);
 
+  // Reload drops local edits by definition, so a pending flush must not write them back
+  // afterwards.
   const onReloadSessions = useCallback(async () => {
-    const { fileId, data, modifiedTime } = await loadSessions(folderRef.current);
-    setSessionsState({ data, fileId, baseModifiedTime: modifiedTime, status: "idle", error: null });
+    clearTimeout(sessionsSaveTimer.current);
+    const { sessions, meta, migrated, failed: unreadable } = await loadSessions(folderRef.current);
+    setSessionsState({
+      data: { version: 1, sessions },
+      meta: meta ?? {},
+      dirty: [],
+      status: "idle",
+      error: null,
+      conflictId: null,
+    });
+    setSessionsMigrated(migrated ?? 0);
+    setSessionsFailed(unreadable ?? []);
   }, [setSessionsState]);
 
   useEffect(() => () => clearTimeout(sessionsSaveTimer.current), []);
@@ -216,8 +278,17 @@ export default function App() {
       setDuplicateFolders(Boolean(dupes));
       // Sessions load after drills: they reference drills by slug, so nothing about
       // resolving a session needs the catalogue to still be loading.
-      const { fileId, data, modifiedTime } = await loadSessions(folderId);
-      setSessionsState({ data, fileId, baseModifiedTime: modifiedTime, status: "idle", error: null });
+      const { sessions, meta, migrated, failed: unreadable } = await loadSessions(folderId);
+      setSessionsState({
+        data: { version: 1, sessions },
+        meta: meta ?? {},
+        dirty: [],
+        status: "idle",
+        error: null,
+        conflictId: null,
+      });
+      setSessionsMigrated(migrated ?? 0);
+      setSessionsFailed(unreadable ?? []);
       setStatus("ready");
       return loaded;
     } catch (e) {
@@ -506,19 +577,32 @@ export default function App() {
     location.hash = formatHash({ view: "session", slug: id });
   }, [onSessionChange]);
 
-  const onDeleteSession = useCallback(() => {
+  // Deleting a plan is now trashing one file, not rewriting the rest. The id leaves
+  // `dirty` with it, so a flush already scheduled cannot re-create what was just deleted.
+  const onDeleteSession = useCallback(async () => {
     const id = selectedSessionId;
     if (!id) return;
     if (!window.confirm("Delete this session plan?")) return;
     const cur = sessionsStateRef.current;
     const rest = { ...cur.data.sessions };
     delete rest[id];
-    setSessionsState({ ...cur, data: { ...cur.data, sessions: rest }, status: "dirty" });
+    const meta = { ...cur.meta };
+    const fileId = meta[id]?.fileId ?? null;
+    delete meta[id];
+    const conflicted = cur.conflictId === id;
+    setSessionsState({
+      ...cur,
+      data: { ...cur.data, sessions: rest },
+      meta,
+      dirty: cur.dirty.filter((d) => d !== id),
+      status: conflicted ? "idle" : cur.status,
+      conflictId: conflicted ? null : cur.conflictId,
+    });
     setSelectedSessionId(null);
     location.hash = formatHash({ view: "sessions" });
-    clearTimeout(sessionsSaveTimer.current);
-    sessionsSaveTimer.current = setTimeout(flushSessionsSave, 0);
-  }, [selectedSessionId, setSessionsState, flushSessionsSave]);
+    // A plan created and deleted before its first save has no file to trash.
+    if (fileId) await deleteSession({ id, fileId });
+  }, [selectedSessionId, setSessionsState]);
 
   // Resolves the current route against the loaded drills and sessions, once the
   // catalogue is ready. A slug/id that matches nothing falls back to browse/sessions
@@ -588,6 +672,13 @@ export default function App() {
   }, [status, drills, resolveRoute]);
 
   const sessionsList = Object.values(sessionsState.data.sessions);
+  // "Keep mine" writes ONE file, so the conflict banner belongs on the plan that actually
+  // conflicted rather than on whichever plan happens to be open.
+  const visibleSessionId = runSessionId ?? selectedSessionId;
+  const sessionsStatus =
+    sessionsState.status === "conflict" && sessionsState.conflictId !== visibleSessionId
+      ? "idle"
+      : sessionsState.status;
   const selectedSession = selectedSessionId ? sessionsState.data.sessions[selectedSessionId] ?? null : null;
   const runSession = runSessionId ? sessionsState.data.sessions[runSessionId] ?? null : null;
 
@@ -629,8 +720,10 @@ export default function App() {
         onSessionChange={onSessionChange}
         onSessionBack={onSessionBack}
         onDeleteSession={onDeleteSession}
-        sessionsStatus={sessionsState.status}
+        sessionsStatus={sessionsStatus}
         sessionsError={sessionsState.error}
+        sessionsMigrated={sessionsMigrated}
+        sessionsFailed={sessionsFailed}
         onKeepMineSessions={onKeepMineSessions}
         onReloadSessions={onReloadSessions}
         runSession={runSession}

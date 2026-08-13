@@ -24,8 +24,12 @@ beforeEach(() => {
   auth.getAccessToken.mockReturnValue("tok"); auth.startTokenKeepAlive.mockImplementation(() => {});
   api.aboutEmail.mockResolvedValue("o@e.com"); owner.isOwner.mockResolvedValue(true);
   drive.loadCatalogue.mockResolvedValue({ drills: [], failed: [], folderId: "F1", duplicateFolders: false, index: { version: 1, entries: {} } });
-  drive.loadSessions.mockResolvedValue({ fileId: "s", data: { version: 1, sessions: { "2026-08-12": SESSION } }, modifiedTime: "T" });
-  drive.saveSessions.mockResolvedValue({ ok: true, fileId: "s", modifiedTime: "T2" });
+  drive.loadSessions.mockResolvedValue({
+    sessions: { "2026-08-12": SESSION },
+    meta: { "2026-08-12": { fileId: "s", modifiedTime: "T" } },
+    migrated: 0, failed: [],
+  });
+  drive.saveSession.mockResolvedValue({ ok: true, id: "2026-08-12", fileId: "s", modifiedTime: "T2" });
 });
 afterEach(() => { act(() => root?.unmount()); container.remove(); });
 const click = async (label) => {

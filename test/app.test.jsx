@@ -21,6 +21,24 @@ const drill = (id, title) => ({
   tags: [], thumb: null, invalid: null,
 });
 
+// What loadSessions now returns: the id-keyed map the app renders, plus one meta entry
+// per file — each plan's own file id and conflict baseline. Tests that care about a
+// specific baseline pass their own `meta`.
+const sessionsLoad = (sessions, extra = {}) => ({
+  sessions,
+  meta: Object.fromEntries(
+    Object.keys(sessions).map((id) => [id, { fileId: `f-${id}`, modifiedTime: "S1" }]),
+  ),
+  migrated: 0,
+  failed: [],
+  ...extra,
+});
+
+// saveSession answers about one plan, and App adopts the returned fileId/modifiedTime for
+// that id alone — so the mock echoes back whichever id it was called with.
+const saveSessionOk = (modifiedTime = "S2") => ({ id }) =>
+  Promise.resolve({ ok: true, id, fileId: `f-${id}`, modifiedTime });
+
 let container;
 let root;
 
@@ -46,7 +64,7 @@ beforeEach(() => {
     drills: [drill("a", "Alpha"), drill("b", "Bravo")],
     failed: [], folderId: "F1", duplicateFolders: false, index: { version: 1, entries: {} },
   });
-  drive.loadSessions.mockResolvedValue({ fileId: null, data: { version: 1, sessions: {} }, modifiedTime: null });
+  drive.loadSessions.mockResolvedValue(sessionsLoad({}));
 });
 
 afterEach(() => {
@@ -301,15 +319,45 @@ const openSession = async (dateText) => {
 
 describe("App sessions", () => {
   it("loads sessions after the catalogue is ready", async () => {
-    drive.loadSessions.mockResolvedValue({
-      fileId: "sess",
-      data: { version: 1, sessions: { s1: session("s1", "2026-08-12") } },
-      modifiedTime: "S1",
-    });
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: session("s1", "2026-08-12") }));
     await mount();
     expect(drive.loadSessions).toHaveBeenCalledWith("F1");
     await act(async () => { findButton("Sessions").click(); });
     expect(container.textContent).toContain("2026-08-12");
+  });
+
+  it("lists both plans when they come from two files", async () => {
+    drive.loadSessions.mockResolvedValue(sessionsLoad({
+      s1: session("s1", "2026-08-12"),
+      s2: session("s2", "2026-08-14"),
+    }));
+    await mount();
+    await act(async () => { findButton("Sessions").click(); });
+    expect(container.textContent).toContain("2026-08-12");
+    expect(container.textContent).toContain("2026-08-14");
+  });
+
+  it("says so once when plans were migrated out of the old blob", async () => {
+    drive.loadSessions.mockResolvedValue(
+      sessionsLoad({ s1: session("s1", "2026-08-12") }, { migrated: 2 }),
+    );
+    await mount();
+    expect(container.textContent).toMatch(/sessions-before-split\.json/);
+  });
+
+  it("says nothing about migration on an ordinary load", async () => {
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: session("s1", "2026-08-12") }));
+    await mount();
+    expect(container.textContent).not.toMatch(/sessions-before-split\.json/);
+  });
+
+  it("names a plan whose file could not be read, rather than silently omitting it", async () => {
+    drive.loadSessions.mockResolvedValue(sessionsLoad(
+      { s1: session("s1", "2026-08-12") },
+      { failed: [{ id: "f-s9", name: "2026-08-20.json", error: new Error("drive 500") }] },
+    ));
+    await mount();
+    expect(container.textContent).toContain("2026-08-20.json");
   });
 
   describe("editing", () => {
@@ -322,9 +370,7 @@ describe("App sessions", () => {
     ]);
 
     beforeEach(() => {
-      drive.loadSessions.mockResolvedValue({
-        fileId: "sess", data: { version: 1, sessions: { s1: initial() } }, modifiedTime: "S1",
-      });
+      drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: initial() }));
       vi.useFakeTimers();
     });
 
@@ -336,8 +382,17 @@ describe("App sessions", () => {
     // turnout (owner asked for an editable session length).
     const minutesInput = () => container.querySelectorAll("input[type=number]")[2];
 
-    it("debounces: repeated edits call saveSessions once, not once per change", async () => {
-      drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    const setNumber = async (index, value) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const input = container.querySelectorAll("input[type=number]")[index];
+      await act(async () => {
+        setter.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+
+    it("debounces: repeated edits call saveSession once, not once per change", async () => {
+      drive.saveSession.mockImplementation(saveSessionOk("S2"));
       await mount();
       await openSession("2026-08-12");
 
@@ -352,18 +407,22 @@ describe("App sessions", () => {
         input.dispatchEvent(new Event("input", { bubbles: true }));
       });
 
-      expect(drive.saveSessions).not.toHaveBeenCalled();
+      expect(drive.saveSession).not.toHaveBeenCalled();
       await act(async () => { await vi.advanceTimersByTimeAsync(900); });
-      expect(drive.saveSessions).toHaveBeenCalledTimes(1);
-      const call = drive.saveSessions.mock.calls[0][0];
-      expect(call.data.sessions.s1.blocks[1].minutes).toBe(12);
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+      const call = drive.saveSession.mock.calls[0][0];
+      expect(call.id).toBe("s1");
+      expect(call.session.blocks[1].minutes).toBe(12);
       expect(call.baseModifiedTime).toBe("S1");
+      // No fileId in the contract: drive.js keeps the id→file map, the same way it is the
+      // authority on modifiedTime.
+      expect(call.fileId).toBeUndefined();
     });
 
     it("adopts the returned modifiedTime, so a second save sends the new baseline", async () => {
-      drive.saveSessions
-        .mockResolvedValueOnce({ ok: true, fileId: "sess", modifiedTime: "S2" })
-        .mockResolvedValueOnce({ ok: true, fileId: "sess", modifiedTime: "S3" });
+      drive.saveSession
+        .mockResolvedValueOnce({ ok: true, id: "s1", fileId: "f-s1", modifiedTime: "S2" })
+        .mockResolvedValueOnce({ ok: true, id: "s1", fileId: "f-s1", modifiedTime: "S3" });
       await mount();
       await openSession("2026-08-12");
 
@@ -374,19 +433,19 @@ describe("App sessions", () => {
         input.dispatchEvent(new Event("input", { bubbles: true }));
       });
       await act(async () => { await vi.advanceTimersByTimeAsync(900); });
-      expect(drive.saveSessions.mock.calls[0][0].baseModifiedTime).toBe("S1");
+      expect(drive.saveSession.mock.calls[0][0].baseModifiedTime).toBe("S1");
 
       await act(async () => {
         setter.call(input, "8");
         input.dispatchEvent(new Event("input", { bubbles: true }));
       });
       await act(async () => { await vi.advanceTimersByTimeAsync(900); });
-      expect(drive.saveSessions).toHaveBeenCalledTimes(2);
-      expect(drive.saveSessions.mock.calls[1][0].baseModifiedTime).toBe("S2");
+      expect(drive.saveSession).toHaveBeenCalledTimes(2);
+      expect(drive.saveSession.mock.calls[1][0].baseModifiedTime).toBe("S2");
     });
 
     it("a conflict keeps the local version and offers both resolutions", async () => {
-      drive.saveSessions.mockResolvedValue({ ok: false, conflict: true, modifiedTime: "S9" });
+      drive.saveSession.mockResolvedValue({ ok: false, conflict: true, id: "s1", modifiedTime: "S9" });
       await mount();
       await openSession("2026-08-12");
 
@@ -405,22 +464,124 @@ describe("App sessions", () => {
       expect(Number(minutesInput().value)).toBe(17);
     });
 
+    it("flushes a pending edit when the builder is closed before the debounce fires", async () => {
+      drive.saveSession.mockImplementation(saveSessionOk("S2"));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "13");
+      expect(drive.saveSession).not.toHaveBeenCalled(); // debounce has not fired yet
+
+      await act(async () => { findButton("← Back").click(); });
+
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+      expect(drive.saveSession.mock.calls[0][0].session.blocks[1].minutes).toBe(13);
+    });
+
     it("deletes the session only after confirmation", async () => {
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-      drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+      drive.saveSession.mockImplementation(saveSessionOk("S2"));
+      drive.deleteSession.mockResolvedValue(undefined);
       await mount();
       await openSession("2026-08-12");
 
       await act(async () => { findButton("Delete").click(); });
       expect(confirmSpy).toHaveBeenCalled();
       expect(container.textContent).toContain("2026-08-12"); // still on the builder
+      expect(drive.deleteSession).not.toHaveBeenCalled();
 
       confirmSpy.mockReturnValue(true);
       await act(async () => { findButton("Delete").click(); });
       await act(async () => { await vi.advanceTimersByTimeAsync(900); });
-      expect(drive.saveSessions).toHaveBeenCalled();
-      const lastCall = drive.saveSessions.mock.calls.at(-1)[0];
-      expect(lastCall.data.sessions.s1).toBeUndefined();
+      // One file trashed, and nothing rewritten: the other plans are not this plan's
+      // business any more.
+      expect(drive.deleteSession).toHaveBeenCalledWith({ id: "s1", fileId: "f-s1" });
+      expect(drive.saveSession).not.toHaveBeenCalled();
+      expect(container.textContent).not.toContain("2026-08-12");
+    });
+
+    // Switching plans by URL rather than via Back, which is what lets two plans be dirty
+    // at once: Back flushes, a hash change does not.
+    const goToHash = async (hash) => {
+      await act(async () => {
+        location.hash = hash;
+        window.dispatchEvent(new Event("hashchange"));
+      });
+    };
+
+    const twoPlans = (extra = {}) => sessionsLoad(
+      { s1: initial(), s2: session("s2", "2026-08-14") },
+      {
+        meta: {
+          s1: { fileId: "f-s1", modifiedTime: "A1" },
+          s2: { fileId: "f-s2", modifiedTime: "B1" },
+        },
+        ...extra,
+      },
+    );
+
+    it("edits to two plans in one window save both, each against its own baseline", async () => {
+      drive.loadSessions.mockResolvedValue(twoPlans());
+      drive.saveSession.mockImplementation(saveSessionOk("X2"));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "12"); // s1's skill block minutes
+      await goToHash("#/session/s2");
+      await setNumber(0, "9"); // s2's turnout
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+      expect(drive.saveSession).toHaveBeenCalledTimes(2);
+      const byId = Object.fromEntries(drive.saveSession.mock.calls.map(([c]) => [c.id, c]));
+      expect(byId.s1.baseModifiedTime).toBe("A1");
+      expect(byId.s1.session.blocks[1].minutes).toBe(12);
+      expect(byId.s2.baseModifiedTime).toBe("B1");
+      expect(byId.s2.session.turnout).toBe(9);
+    });
+
+    it("a conflict on one plan still saves the other, and keeps the conflicted edit", async () => {
+      drive.loadSessions.mockResolvedValue(twoPlans());
+      drive.saveSession.mockImplementation(({ id }) => Promise.resolve(
+        id === "s1"
+          ? { ok: false, conflict: true, id, modifiedTime: "A9" }
+          : { ok: true, id, fileId: "f-s2", modifiedTime: "B2" },
+      ));
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+      await goToHash("#/session/s2");
+      await setNumber(0, "9");
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+      const byId = Object.fromEntries(drive.saveSession.mock.calls.map(([c]) => [c.id, c]));
+      expect(byId.s2.session.turnout).toBe(9); // saved despite s1 conflicting
+      // s1's conflict does not belong on s2's screen: "Keep mine" writes one file.
+      expect(container.textContent).not.toMatch(/changed in drive|changed on drive/i);
+      // And s1's own edit is untouched, waiting for the owner to choose.
+      await goToHash("#/session/s1");
+      expect(Number(minutesInput().value)).toBe(17);
+      expect(container.textContent).toMatch(/changed in drive|changed on drive/i);
+    });
+
+    it("Keep mine re-saves the conflicted plan with the baseline Drive reported", async () => {
+      drive.saveSession
+        .mockResolvedValueOnce({ ok: false, conflict: true, id: "s1", modifiedTime: "S9" })
+        .mockResolvedValue({ ok: true, id: "s1", fileId: "f-s1", modifiedTime: "S10" });
+      await mount();
+      await openSession("2026-08-12");
+      await setNumber(2, "17");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(container.textContent).toMatch(/keep mine/i);
+
+      await act(async () => { findButton("Keep mine").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(drive.saveSession).toHaveBeenCalledTimes(2);
+      const retry = drive.saveSession.mock.calls[1][0];
+      expect(retry.id).toBe("s1");
+      expect(retry.baseModifiedTime).toBe("S9");
+      expect(retry.session.blocks[1].minutes).toBe(17);
+      expect(container.textContent).not.toMatch(/changed in drive|changed on drive/i);
     });
   });
 });
@@ -435,9 +596,7 @@ describe("App session run mode", () => {
   ]);
 
   beforeEach(() => {
-    drive.loadSessions.mockResolvedValue({
-      fileId: "sess", data: { version: 1, sessions: { s1: runSessionFixture() } }, modifiedTime: "S1",
-    });
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: runSessionFixture() }));
   });
 
   const bodyText = (slug) => `---\ntitle: Drill ${slug}\n---\n\nbody ${slug}\n`;
@@ -457,17 +616,13 @@ describe("App session run mode", () => {
   });
 
   it("a block with no drill chosen and a broken reference both render sensibly, without crashing the rest", async () => {
-    drive.loadSessions.mockResolvedValue({
-      fileId: "sess",
-      data: { version: 1, sessions: { s1: session("s1", "2026-08-12", [
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: session("s1", "2026-08-12", [
         { slot: "warmup", drill: "ghost", minutes: null, note: "" },
         { slot: "skill", drill: null, minutes: null, note: "" },
         { slot: "tactical", drill: "a", minutes: null, note: "" },
         { slot: "match", drill: null, minutes: null, note: "" },
         { slot: "fun", drill: null, minutes: null, note: "" },
-      ]) } },
-      modifiedTime: "S1",
-    });
+      ]) }));
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
     await mount();
     await openSession("2026-08-12");
@@ -562,7 +717,7 @@ describe("App session run mode", () => {
       failed: [], folderId: "F1", duplicateFolders: false, index: { version: 1, entries: {} },
     });
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
-    drive.saveSessions.mockResolvedValue({ ok: true, modifiedTime: "S2" });
+    drive.saveSession.mockImplementation(saveSessionOk("S2"));
     vi.useFakeTimers();
     try {
       await mount();
@@ -582,9 +737,9 @@ describe("App session run mode", () => {
 
       // And the change is a real edit to the plan, saved like any builder edit.
       await act(async () => { await vi.advanceTimersByTimeAsync(900); });
-      const saved = drive.saveSessions.mock.calls.at(-1)[0];
-      expect(saved.data.sessions.s1.blocks[0].drill).toBe("c");
-      expect(saved.data.sessions.s1.blocks[0].minutes).toBeNull();
+      const saved = drive.saveSession.mock.calls.at(-1)[0];
+      expect(saved.session.blocks[0].drill).toBe("c");
+      expect(saved.session.blocks[0].minutes).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -592,7 +747,7 @@ describe("App session run mode", () => {
 
   it("a swap to a drill already loaded this visit does not refetch it", async () => {
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
-    drive.saveSessions.mockResolvedValue({ ok: true, modifiedTime: "S2" });
+    drive.saveSession.mockImplementation(saveSessionOk("S2"));
     await mount();
     await openSession("2026-08-12");
     await act(async () => { findButton("Run this session").click(); });
@@ -611,15 +766,11 @@ describe("App session run mode", () => {
     // leave session A's run view with A's read of "a" still pending, enter session B's
     // run view, swap a block to "a" — the swap sees "a" as already in flight and does
     // nothing, while the old reply is dropped as stale. The block waits forever.
-    drive.loadSessions.mockResolvedValue({
-      fileId: "sess",
-      data: { version: 1, sessions: {
+    drive.loadSessions.mockResolvedValue(sessionsLoad({
         s1: session("s1", "2026-08-12", [{ slot: "warmup", drill: "a", minutes: null, note: "" }]),
         s2: session("s2", "2026-08-14", [{ slot: "warmup", drill: "b", minutes: null, note: "" }]),
-      } },
-      modifiedTime: "S1",
-    });
-    drive.saveSessions.mockResolvedValue({ ok: true, modifiedTime: "S2" });
+      }));
+    drive.saveSession.mockImplementation(saveSessionOk("S2"));
     const resolvers = {};
     drive.readDrill.mockImplementation((id) => new Promise((resolve) => {
       (resolvers[id] ??= []).push(resolve);
@@ -647,9 +798,15 @@ describe("App session run mode", () => {
     expect(container.textContent).not.toContain("Loading…");
   });
 
-  it("a mark made during a run is saved into the session's progress", async () => {
+  it("a mark made during a run is saved into that session's file only", async () => {
+    // A Done tap at the side of a pitch used to rewrite every plan ever made. Loading a
+    // second plan here is what proves it now writes one file.
+    drive.loadSessions.mockResolvedValue(sessionsLoad({
+      s1: runSessionFixture(),
+      s2: session("s2", "2026-08-14"),
+    }));
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
-    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    drive.saveSession.mockImplementation(saveSessionOk("S2"));
     vi.useFakeTimers();
     try {
       await mount();
@@ -657,31 +814,29 @@ describe("App session run mode", () => {
       await act(async () => { findButton("Run this session").click(); });
       await act(async () => { findButton("Done").click(); });
       await act(async () => { await vi.advanceTimersByTimeAsync(900); });
-      const saved = drive.saveSessions.mock.calls.at(-1)[0];
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+      const saved = drive.saveSession.mock.calls.at(-1)[0];
+      expect(saved.id).toBe("s1");
       // Keyed by the day the run happened, which is today — NOT the session's planned
       // date (2026-08-12), so re-running this plan another day starts clean.
-      const days = Object.keys(saved.data.sessions.s1.progress);
+      const days = Object.keys(saved.session.progress);
       expect(days).toHaveLength(1);
       // Keyed by the block's slot, not its position: reordering the plan must not move
       // this mark onto another drill.
-      expect(saved.data.sessions.s1.progress[days[0]].marks).toEqual({ warmup: "done" });
-      expect(saved.data.sessions.s1.progress[days[0]].updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(saved.session.progress[days[0]].marks).toEqual({ warmup: "done" });
+      expect(saved.session.progress[days[0]].updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     } finally {
       vi.useRealTimers();
     }
   });
 
   it("progress made on another device shows when the run view opens", async () => {
-    drive.loadSessions.mockResolvedValue({
-      fileId: "sess",
-      data: { version: 1, sessions: { s1: {
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: {
         ...runSessionFixture(),
         progress: { [new Date().toISOString().slice(0, 10)]: {
           marks: { 0: "done" }, updatedAt: new Date().toISOString(),
         } },
-      } } },
-      modifiedTime: "S1",
-    });
+      } }));
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
     await mount();
     await openSession("2026-08-12");
@@ -692,7 +847,7 @@ describe("App session run mode", () => {
 
   it("a failed save is visible from the run view, not only from the builder", async () => {
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
-    drive.saveSessions.mockResolvedValue({ ok: false, error: new Error("offline") });
+    drive.saveSession.mockResolvedValue({ ok: false, id: "s1", error: new Error("offline") });
     vi.useFakeTimers();
     try {
       await mount();
@@ -712,7 +867,7 @@ describe("App session run mode", () => {
   it("phone to laptop: marks made in one browser appear in another", async () => {
     // "The phone": mark a block, let the save land, and capture exactly what went to Drive.
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
-    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    drive.saveSession.mockImplementation(saveSessionOk("S2"));
     vi.useFakeTimers();
     let sentToDrive;
     try {
@@ -721,7 +876,7 @@ describe("App session run mode", () => {
       await act(async () => { findButton("Run this session").click(); });
       await act(async () => { findButton("Done").click(); });
       await act(async () => { await vi.advanceTimersByTimeAsync(900); });
-      sentToDrive = drive.saveSessions.mock.calls.at(-1)[0].data;
+      sentToDrive = drive.saveSession.mock.calls.at(-1)[0].session;
     } finally {
       vi.useRealTimers();
     }
@@ -732,7 +887,7 @@ describe("App session run mode", () => {
     act(() => root.unmount());
     localStorage.clear();
     location.hash = "";
-    drive.loadSessions.mockResolvedValue({ fileId: "sess", data: sentToDrive, modifiedTime: "S2" });
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: sentToDrive }));
     await mount();
     await openSession("2026-08-12");
     await act(async () => { findButton("Run this session").click(); });
@@ -745,16 +900,12 @@ describe("App session run mode", () => {
     // The owner reads and edits sessions.json by hand. An entry with no updatedAt used to
     // be reported upward as {}, which App then saved — deleting his marks.
     const day = new Date().toISOString().slice(0, 10);
-    drive.loadSessions.mockResolvedValue({
-      fileId: "sess",
-      data: { version: 1, sessions: { s1: {
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: {
         ...runSessionFixture(),
         progress: { [day]: { marks: { 0: "done", 1: "skipped" } } },
-      } } },
-      modifiedTime: "S1",
-    });
+      } }));
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
-    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    drive.saveSession.mockImplementation(saveSessionOk("S2"));
     vi.useFakeTimers();
     try {
       await mount();
@@ -764,8 +915,8 @@ describe("App session run mode", () => {
       const summaries = [...container.querySelectorAll(".run-block-summary")];
       expect(summaries[0].textContent).toContain("Done");
       expect(summaries[1].textContent).toContain("Skipped");
-      for (const [arg] of drive.saveSessions.mock.calls) {
-        expect(arg.data.sessions.s1.progress[day].marks).toEqual({ 0: "done", 1: "skipped" });
+      for (const [arg] of drive.saveSession.mock.calls) {
+        expect(arg.session.progress[day].marks).toEqual({ 0: "done", 1: "skipped" });
       }
     } finally {
       vi.useRealTimers();
@@ -776,7 +927,7 @@ describe("App session run mode", () => {
     // The reported bug: "every mark cleared" used to be stored exactly like "no marks
     // yet", so the phone's older stamped mark won the merge and the block came back Done.
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
-    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    drive.saveSession.mockImplementation(saveSessionOk("S2"));
     const PROGRESS_KEY = "ballislife_progress";
     let phoneStorage;
     let sentToDrive;
@@ -789,20 +940,20 @@ describe("App session run mode", () => {
       await act(async () => { findButton("Run this session").click(); });
       await act(async () => { findButton("Done").click(); });
       await act(async () => { await vi.advanceTimersByTimeAsync(900); });
-      sentToDrive = drive.saveSessions.mock.calls.at(-1)[0].data;
+      sentToDrive = drive.saveSession.mock.calls.at(-1)[0].session;
       phoneStorage = localStorage.getItem(PROGRESS_KEY);
 
       // "The laptop": its own empty storage, adopting the phone's mark and then un-marking.
       act(() => root.unmount());
       localStorage.clear();
       location.hash = "";
-      drive.loadSessions.mockResolvedValue({ fileId: "sess", data: sentToDrive, modifiedTime: "S2" });
+      drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: sentToDrive }));
       await mount();
       await openSession("2026-08-12");
       await act(async () => { findButton("Run this session").click(); });
       await act(async () => { findButton("Not done").click(); });
       await act(async () => { await vi.advanceTimersByTimeAsync(900); });
-      sentToDrive = drive.saveSessions.mock.calls.at(-1)[0].data;
+      sentToDrive = drive.saveSession.mock.calls.at(-1)[0].session;
     } finally {
       vi.useRealTimers();
     }
@@ -811,7 +962,7 @@ describe("App session run mode", () => {
     act(() => root.unmount());
     localStorage.setItem(PROGRESS_KEY, phoneStorage);
     location.hash = "";
-    drive.loadSessions.mockResolvedValue({ fileId: "sess", data: sentToDrive, modifiedTime: "S2" });
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: sentToDrive }));
     await mount();
     await openSession("2026-08-12");
     await act(async () => { findButton("Run this session").click(); });
@@ -825,7 +976,7 @@ describe("App session run mode", () => {
     // run again. Marks used to be keyed by position, so the reorder moved "Done" onto
     // whichever drill took that position.
     drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
-    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    drive.saveSession.mockImplementation(saveSessionOk("S2"));
     await mount();
     await openSession("2026-08-12");
     await act(async () => { findButton("Run this session").click(); });
