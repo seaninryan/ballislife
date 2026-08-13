@@ -707,6 +707,38 @@ describe("App session run mode", () => {
     }
   });
 
+  it("phone to laptop: marks made in one browser appear in another", async () => {
+    // "The phone": mark a block, let the save land, and capture exactly what went to Drive.
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    vi.useFakeTimers();
+    let sentToDrive;
+    try {
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      await act(async () => { findButton("Done").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      sentToDrive = drive.saveSessions.mock.calls.at(-1)[0].data;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // "The laptop": a different browser is an empty localStorage, and Drive now returns
+    // what the phone wrote. Tear the app down completely to be sure nothing in memory
+    // carries the answer across.
+    act(() => root.unmount());
+    localStorage.clear();
+    location.hash = "";
+    drive.loadSessions.mockResolvedValue({ fileId: "sess", data: sentToDrive, modifiedTime: "S2" });
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    const blocks = container.querySelectorAll(".run-block");
+    expect(blocks[0].querySelector(".run-block-summary").textContent).toContain("Done");
+    expect(blocks[1].querySelector(".run-block-now-badge")).not.toBeNull();
+  });
+
   it("returns to the builder from Back to plan even when run mode was entered directly via the /run hash (not through a click)", async () => {
     // Mirrors the owner's report as closely as this harness allows: land on the run
     // view via #/session/<id>/run directly — the same route the report's address bar
