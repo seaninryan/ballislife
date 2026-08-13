@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  aboutEmail, findFolder, findAllFolders, createFolder, listFiles,
+  aboutEmail, findFolder, findAllFolders, findChildFolder, createFolder, listFiles,
   readFile, writeFile, createFile, renameFile, trashFile,
 } from "../src/lib/driveApi.js";
 
@@ -60,6 +60,25 @@ describe("findAllFolders", () => {
   });
 });
 
+describe("findChildFolder", () => {
+  it("searches for a folder by name inside one parent", async () => {
+    // The `sessions` folder must be found INSIDE BallIsLife: a folder of that name
+    // elsewhere in the owner's Drive is not ours.
+    fetchMock.mockResolvedValue(ok({ files: [{ id: "S", name: "sessions" }] }));
+    expect(await findChildFolder("tok", "PARENT", "sessions")).toBe("S");
+    const [url] = lastCall();
+    expect(decodeURIComponent(url)).toContain("'PARENT' in parents");
+    expect(decodeURIComponent(url)).toContain("name='sessions'");
+    expect(decodeURIComponent(url)).toContain("mimeType='application/vnd.google-apps.folder'");
+    expect(decodeURIComponent(url)).toContain("trashed=false");
+  });
+
+  it("returns null when the parent has no such folder", async () => {
+    fetchMock.mockResolvedValue(ok({ files: [] }));
+    expect(await findChildFolder("tok", "PARENT", "sessions")).toBe(null);
+  });
+});
+
 describe("createFolder", () => {
   it("posts a folder and returns its id", async () => {
     fetchMock.mockResolvedValue(ok({ id: "F2" }));
@@ -70,6 +89,20 @@ describe("createFolder", () => {
       name: "BallIsLife",
       mimeType: "application/vnd.google-apps.folder",
     });
+  });
+
+  it("creates inside a parent when given one", async () => {
+    fetchMock.mockResolvedValue(ok({ id: "NEW" }));
+    expect(await createFolder("tok", "sessions", "PARENT")).toBe("NEW");
+    const body = JSON.parse(lastCall()[1].body);
+    expect(body.parents).toEqual(["PARENT"]);
+    expect(body.mimeType).toBe("application/vnd.google-apps.folder");
+  });
+
+  it("still creates at the root when given no parent", async () => {
+    fetchMock.mockResolvedValue(ok({ id: "NEW" }));
+    await createFolder("tok", "BallIsLife");
+    expect(JSON.parse(lastCall()[1].body).parents).toBeUndefined();
   });
 });
 

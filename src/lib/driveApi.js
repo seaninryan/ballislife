@@ -39,11 +39,27 @@ export async function findFolder(token, name) {
   return (await findAllFolders(token, name))[0] ?? null;
 }
 
-export async function createFolder(token, name) {
+// -> the id of a folder with this name directly inside `parentId`, or null. Scoping to a
+// parent is the point: a `sessions` folder anywhere else in the owner's Drive is not ours.
+export async function findChildFolder(token, parentId, name) {
+  const q = encodeURIComponent(
+    `'${parentId}' in parents and name='${name}' and mimeType='${FOLDER_MIME}' and trashed=false`,
+  );
+  const body = await json(token, `${FILES}?q=${q}&fields=files(id)`);
+  return (body.files ?? [])[0]?.id ?? null;
+}
+
+// `parentId` is optional: the BallIsLife folder is created at the root, its subfolders
+// inside it. Omitting `parents` entirely (rather than sending null) is what Drive wants.
+export async function createFolder(token, name, parentId) {
   const body = await json(token, FILES, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, mimeType: FOLDER_MIME }),
+    body: JSON.stringify({
+      name,
+      mimeType: FOLDER_MIME,
+      ...(parentId ? { parents: [parentId] } : {}),
+    }),
   });
   return body.id;
 }
