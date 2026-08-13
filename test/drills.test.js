@@ -138,4 +138,12 @@ describe("filterDrills", () => {
   it("ignores an empty or whitespace query", () => {
     expect(filterDrills(drills, { query: "   " })).toHaveLength(3);
   });
+
+  it("does not throw on a drill with no tags array", () => {
+    const bare = [{ slug: "x", title: "X", category: "skill", minutes: 5 }];
+    // A query that cannot match the title is what reaches the tags branch.
+    expect(filterDrills(bare, { query: "zzz" })).toEqual([]);
+    expect(filterDrills(bare, { tag: "possession" })).toEqual([]);
+    expect(filterDrills(bare, { query: "x" })).toHaveLength(1);
+  });
 });

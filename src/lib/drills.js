@@ -59,12 +59,15 @@ export function drillsFromIndex(index) {
 export function filterDrills(drills, { category, tag, query } = {}) {
   const q = String(query ?? "").trim().toLowerCase();
   return (drills ?? []).filter((d) => {
+    // Callers other than the catalogue (the picker, tests) hand us drills that need not
+    // have been through drillsFromIndex, and a TypeError in here blanks the whole list.
+    const tags = d.tags ?? [];
     if (category && d.category !== category) return false;
-    if (tag && !d.tags.includes(tag)) return false;
+    if (tag && !tags.includes(tag)) return false;
     if (!q) return true;
     return (
-      d.title.toLowerCase().includes(q) ||
-      d.tags.some((t) => String(t).toLowerCase().includes(q))
+      String(d.title ?? "").toLowerCase().includes(q) ||
+      tags.some((t) => String(t).toLowerCase().includes(q))
     );
   });
 }
