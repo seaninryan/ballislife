@@ -820,6 +820,32 @@ describe("App session run mode", () => {
     expect(blocks[0].querySelector(".run-block-now-badge")).not.toBeNull();
   });
 
+  it("a mark survives reordering the plan: it stays on its own drill", async () => {
+    // The bug, by the only route it actually happens: run, back to the plan, reorder,
+    // run again. Marks used to be keyed by position, so the reorder moved "Done" onto
+    // whichever drill took that position.
+    drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    drive.saveSessions.mockResolvedValue({ ok: true, fileId: "sess", modifiedTime: "S2" });
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    // Mark the warm-up (drill a) done.
+    await act(async () => { findButton("Done").click(); });
+    // Back to the plan, move the skill block above the warm-up, and run it again. Row 0
+    // has no "Move up" control, so the first one belongs to row 1 — the skill block.
+    await act(async () => { findButton("Back to plan").click(); });
+    const moveUp = [...container.querySelectorAll("button")]
+      .filter((b) => b.getAttribute("aria-label") === "Move up");
+    await act(async () => { moveUp[0].click(); });
+    await act(async () => { findButton("Run this session").click(); });
+
+    const rows = container.querySelectorAll(".run-block");
+    // The skill block is first now, and is the one to do next — the warm-up stays done.
+    expect(rows[0].querySelector(".run-block-summary").textContent).toContain("skill");
+    expect(rows[0].querySelector(".run-block-now-badge")).not.toBeNull();
+    expect(rows[1].querySelector(".run-block-summary").textContent).toContain("Done");
+  });
+
   it("returns to the builder from Back to plan even when run mode was entered directly via the /run hash (not through a click)", async () => {
     // Mirrors the owner's report as closely as this harness allows: land on the run
     // view via #/session/<id>/run directly — the same route the report's address bar
