@@ -40,6 +40,31 @@ export function readSessions(raw) {
   }
 }
 
+// A session's id is its file name, so it has to be safe as one. Ids are generated from a
+// date plus a collision suffix today, but this is the only place that assumption is
+// enforced rather than assumed — and `index` is reserved because index.json shares the
+// folder.
+const ID_OK = /^[a-z0-9][a-z0-9-]*$/i;
+export const SESSIONS_FOLDER = "sessions";
+export const SESSIONS_INDEX_NAME = "index.json";
+
+export function sessionFileName(id) {
+  const s = String(id ?? "");
+  if (!ID_OK.test(s) || s.toLowerCase() === "index") {
+    throw new Error(`unsafe session id: ${JSON.stringify(s)}`);
+  }
+  return `${s}.json`;
+}
+
+// -> the id, or null if this listing entry is not a session file (index.json included).
+export function sessionIdFromFileName(name) {
+  const s = String(name ?? "");
+  if (!s.toLowerCase().endsWith(".json")) return null;
+  const id = s.slice(0, -5);
+  if (!ID_OK.test(id) || id.toLowerCase() === "index") return null;
+  return id;
+}
+
 // A block's own minutes win; otherwise inherit the drill's, so a session picks up a
 // drill's duration until you deliberately override it for one night.
 export function blockMinutes(block, drill) {

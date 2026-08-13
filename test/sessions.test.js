@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SLOTS, EMPTY, emptySession, readSessions, blockMinutes, resolveBlocks,
   totalMinutes, emptySlots, squadRange, fitsSquad, setBlock, moveBlock,
+  sessionFileName, sessionIdFromFileName,
 } from "../src/lib/sessions.js";
 
 const drills = [
@@ -161,5 +162,27 @@ describe("readSessions", () => {
     a.sessions.x = 1;
     expect(readSessions("nope").sessions).toEqual({});
     expect(EMPTY.sessions).toEqual({});
+  });
+});
+
+describe("session file names", () => {
+  it("round-trips an id through its file name", () => {
+    for (const id of ["2026-08-13", "2026-08-13-2", "u14a-friendly"]) {
+      expect(sessionIdFromFileName(sessionFileName(id))).toBe(id);
+    }
+  });
+
+  it("is not a session file if it does not end in .json", () => {
+    expect(sessionIdFromFileName("index.json")).toBe(null);   // the cache, not a session
+    expect(sessionIdFromFileName("notes.txt")).toBe(null);
+    expect(sessionIdFromFileName("")).toBe(null);
+  });
+
+  it("refuses an id that could escape the folder or collide with the cache", () => {
+    // Ids come from a date and a collision suffix today, but this is a file path.
+    expect(() => sessionFileName("../evil")).toThrow();
+    expect(() => sessionFileName("a/b")).toThrow();
+    expect(() => sessionFileName("index")).toThrow();
+    expect(() => sessionFileName("")).toThrow();
   });
 });

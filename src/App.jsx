@@ -483,6 +483,13 @@ export default function App() {
     const today = new Date().toISOString().slice(0, 10);
     const date = window.prompt("Date for this session? (YYYY-MM-DD)", today);
     if (!date || !date.trim()) return;
+    // The id becomes the session's file name, so a date the file-name rule would reject
+    // (13/08/2026, say) has to be refused here rather than thrown out of sessionFileName
+    // on the first save.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
+      window.alert("Use a date like 2026-08-13.");
+      return;
+    }
     const squad = window.prompt("Squad? (optional)") ?? "";
     const theme = window.prompt("Theme? (optional)") ?? "";
     const themeSlug = theme.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
