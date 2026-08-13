@@ -143,12 +143,19 @@ export function knownModifiedTime(id) { return known.get(id) ?? null; }
 // same reasoning as `known` above: one authority on a fact drive.js already learned.
 const sessionFileIds = new Map();
 
+// Ids that MORE than one file claims, as of the last load. A save into one of these would
+// write into whichever file happened to win, which may not be the one the owner is looking
+// at, so saveSession refuses instead. Replaced by every load, so fixing it in Drive fixes it
+// here.
+const ambiguousSessionIds = new Set();
+
 // Drops every baseline, session file id and resolved folder. None of it survives a sign-out
 // (another account's Drive shares none of it) and none of it should survive a test: a
 // leftover baseline for a reused literal id made a test pass alone and fail in file order.
 export function forgetDriveState() {
   known.clear();
   sessionFileIds.clear();
+  ambiguousSessionIds.clear();
   sessionsFolders.clear();
 }
 
@@ -433,10 +440,24 @@ export async function loadSessions(folder) {
       else await api.createFile(token, sessionsFolder, SESSIONS_INDEX_NAME, body);
     }
 
-    const { sessions, meta } = sessionsFromIndex(index);
+    const { sessions, meta, duplicates } = sessionsFromIndex(index);
+
+    // Two files claiming one plan. The newest is shown so the plan is still usable tonight,
+    // but no save may write into it until the owner has resolved which file is the plan.
+    for (const dupe of duplicates) {
+      failed.push({
+        id: dupe.files[0].fileId,
+        name: dupe.files.map((f) => f.name).join(" and "),
+        error: new Error(`more than one file is the plan "${dupe.id}"`),
+        reason: "duplicate",
+      });
+    }
+
     // A load is a full statement of what exists, so it replaces rather than adds to what we
     // knew: a plan deleted on another device must not leave a file id behind to save into.
     sessionFileIds.clear();
+    ambiguousSessionIds.clear();
+    for (const dupe of duplicates) ambiguousSessionIds.add(dupe.id);
     for (const [id, m] of Object.entries(meta)) {
       known.set(m.fileId, m.modifiedTime);
       sessionFileIds.set(id, m.fileId);
@@ -466,6 +487,18 @@ export async function loadSessions(folder) {
 // something else for its file, we refuse rather than clobber and hand back the current
 // value, so the caller can offer to reload — but only for that one plan.
 export async function saveSession({ folder, id, session, baseModifiedTime }) {
+  if (ambiguousSessionIds.has(id)) {
+    // Writing would edit whichever of the two files won the load, which may not be the one
+    // the owner opened in Drive — and creating a third would make it worse. Refuse, keep his
+    // edit in memory where the caller already holds it, and let the load banner explain.
+    return {
+      ok: false,
+      id,
+      error: new Error(
+        `More than one file in Drive is the plan "${id}". Rename or delete one in the sessions folder, then reload.`,
+      ),
+    };
+  }
   const fileId = sessionFileIds.get(id) ?? null;
   const current = fileId ? known.get(fileId) : undefined;
   if (current !== undefined && baseModifiedTime !== current) {

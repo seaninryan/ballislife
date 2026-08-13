@@ -126,6 +126,40 @@ describe("applySessionsDiff / sessionsFromIndex", () => {
     expect(meta.c).toEqual({ fileId: "F3", modifiedTime: "T3" });
   });
 
+  it("reports two files that resolve to one plan, and shows the newest of them", () => {
+    // Drive allows duplicate names, so creating the same-dated plan on two devices makes
+    // two a.json files. One used to win silently and the other's content was unreachable.
+    const index = {
+      version: 1,
+      entries: {
+        F1: entry("a.json", "T1", { ...sess("a"), theme: "older" }),
+        F2: entry("a.json", "T2", { ...sess("a"), theme: "newer" }),
+      },
+    };
+    const { sessions, meta, duplicates } = sessionsFromIndex(index);
+    expect(sessions.a.theme).toBe("newer");
+    expect(meta.a).toEqual({ fileId: "F2", modifiedTime: "T2" });
+    expect(duplicates).toHaveLength(1);
+    expect(duplicates[0].id).toBe("a");
+    expect(duplicates[0].files.map((f) => f.fileId)).toEqual(["F2", "F1"]);
+  });
+
+  it("picks the same winner whichever order the index happens to be in", () => {
+    // Two files written in the same second have the same modifiedTime. Which one is shown
+    // must not depend on object key order, or a reload could swap the plan underneath him.
+    const a = entry("a.json", "T1", { ...sess("a"), theme: "one" });
+    const b = entry("a.json", "T1", { ...sess("a"), theme: "two" });
+    const first = sessionsFromIndex({ version: 1, entries: { F1: a, F2: b } });
+    const second = sessionsFromIndex({ version: 1, entries: { F2: b, F1: a } });
+    expect(first.meta.a).toEqual(second.meta.a);
+    expect(first.sessions.a.theme).toBe(second.sessions.a.theme);
+  });
+
+  it("reports no duplicates in the ordinary case", () => {
+    const index = { version: 1, entries: { F1: entry("a.json", "T1", sess("a")) } };
+    expect(sessionsFromIndex(index).duplicates).toEqual([]);
+  });
+
   it("prefers the id in the file NAME when the stored session disagrees with it", () => {
     // The file name is the authority: it is what the id was resolved from on save. A
     // session whose stored id drifted (hand-edited) must not shadow another file.

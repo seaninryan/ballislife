@@ -500,6 +500,54 @@ describe("loadSessions", () => {
   });
 });
 
+describe("two files claiming one plan", () => {
+  // Drive allows duplicate names, so the same-dated plan created on two devices makes two
+  // a.json files. One used to shadow the other silently, and a save wrote into the winner.
+  const twoAs = () => mockSessionsDrive({
+    sessions: [file("FA1", "a.json", "T1"), file("FA2", "a.json", "T2")],
+    read: {
+      FA1: JSON.stringify({ ...sess("a"), theme: "older" }),
+      FA2: JSON.stringify({ ...sess("a"), theme: "newer" }),
+    },
+  });
+
+  it("shows the newest and names both files", async () => {
+    twoAs();
+    const { sessions, meta, failed } = await loadSessions("F1");
+    expect(sessions.a.theme).toBe("newer");
+    expect(meta.a.fileId).toBe("FA2");
+    const dupe = failed.find((f) => f.reason === "duplicate");
+    expect(dupe).toBeTruthy();
+    expect(dupe.name).toContain("a.json");
+  });
+
+  it("refuses to save into the ambiguous plan rather than writing the wrong file", async () => {
+    twoAs();
+    await loadSessions("F1");
+    api.writeFile.mockClear();   // the load wrote its own index; only the save matters here
+    api.createFile.mockClear();
+    const r = await saveSession({ folder: "F1", id: "a", session: sess("a"), baseModifiedTime: "T2" });
+    expect(r.ok).toBe(false);
+    expect(r.conflict).toBeFalsy();
+    expect(r.id).toBe("a");
+    expect(api.writeFile).not.toHaveBeenCalled();
+    expect(api.createFile).not.toHaveBeenCalled();
+  });
+
+  it("saves again once the duplicate is gone from Drive", async () => {
+    twoAs();
+    await loadSessions("F1");
+    mockSessionsDrive({
+      sessions: [file("FA2", "a.json", "T2")],
+      read: { FA2: JSON.stringify(sess("a")) },
+    });
+    await loadSessions("F1");
+    api.writeFile.mockResolvedValue("T8");
+    const r = await saveSession({ folder: "F1", id: "a", session: sess("a"), baseModifiedTime: "T2" });
+    expect(r).toMatchObject({ ok: true, id: "a", fileId: "FA2" });
+  });
+});
+
 describe("saveSession", () => {
   it("creates a file in the sessions folder for a plan Drive has never seen", async () => {
     mockSessionsDrive();

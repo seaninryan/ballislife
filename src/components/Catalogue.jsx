@@ -73,9 +73,13 @@ export default function Catalogue({
   const blobUnreadable = sessionsFailed.some((f) => f.reason === "blob");
   // Split by whether reloading can help. A flaky download will fix itself; a file whose
   // JSON or whose name is broken will not, and telling the owner to wait would be a lie.
-  const needsDrive = new Set(["parse", "unnamed", "duplicate"]);
-  const unloadable = sessionsFailed.filter((f) => f.reason !== "blob" && !needsDrive.has(f.reason));
+  const needsDrive = new Set(["parse", "unnamed"]);
+  const unloadable = sessionsFailed.filter(
+    (f) => f.reason !== "blob" && f.reason !== "duplicate" && !needsDrive.has(f.reason),
+  );
   const unfixable = sessionsFailed.filter((f) => needsDrive.has(f.reason));
+  // A plan two files claim. It IS shown, so it does not belong with the unreadable ones.
+  const duplicated = sessionsFailed.filter((f) => f.reason === "duplicate");
   // A plan still in the blob but shown from it: its file will be written by its next save.
   const notMoved = sessionsUnmigrated.filter((u) => u.reason !== "unsafe-id");
   const unnameable = sessionsUnmigrated.filter((u) => u.reason === "unsafe-id");
@@ -220,6 +224,16 @@ export default function Catalogue({
           {unfixable.map((f) => f.name).join(", ")}. Nothing has been changed or deleted, but
           reloading will not help — fix or rename {unfixable.length === 1 ? "it" : "them"} in
           Drive.
+        </div>
+      ) : null}
+
+      {duplicated.length ? (
+        <div className="banner err">
+          {duplicated.length === 1 ? "A plan is" : `${duplicated.length} plans are`} claimed
+          by more than one file in your <strong>sessions</strong> folder:{" "}
+          {duplicated.map((f) => f.name).join("; ")}. The newest of each is shown, and saving
+          {duplicated.length === 1 ? " it" : " them"} is blocked so nothing is written into
+          the wrong file. Delete or rename the spare in Drive, then reload.
         </div>
       ) : null}
 

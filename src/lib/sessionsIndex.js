@@ -68,23 +68,50 @@ export function applySessionsDiff(keep, fetched) {
   return { version: VERSION, entries: { ...keep, ...fetched } };
 }
 
-// index -> { sessions: {id -> session}, meta: {id -> {fileId, modifiedTime}} }, the map the
-// app renders plus the per-file conflict baselines.
+// index -> { sessions: {id -> session}, meta: {id -> {fileId, modifiedTime}}, duplicates },
+// the map the app renders, the per-file conflict baselines, and any id more than one file
+// claims.
 //
 // The FILE NAME decides a session's id, and the stored id is overwritten with it: a plan
 // hand-edited so its stored id drifted must not shadow another file's plan. That rule also
 // covers a plan with no stored id at all — the name still names it, and dropping it would
 // make a file the owner can see in Drive vanish from the app. Only something that is not a
 // session object at all (null, a string, an array) is skipped, having nothing to key.
+//
+// Drive allows duplicate names, so two files can claim one id — reachable by creating the
+// same-dated plan on two devices. The newest is shown, because hiding the plan is worse than
+// showing one of two versions of it, but the collision is REPORTED and the caller must
+// refuse to save into that id: silently writing to whichever file won would edit a file the
+// owner may not be looking at. Ordering breaks a modifiedTime tie on fileId, so which file
+// wins never depends on key order — a reload must not swap the plan underneath him.
 export function sessionsFromIndex(index) {
-  const sessions = {};
-  const meta = {};
+  const claimed = new Map();
   for (const [fileId, entry] of Object.entries(index?.entries ?? {})) {
     const id = sessionIdFromFileName(entry?.name);
     const session = entry?.session;
     if (!id || !session || typeof session !== "object" || Array.isArray(session)) continue;
-    sessions[id] = { ...session, id };
-    meta[id] = { fileId, modifiedTime: entry.modifiedTime };
+    if (!claimed.has(id)) claimed.set(id, []);
+    claimed.get(id).push({ fileId, entry });
   }
-  return { sessions, meta };
+
+  const sessions = {};
+  const meta = {};
+  const duplicates = [];
+  for (const [id, files] of claimed) {
+    const ordered = [...files].sort((a, b) =>
+      String(b.entry.modifiedTime ?? "").localeCompare(String(a.entry.modifiedTime ?? ""))
+      || String(a.fileId).localeCompare(String(b.fileId)));
+    const winner = ordered[0];
+    sessions[id] = { ...winner.entry.session, id };
+    meta[id] = { fileId: winner.fileId, modifiedTime: winner.entry.modifiedTime };
+    if (ordered.length > 1) {
+      duplicates.push({
+        id,
+        files: ordered.map(({ fileId, entry }) => ({
+          fileId, name: entry.name, modifiedTime: entry.modifiedTime,
+        })),
+      });
+    }
+  }
+  return { sessions, meta, duplicates };
 }

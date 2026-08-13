@@ -226,6 +226,21 @@ describe("Catalogue sessions switch", () => {
     expect(html).toMatch(/in Drive/i);
   });
 
+  it("says a plan is claimed by two files and that saving it is blocked", () => {
+    const html = render({
+      status: "ready", drills: [], mode: "sessions", sessions: [],
+      sessionsFailed: [
+        { id: "FA2", name: "a.json and a.json", reason: "duplicate", error: new Error("x") },
+      ],
+    });
+    expect(html).toContain("a.json");
+    expect(html).toMatch(/two files|more than one file/i);
+    expect(html).toMatch(/newest/i);
+    expect(html).toMatch(/sav/i);
+    // Not the "could not be read" wording: the plan IS shown.
+    expect(html).not.toMatch(/could not be read as a plan/i);
+  });
+
   it("names a plan the old blob holds under an id no file can be called", () => {
     const html = render({
       status: "ready", drills: [], mode: "sessions", sessions: [],
