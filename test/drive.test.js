@@ -486,6 +486,22 @@ describe("loadSessions", () => {
     expect(readIds()).toEqual(["idx"]); // still not refetched
   });
 
+  it("loads every plan even when the index cache cannot be written back", async () => {
+    // index.json is a disposable cache, rebuilt from a real listing on every load, so
+    // failing to write it must cost nothing at all. On a phone at the side of a pitch that
+    // write is among the likeliest things to fail.
+    mockSessionsDrive({
+      sessions: [file("idx", "index.json", "T"), file("FA", "a.json", "T2")],
+      read: { idx: indexOf({ FA: entry("a.json", "T1", sess("a")) }), FA: JSON.stringify(sess("a")) },
+    });
+    api.writeFile.mockRejectedValue(Object.assign(new Error("offline"), { code: 0 }));
+
+    const { sessions, meta, failed } = await loadSessions("F1");
+    expect(Object.keys(sessions)).toEqual(["a"]);
+    expect(meta.a).toEqual({ fileId: "FA", modifiedTime: "T2" });
+    expect(failed).toEqual([]);
+  });
+
   it("names a file whose name cannot be a plan id instead of hiding it", async () => {
     // Drive's own "Copy of a.json", made by a duplicate in the web UI.
     mockSessionsDrive({
@@ -710,6 +726,24 @@ describe("migrating the sessions.json blob", () => {
     const r = await saveSession({ folder: "F1", id: "b", session: sess("b"), baseModifiedTime: null });
     expect(r).toMatchObject({ ok: true, id: "b", fileId: "F-b" });
     expect(api.createFile.mock.calls[0][2]).toBe("b.json");
+  });
+
+  it("keeps the plans it just migrated when the new index cache cannot be created", async () => {
+    // Same reasoning as the load above, on the other write: every plan is in its own file
+    // by now, so a failed cache write must not turn the migration into a failed load.
+    mockSessionsDrive({
+      parent: [file("BLOB", SESSIONS_NAME, "T0")],
+      read: { BLOB: blob({ a: sess("a"), b: sess("b") }) },
+    });
+    api.createFile.mockImplementation(async (_t, _f, name) => {
+      if (name === "index.json") throw Object.assign(new Error("offline"), { code: 0 });
+      return { id: `F-${name}`, modifiedTime: "TN" };
+    });
+
+    const { sessions, migrated } = await loadSessions("F1");
+    expect(migrated).toBe(2);
+    expect(Object.keys(sessions).sort()).toEqual(["a", "b"]);
+    expect(api.renameFile).toHaveBeenCalledWith("tok", "BLOB", SESSIONS_BACKUP_NAME);
   });
 
   it("lets a 401 while writing a migrated plan reach the retry", async () => {

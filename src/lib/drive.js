@@ -436,8 +436,17 @@ export async function loadSessions(folder) {
     // nothing new must not cost a write.
     if (refetch.length || dropped.length || migrated || !indexFile) {
       const body = JSON.stringify(index);
-      if (indexFile) await api.writeFile(token, indexFile.id, body);
-      else await api.createFile(token, sessionsFolder, SESSIONS_INDEX_NAME, body);
+      try {
+        if (indexFile) await api.writeFile(token, indexFile.id, body);
+        else await api.createFile(token, sessionsFolder, SESSIONS_INDEX_NAME, body);
+      } catch {
+        // The index is a disposable cache — every load diffs it against a real listing and
+        // repairs it — so failing to write it costs one wasted refetch next time and nothing
+        // else. Every plan has already been read (or, after a migration, written), so failing
+        // the load over the cache would lose the lot for the sake of an optimisation. Even a
+        // 401 is swallowed here rather than sent to withRetry: retrying the whole load to
+        // refresh a token, only to rewrite a cache, would repeat the read of every plan.
+      }
     }
 
     const { sessions, meta, duplicates } = sessionsFromIndex(index);
