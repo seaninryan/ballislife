@@ -19,7 +19,11 @@ const button = (re) => [...container.querySelectorAll("button")].find((b) => re.
 describe("Header", () => {
   it("shows the mark, the name and the version", () => {
     mount();
-    expect(container.querySelector("svg.ball-icon")).not.toBeNull();
+    const mark = container.querySelector("svg.app-mark");
+    expect(mark).not.toBeNull();
+    // The mark carries the name for anyone who cannot see it, so it has to say the same
+    // thing the wordmark beside it does.
+    expect(mark.getAttribute("aria-label")).toBe("ball.is.life");
     expect(container.textContent).toContain("ballislife");
     expect(container.textContent).toContain("1.2.3");
   });

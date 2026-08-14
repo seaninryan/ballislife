@@ -3,14 +3,14 @@
 // session is under way. The section links used to live inside the browse view, so they
 // disappeared exactly when they were most useful — inside a drill, mid-edit, mid-session.
 import React from "react";
-import BallIcon from "./BallIcon.jsx";
+import AppMark from "./AppMark.jsx";
 
 export default function Header({ mode = "drills", onModeChange, onHome, activeCount = 0, version }) {
   const running = activeCount > 0;
   return (
     <header className="app-header">
       <button type="button" className="app-home" onClick={onHome}>
-        <BallIcon size={26} />
+        <AppMark size={26} />
         <span className="app-name">ballislife</span>
       </button>
 

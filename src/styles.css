@@ -1,7 +1,7 @@
 :root {
   --bg: #f4f6f7; --panel: #ffffff; --line: #d7dee3;
   --text: #17222b; --dim: #5d7180; --accent: #1f7a4d; --warn: #9c7100; --err: #b3261e;
-  --brand: #1d4ed8; --grass: #2f7d4f; --paint: rgba(255, 255, 255, 0.55);
+  --grass: #2f7d4f; --paint: rgba(255, 255, 255, 0.55);
   --red: #e8483f; --blue: #2b6cff; --yellow: #ffd83d; --gk: #3ad17a;
   --ball-line: #ffd83d; --run-line: #ffffff; --shot-line: #ff6b4a; --cone: #ffb01f;
   color-scheme: light;
@@ -287,13 +287,12 @@ textarea, input, select {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   margin: 10px 0 12px;
 }
-/* --brand, not --accent: the mark has to be the same colour as the favicon, because the
-   point of it is that the tab and the app read as one thing. --accent is the app's green
-   and is the language of "act on this" (Done, the NOW badge, the current block) — the
-   mark is not an action. */
+/* --accent, which is also the favicon's green: the mark IS the app's colour now, so the
+   tab and the app read as one thing without a second brand value to keep in step. The
+   mark is not an action, but it is no longer a different colour from one either. */
 .app-home {
   display: flex; align-items: center; gap: 8px; cursor: pointer;
-  background: none; border: none; padding: 4px 0; color: var(--brand);
+  background: none; border: none; padding: 4px 0; color: var(--accent);
 }
 .app-name { font-size: 20px; font-weight: 700; color: var(--text); }
 .app-nav { flex: 1; }
