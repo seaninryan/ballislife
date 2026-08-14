@@ -1,17 +1,22 @@
 // src/components/AppMark.jsx
-// The app's mark: a monogram, not a ball. Inline so the header costs no request and the
-// disc can take the colour of whatever it sits in. The same geometry as public/icon.svg,
-// which cannot import this because a favicon has to be a file — keep the two in step by
-// hand if the mark changes.
+// The app's mark: a lowercase b on a disc, matching the ball.is.life wordmark. Inline so
+// the header costs no request and the disc can take the colour of whatever it sits in.
+// The same geometry as public/icon.svg, which cannot import this because a favicon has to
+// be a file — test/header.test.jsx holds the two in step.
 //
-// Deliberately two shapes: at 16px in a tab strip anything more detailed turns to mush,
-// and being told apart from the other tabs is the whole job.
+// Deliberately simple: at 16px in a tab strip anything more detailed turns to mush, and
+// being told apart from the other tabs is the whole job. A lowercase b is three primitives
+// — a stem, a ring, a hole — where the uppercase B needed two bowls to meet at a waist,
+// which is precisely where two attempts at it looked wrong.
 //
-// The transform is measured, not eyeballed. The path's own bounding box is already
-// centred on (32,32), so the job is only to scale it: 0.8 puts the B's corners at 65% of
-// the radius, which leaves a ring of disc around it and survives a rounded-square mask.
-// An earlier hand-tuned nudge pushed it OFF centre and sized it at 76%, which read as
-// clipped. If the mark changes, measure getBBox again rather than nudging by eye.
+// NOTE THE WINDING. The stem and the bowl OVERLAP, so this depends on the default nonzero
+// fill rule to union them. Setting fillRule="evenodd" here would punch the overlap out and
+// cut the letter in half. The counter is drawn the opposite way round (sweep 0 against the
+// bowl's sweep 1), which is what makes it a hole under nonzero.
+//
+// The transform is measured, not eyeballed: the path's bounding box is 29.5 x 38 centred
+// on (31.75, 32), and 0.8 puts its worst corner at 64% of the disc's radius. Re-measure
+// with getBBox rather than nudging by eye if the glyph ever changes.
 import React from "react";
 
 export default function AppMark({ size = 24, className = "" }) {
@@ -23,9 +28,9 @@ export default function AppMark({ size = 24, className = "" }) {
     >
       <circle cx="32" cy="32" r="30" fill="currentColor" />
       <path
-        fill="var(--panel)" fillRule="evenodd"
-        transform="translate(6.80 6.40) scale(0.8)"
-        d="M17 13 H35 A9 9 0 0 1 35 31 H36 A10 10 0 0 1 36 51 H17 Z M26 19 H33.5 A4.5 4.5 0 0 1 33.5 28 H26 Z M26 34 H34.5 A5.5 5.5 0 0 1 34.5 45 H26 Z"
+        fill="var(--panel)"
+        transform="translate(6.60 6.40) scale(0.8)"
+        d="M17 13 H26 V51 H17 Z M19.5 37.5 A13.5 13.5 0 1 1 46.5 37.5 A13.5 13.5 0 1 1 19.5 37.5 Z M26 37.5 A7 7 0 1 0 40 37.5 A7 7 0 1 0 26 37.5 Z"
       />
     </svg>
   );

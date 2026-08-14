@@ -89,12 +89,39 @@ describe("the mark, in both of its copies", () => {
   });
 
   it("keeps the B inside the disc, with room around it", () => {
-    // Measured with getBBox in a browser, not eyeballed: the path is 29 x 38. Its worst
-    // corner sits at scale * hypot(14.5, 19) from the centre. An earlier version scaled it
+    // Measured with getBBox in a browser, not eyeballed: the path is 29.5 x 38. Its worst
+    // corner sits at scale * hypot(14.75, 19) from the centre. An earlier version scaled it
     // to 76% and read as clipped. Re-measure these two numbers if the glyph changes.
     const { transform, radius } = geometry(icon);
     const scale = Number(transform.match(/scale\(([\d.]+)\)/)[1]);
-    const worstCorner = scale * Math.hypot(29 / 2, 38 / 2);
+    const worstCorner = scale * Math.hypot(29.5 / 2, 38 / 2);
     expect(worstCorner / Number(radius)).toBeLessThan(0.7);
+  });
+});
+
+// The lowercase b overlaps its own stem with its bowl, so it is drawn under the DEFAULT
+// nonzero fill rule and would be cut in half by evenodd. That is a one-word change nobody
+// would think to question, and the damage — a letter with a slice missing — only shows up
+// by looking. Neither copy of the mark may carry a fill-rule at all.
+describe("the mark's winding", () => {
+  const sources = {
+    "public/icon.svg": readFileSync(join(here, "..", "public", "icon.svg"), "utf8"),
+    "src/components/AppMark.jsx": readFileSync(join(here, "..", "src", "components", "AppMark.jsx"), "utf8"),
+  };
+
+  it("never sets a fill rule, in either copy", () => {
+    for (const [name, src] of Object.entries(sources)) {
+      // Strip line comments first: the component explains this trap in prose.
+      const code = src.replace(/^\s*\/\/.*$/gm, "");
+      expect(`${name}: ${/fill-?[rR]ule\s*=/.test(code)}`).toBe(`${name}: false`);
+    }
+  });
+
+  it("draws the counter against the bowl, which is what makes it a hole", () => {
+    // The bowl sweeps 1 and the counter sweeps 0. Same direction on both and the counter
+    // fills in solid under nonzero, leaving a b with no hole in it.
+    const d = sources["public/icon.svg"].match(/d="([^"]+)"/)[1];
+    const sweeps = [...d.matchAll(/A[\d.]+ [\d.]+ 0 1 ([01])/g)].map((m) => m[1]);
+    expect(sweeps).toEqual(["1", "1", "0", "0"]);
   });
 });
