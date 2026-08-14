@@ -11,7 +11,12 @@ export default function Header({ mode = "drills", onModeChange, onHome, activeCo
     <header className="app-header">
       <button type="button" className="app-home" onClick={onHome}>
         <AppMark size={26} />
-        <span className="app-name">ballislife</span>
+        {/* Spans, not styled pseudo-elements or images: the separators are dimmed so the
+            three syllables read as one word, but the name stays real text that selects
+            and copies as "ball.is.life". */}
+        <span className="app-name">
+          ball<span className="app-name-sep">.</span>is<span className="app-name-sep">.</span>life
+        </span>
       </button>
 
       <nav className="row app-nav">

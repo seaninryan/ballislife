@@ -1425,7 +1425,7 @@ describe("App header", () => {
     await mount();
     await openEditFor("Alpha");
     expect(container.querySelector("textarea")).not.toBeNull();
-    await act(async () => { findButton("ballislife").click(); });
+    await act(async () => { findButton("ball.is.life").click(); });
     expect(container.querySelector("textarea")).toBe(null);
     expect(container.textContent).toContain("Bravo"); // the grid is back
     expect(location.hash).toBe("#/");
@@ -1444,7 +1444,7 @@ describe("App header", () => {
     await openSession("2026-08-12");
     await act(async () => { findButton("Run this session").click(); });
     expect(container.textContent).toContain("body a");
-    await act(async () => { findButton("ballislife").click(); });
+    await act(async () => { findButton("ball.is.life").click(); });
     expect(container.textContent).not.toContain("body a");
     expect(container.textContent).toContain("Bravo");
     expect(location.hash).toBe("#/");

@@ -295,6 +295,9 @@ textarea, input, select {
   background: none; border: none; padding: 4px 0; color: var(--accent);
 }
 .app-name { font-size: 20px; font-weight: 700; color: var(--text); }
+/* Dimmed and lighter so the dots separate the syllables without being read as three
+   words — the eye should land on "ballislife", the dots only give it its rhythm. */
+.app-name-sep { color: var(--dim); font-weight: 400; }
 .app-nav { flex: 1; }
 .app-version { margin-left: auto; }
 /* A session under way, said twice: the dot catches the eye, the button's aria-label says
