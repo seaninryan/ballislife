@@ -89,12 +89,12 @@ describe("the mark, in both of its copies", () => {
   });
 
   it("keeps the B inside the disc, with room around it", () => {
-    // Measured, not eyeballed: the path's bounding box is 29.94 x 38 centred on (32,32),
-    // so its worst corner sits at scale * hypot(14.97, 19) from the centre. An earlier
-    // version scaled it to 76% of the radius and read as clipped.
+    // Measured with getBBox in a browser, not eyeballed: the path is 29 x 38. Its worst
+    // corner sits at scale * hypot(14.5, 19) from the centre. An earlier version scaled it
+    // to 76% and read as clipped. Re-measure these two numbers if the glyph changes.
     const { transform, radius } = geometry(icon);
     const scale = Number(transform.match(/scale\(([\d.]+)\)/)[1]);
-    const worstCorner = scale * Math.hypot(29.94 / 2, 38 / 2);
+    const worstCorner = scale * Math.hypot(29 / 2, 38 / 2);
     expect(worstCorner / Number(radius)).toBeLessThan(0.7);
   });
 });
