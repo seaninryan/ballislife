@@ -14,6 +14,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import SessionRun from "../src/components/SessionRun.jsx";
 import { DONE, SKIPPED, readProgress, writeProgress } from "../src/lib/progress.js";
+import {
+  PRESENT, ABSENT, readAttendance, writeAttendance,
+} from "../src/lib/attendance.js";
+import { u14a } from "./fixtures/squads.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(join(here, "..", "src", "styles.css"), "utf8");
@@ -1046,6 +1050,222 @@ describe("SessionRun marks follow the drill, not the position", () => {
     expect(rows[1].querySelector(".run-block-summary").textContent).toContain("Done");
     // And Drive is told to store it by slot, so the next device to read it agrees.
     expect(onProgress).toHaveBeenCalledWith("2026-08-13", { warmup: DONE }, at("19:00"));
+  });
+});
+
+// The register is the first section of the run view: the thing you do before anything
+// else on the pitch. It is NOT a block — the accordion's NOW badge and current-block
+// logic are about drills, and an untaken register must not stop one being current — and
+// its marks take exactly the path progress takes: localStorage first, then upward.
+describe("SessionRun attendance", () => {
+  let container, root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+  });
+
+  const mount = (props) => {
+    if (root) act(() => root.unmount());
+    root = createRoot(container);
+    act(() => { root.render(<SessionRun {...props} />); });
+    return root;
+  };
+
+  const twoBlocks = () => [
+    { slot: "warmup", drill: "a", minutes: null, note: "" },
+    { slot: "skill", drill: "b", minutes: null, note: "" },
+  ];
+  const DAY = "2026-08-13";
+  const at = (t) => `${DAY}T${t}:00.000Z`;
+  const now = () => at("19:00");
+  const squad = u14a();
+  const idOf = (name) => squad.players.find((p) => p.name === name).id;
+  const base = (props = {}) => ({
+    session: session(twoBlocks()), drills: runDrills(), texts: {}, today: DAY,
+    squad, now, ...props,
+  });
+  const rows = () => [...container.querySelectorAll(".attendance-row")];
+  const rowFor = (name) => rows().find((r) => r.textContent.includes(name));
+
+  it("is the first section, above the first block", () => {
+    mount(base());
+    const html = container.innerHTML;
+    expect(html.indexOf("run-attendance")).toBeLessThan(html.indexOf("run-block"));
+    expect(rows()).toHaveLength(15);
+  });
+
+  it("is open when nothing is marked yet — it is the first thing you do", () => {
+    mount(base());
+    expect(container.querySelector(".run-attendance-summary").getAttribute("aria-expanded")).toBe("true");
+    expect(rows()).toHaveLength(15);
+  });
+
+  it("is closed once the register has been taken — and then not again", () => {
+    writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: PRESENT }, at("18:50"));
+    mount(base());
+    expect(container.querySelector(".run-attendance-summary").getAttribute("aria-expanded")).toBe("false");
+    expect(rows()).toHaveLength(0);
+    // Still reachable, and it says what it holds without being opened.
+    expect(container.querySelector(".run-attendance").textContent).toMatch(/1 present/);
+  });
+
+  it("is closed when the register was taken on the other device", () => {
+    const s = { ...session(twoBlocks()), attendance: {
+      [DAY]: { marks: { [idOf("Alfie Ryan")]: PRESENT }, updatedAt: at("18:50") },
+    } };
+    mount(base({ session: s, onAttendance: () => {} }));
+    expect(container.querySelector(".run-attendance-summary").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens and closes on its summary, like a block", () => {
+    writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: PRESENT }, at("18:50"));
+    mount(base());
+    act(() => { container.querySelector(".run-attendance-summary").click(); });
+    expect(rows()).toHaveLength(15);
+    act(() => { container.querySelector(".run-attendance-summary").click(); });
+    expect(rows()).toHaveLength(0);
+  });
+
+  it("an untaken register does not stop a drill being current, or shift which one it is", () => {
+    mount(base());
+    const attendance = container.querySelector(".run-attendance");
+    expect(attendance.querySelector(".run-block-now-badge")).toBeNull();
+    expect(attendance.classList.contains("run-block-current")).toBe(false);
+    // Exactly one thing on screen is current, and it is the first drill.
+    const current = container.querySelectorAll(".run-block-current");
+    expect(current).toHaveLength(1);
+    expect(current[0].querySelector(".run-block-summary").textContent).toContain("warmup");
+    expect(container.querySelectorAll(".run-block-now-badge")).toHaveLength(1);
+  });
+
+  it("a tap writes to this device first, then reports the register upward with its time", () => {
+    const onAttendance = vi.fn();
+    mount(base({ onAttendance }));
+    act(() => { rowFor("Cillian Conlan").click(); });
+    expect(readAttendance(localStorage, "s1", DAY)).toEqual({ [idOf("Cillian Conlan")]: PRESENT });
+    expect(onAttendance).toHaveBeenLastCalledWith(DAY, { [idOf("Cillian Conlan")]: PRESENT }, at("19:00"));
+    // And the row shows it, without waiting for anything to come back.
+    expect(rowFor("Cillian Conlan").textContent).toContain("Present");
+  });
+
+  it("cycling a player round to unmarked removes the mark rather than storing a fourth state", () => {
+    const onAttendance = vi.fn();
+    const kevin = idOf("Kevin");
+    writeAttendance(localStorage, "s1", DAY, { [kevin]: "excused" }, at("18:50"));
+    mount(base({ onAttendance }));
+    act(() => { container.querySelector(".run-attendance-summary").click(); }); // it opens closed
+    act(() => { rowFor("Kevin").click(); });
+    expect(readAttendance(localStorage, "s1", DAY)).toEqual({});
+    expect(onAttendance).toHaveBeenLastCalledWith(DAY, {}, at("19:00"));
+  });
+
+  it("works with no onAttendance at all: the tap is still kept on this device", () => {
+    mount(base());
+    act(() => { rowFor("Jack Melia").click(); });
+    expect(readAttendance(localStorage, "s1", DAY)).toEqual({ [idOf("Jack Melia")]: PRESENT });
+  });
+
+  it("shows a register taken on another device, and adopts it onto this one", () => {
+    const s = { ...session(twoBlocks()), attendance: {
+      [DAY]: { marks: { [idOf("Alfie Ryan")]: PRESENT, [idOf("Kevin")]: ABSENT }, updatedAt: at("18:50") },
+    } };
+    const onAttendance = vi.fn();
+    mount(base({ session: s, onAttendance }));
+    act(() => { container.querySelector(".run-attendance-summary").click(); });
+    expect(rowFor("Alfie Ryan").textContent).toContain("Present");
+    expect(rowFor("Kevin").textContent).toContain("Absent");
+    expect(readAttendance(localStorage, "s1", DAY))
+      .toEqual({ [idOf("Alfie Ryan")]: PRESENT, [idOf("Kevin")]: ABSENT });
+    expect(onAttendance).not.toHaveBeenCalled();
+  });
+
+  it("a newer register on this device wins, and is reported so Drive catches up", () => {
+    writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: PRESENT }, at("19:30"));
+    const s = { ...session(twoBlocks()), attendance: {
+      [DAY]: { marks: { [idOf("Kevin")]: ABSENT }, updatedAt: at("18:50") },
+    } };
+    const onAttendance = vi.fn();
+    mount(base({ session: s, onAttendance, now: () => at("20:00") }));
+    act(() => { container.querySelector(".run-attendance-summary").click(); });
+    expect(rowFor("Kevin").textContent).toContain("Present");
+    expect(onAttendance).toHaveBeenCalledWith(DAY, { [idOf("Kevin")]: PRESENT }, at("19:30"));
+  });
+
+  it("settles rather than looping when the session comes back with what was reported", () => {
+    const onAttendance = vi.fn();
+    let s = session(twoBlocks());
+    const r = mount(base({ session: s, onAttendance }));
+    act(() => { rowFor("Mikey Gilligan").click(); });
+    const [day, marks, stamp] = onAttendance.mock.calls.at(-1);
+    onAttendance.mockClear();
+    s = { ...s, attendance: { [day]: { marks, updatedAt: stamp } } };
+    act(() => {
+      r.render(
+        <SessionRun
+          session={s} drills={runDrills()} texts={{}} today={DAY}
+          squad={squad} onAttendance={onAttendance} now={now}
+        />,
+      );
+    });
+    expect(onAttendance).not.toHaveBeenCalled();
+    expect(rowFor("Mikey Gilligan").textContent).toContain("Present");
+  });
+
+  it("keeps a register for another day out of tonight's", () => {
+    const s = { ...session(twoBlocks()), attendance: {
+      "2026-08-12": { marks: { [idOf("Kevin")]: PRESENT }, updatedAt: "2026-08-12T19:00:00.000Z" },
+    } };
+    const onAttendance = vi.fn();
+    mount(base({ session: s, onAttendance }));
+    expect(rowFor("Kevin").textContent).not.toContain("Present");
+    expect(onAttendance).not.toHaveBeenCalled();
+  });
+
+  it("shows the register of the session on screen when a different one is handed in", () => {
+    // Same re-render-not-remount case the progress suite pins: Catalogue renders one
+    // SessionRun whichever plan is being run.
+    writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: PRESENT }, at("18:50"));
+    const r = mount(base());
+    act(() => { container.querySelector(".run-attendance-summary").click(); });
+    expect(rowFor("Kevin").textContent).toContain("Present");
+    act(() => {
+      r.render(
+        <SessionRun
+          session={session(twoBlocks(), "s2")} drills={runDrills()} texts={{}} today={DAY}
+          squad={squad} now={now}
+        />,
+      );
+    });
+    expect(rowFor("Kevin").textContent).not.toContain("Present");
+  });
+
+  it("a session with no squad says so and offers no register", () => {
+    mount(base({ squad: null }));
+    expect(rows()).toHaveLength(0);
+    expect(container.querySelector(".run-attendance").textContent).toMatch(/no squad/i);
+    // And the drills are entirely unaffected by there being nobody to tick.
+    expect(container.querySelectorAll(".run-block")).toHaveLength(2);
+    expect(container.querySelectorAll(".run-block-now-badge")).toHaveLength(1);
+  });
+
+  it("a register survives a remount on the same day, and a new day starts clean", () => {
+    mount(base());
+    act(() => { rowFor("Sean Coughlan").click(); });
+
+    mount(base());
+    act(() => { container.querySelector(".run-attendance-summary").click(); });
+    expect(rowFor("Sean Coughlan").textContent).toContain("Present");
+
+    mount(base({ today: "2026-08-14", now: () => "2026-08-14T19:00:00.000Z" }));
+    expect(rowFor("Sean Coughlan").textContent).not.toContain("Present");
   });
 });
 

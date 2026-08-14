@@ -13,6 +13,7 @@ import { emptySession, resolveBlocks, setBlock } from "./lib/sessions.js";
 import { emptySquad, linkSquadId } from "./lib/squads.js";
 import { slugify } from "./lib/drills.js";
 import { withSessionProgress, activeSessionIds } from "./lib/progress.js";
+import { withSessionAttendance } from "./lib/attendance.js";
 import { localStore, todayIso } from "./lib/browser.js";
 import { parseHash, formatHash } from "./lib/route.js";
 
@@ -842,6 +843,15 @@ export default function App() {
     onSessionChange(withSessionProgress(sess, day, marks, updatedAt));
   }, [runSessionId, onSessionChange]);
 
+  // A tick on the register, by exactly the same road: the run view has already written it
+  // to this device, this folds it into the plan and the usual debounce carries it to
+  // Drive. Unlike progress, what lands there is a permanent record — every date is kept.
+  const onRunAttendance = useCallback((day, marks, updatedAt) => {
+    const sess = sessionsStateRef.current.data.sessions[runSessionId];
+    if (!sess) return;
+    onSessionChange(withSessionAttendance(sess, day, marks, updatedAt));
+  }, [runSessionId, onSessionChange]);
+
   // Back to the plan = the builder for the session that was just being run, not the
   // session list — running is a detour from editing, not a replacement for it.
   const onRunBack = useCallback(() => {
@@ -1092,6 +1102,10 @@ export default function App() {
   const selectedSquad = selectedSquadId ? squadsState.data[selectedSquadId] ?? null : null;
   const selectedSession = selectedSessionId ? sessionsState.data.sessions[selectedSessionId] ?? null : null;
   const runSession = runSessionId ? sessionsState.data.sessions[runSessionId] ?? null : null;
+  // Who the running plan is for. By id only: the free-text name is what old plans carry
+  // and linkSessionsToSquads has already turned that into an id where it matched one — a
+  // name matched again here could attach the wrong roster to a night's register.
+  const runSquad = runSession?.squadId ? squadsState.data[runSession.squadId] ?? null : null;
 
   // Nothing but the button before sign-in. The header is deliberately outside this
   // return: its way home, its sections and the version are all about a catalogue that
@@ -1159,6 +1173,8 @@ export default function App() {
         onRunBack={onRunBack}
         onRunSwap={onRunSwap}
         onRunProgress={onRunProgress}
+        runSquad={runSquad}
+        onRunAttendance={onRunAttendance}
         squads={squadsList}
         selectedSquad={selectedSquad}
         onOpenSquad={onOpenSquad}

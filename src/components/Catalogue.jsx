@@ -130,6 +130,9 @@ export default function Catalogue({
   onKeepMineSessions, onReloadSessions,
   sessionsMigrated = 0, sessionsFailed = [], sessionsUnmigrated = [], sessionsLoadError,
   runSession, runTexts, onOpenRun, onRunBack, onRunSwap, onRunProgress,
+  // The squad the running plan is for, resolved by App from the plan's squadId — the run
+  // view takes the register but has no way to look a squad up itself.
+  runSquad = null, onRunAttendance,
   squads = [], selectedSquad, onOpenSquad, onCreateSquad, onSquadChange, onSquadBack,
   onDeleteSquad, squadsStatus, squadsError, squadsConflict = false, squadsResolving = false,
   squadsBlocked = null, squadsLoadError, onKeepMineSquads, onReloadSquads,
@@ -231,6 +234,8 @@ export default function Catalogue({
           onBack={onRunBack}
           onSwap={onRunSwap}
           onProgress={onRunProgress}
+          squad={runSquad}
+          onAttendance={onRunAttendance}
         />
       </div>
     );

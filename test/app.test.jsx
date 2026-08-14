@@ -7,6 +7,7 @@ import * as auth from "../src/lib/driveAuth.js";
 import * as owner from "../src/lib/owner.js";
 import * as api from "../src/lib/driveApi.js";
 import App from "../src/App.jsx";
+import { u14a } from "./fixtures/squads.js";
 
 vi.mock("../src/lib/drive.js");
 vi.mock("../src/lib/driveAuth.js");
@@ -1417,6 +1418,77 @@ describe("App session run mode", () => {
     expect(container.textContent).toContain("2026-08-12"); // back on the builder
     expect(container.textContent).not.toContain("body a"); // run view is gone
     expect(location.hash).toBe("#/session/s1");
+  });
+
+  // The register takes the same road a Done tap takes: localStorage on the tap, into the
+  // session on the debounce, one file written. What is new is that it needs the SQUAD as
+  // well as the plan, which App is the only thing holding both of.
+  describe("taking the register", () => {
+    const withSquad = () => ({ ...runSessionFixture(), squadId: u14a().id, squad: u14a().name });
+    const attendanceRow = (name) =>
+      [...container.querySelectorAll(".attendance-row")].find((r) => r.textContent.includes(name));
+
+    beforeEach(() => {
+      drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: withSquad() }));
+      drive.loadSquads.mockResolvedValue({
+        squads: { [u14a().id]: u14a() }, fileId: "sq", modifiedTime: "Q1", failed: null,
+      });
+      drive.readDrill.mockImplementation((id) => Promise.resolve({ text: bodyText(id), modifiedTime: "T" }));
+    });
+
+    it("lists the plan's squad in the run view, above the drills", async () => {
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      expect(container.querySelectorAll(".attendance-row")).toHaveLength(15);
+      expect(container.textContent).toContain("Darragh C Kelly");
+    });
+
+    it("saves a tick into that plan's file, keyed by tonight", async () => {
+      drive.saveSession.mockImplementation(saveSessionOk("S2"));
+      vi.useFakeTimers();
+      try {
+        await mount();
+        await openSession("2026-08-12");
+        await act(async () => { findButton("Run this session").click(); });
+        await act(async () => { attendanceRow("Cathal Cloonan").click(); });
+        await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+        expect(drive.saveSession).toHaveBeenCalledTimes(1);
+        const saved = drive.saveSession.mock.calls.at(-1)[0];
+        expect(saved.id).toBe("s1");
+        const days = Object.keys(saved.session.attendance);
+        expect(days).toEqual([new Date().toISOString().slice(0, 10)]);
+        expect(saved.session.attendance[days[0]].marks).toEqual({ "cathal-cloonan": "present" });
+        expect(saved.session.attendance[days[0]].updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("shows a register taken on the other device when the run view opens", async () => {
+      const day = new Date().toISOString().slice(0, 10);
+      drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: {
+        ...withSquad(),
+        attendance: { [day]: { marks: { "alfie-ryan": "present" }, updatedAt: new Date().toISOString() } },
+      } }));
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      // Already taken, so the section opens collapsed — with its count on the summary.
+      expect(container.querySelector(".run-attendance").textContent).toContain("1 present");
+      await act(async () => { container.querySelector(".run-attendance-summary").click(); });
+      expect(attendanceRow("Alfie Ryan").textContent).toContain("Present");
+    });
+
+    it("a plan with no squad still runs, and says there is nobody to tick", async () => {
+      drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: runSessionFixture() }));
+      drive.loadSquads.mockResolvedValue({ squads: {}, fileId: null, modifiedTime: null, failed: null });
+      await mount();
+      await openSession("2026-08-12");
+      await act(async () => { findButton("Run this session").click(); });
+      expect(container.querySelector(".run-attendance").textContent).toMatch(/no squad/i);
+      expect(container.textContent).toContain("body a"); // the drills are unaffected
+    });
   });
 });
 

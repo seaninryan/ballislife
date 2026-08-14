@@ -17,10 +17,15 @@ import React, { useState, useEffect } from "react";
 import { resolveBlocks, totalMinutes } from "../lib/sessions.js";
 import DrillPreview from "./DrillPreview.jsx";
 import DrillPicker from "./DrillPicker.jsx";
+import Attendance from "./Attendance.jsx";
 import {
   DONE, SKIPPED, readProgress, localProgress, writeProgress, mark, reopen, currentIndex,
   counts, sessionProgress, mergeProgress, sameMarks, blockKey, migrateMarks,
 } from "../lib/progress.js";
+import {
+  readAttendance, localAttendance, writeAttendance, sessionAttendance, mergeAttendance,
+  turnout as presentCount,
+} from "../lib/attendance.js";
 import { localStore } from "../lib/browser.js";
 
 
@@ -138,6 +143,9 @@ function RunBlock({
 
 export default function SessionRun({
   session, drills = [], texts = {}, onBack, onSwap, onProgress, today,
+  // The squad this plan is for, and where tonight's register goes. Both optional: a plan
+  // with no squad still runs, it just has nobody to tick.
+  squad = null, onAttendance,
   // Injectable so tests can assert on an exact stamp; the app never passes one.
   now = () => new Date().toISOString(),
 }) {
@@ -164,6 +172,26 @@ export default function SessionRun({
   const readSide = (side) => (side ? { ...side, marks: migrateMarks(side.marks, blocks) } : side);
 
   const [marks, setMarks] = useState(readLocalMarks);
+
+  // Tonight's register, kept exactly the way progress is (see lib/dayMarks.js, which both
+  // stores share): read from this device, reconciled below against what the session file
+  // holds. A tap is never allowed to wait on signal.
+  const readLocalAttendance = () => readAttendance(localStore(), session?.id, day);
+  const [attendanceMarks, setAttendanceMarks] = useState(readLocalAttendance);
+  // What the register would show at this instant, taking the session file into account as
+  // well as this device — used only to decide whether it has been taken yet, which the
+  // opening state below needs before the reconciliation effect has run.
+  const registerAtOpen = () => mergeAttendance(
+    localAttendance(localStore(), session?.id, day),
+    sessionAttendance(session, day),
+    Date.parse(now()),
+  ).marks;
+  // Open when nothing is marked, closed once the register is taken: it is the first thing
+  // you do at training and then not again. NOT recomputed from the marks on every render —
+  // that would collapse the section under the coach's thumb on the first player he ticks.
+  const [registerOpen, setRegisterOpen] = useState(
+    () => Object.keys(registerAtOpen()).length === 0,
+  );
   // Blocks opened by hand to look back or peek ahead, independent of what is marked.
   // The current block is always open regardless of this set.
   const [opened, setOpened] = useState(() => new Set());
@@ -183,6 +211,8 @@ export default function SessionRun({
     // session's progress for one frame and then correcting it in an effect.
     setShownKey(progressKey);
     setMarks(readLocalMarks());
+    setAttendanceMarks(readLocalAttendance());
+    setRegisterOpen(Object.keys(registerAtOpen()).length === 0);
     setOpened(new Set());
     setPicking(null);
   }
@@ -226,6 +256,45 @@ export default function SessionRun({
     // won by construction) and `onProgress` would re-run it whenever App re-creates the
     // callback. Neither can change who wins.
   }, [session?.id, day, remoteKey]);
+
+  // The register's half of the same reconciliation, on the same terms and for the same
+  // reasons — the register may have been taken on the laptop, and a register cleared here
+  // must not be resurrected from Drive. `sameMarks` is the shared comparison out of
+  // dayMarks; progress re-exports it.
+  const attendanceRemote = sessionAttendance(session, day);
+  const attendanceRemoteKey = attendanceRemote
+    ? `${attendanceRemote.updatedAt} ${JSON.stringify(attendanceRemote.marks)}`
+    : "";
+  useEffect(() => {
+    const local = localAttendance(localStore(), session?.id, day);
+    const winner = mergeAttendance(local, attendanceRemote, Date.parse(now()));
+    if (winner === attendanceRemote) {
+      if (!sameMarks(winner.marks, local?.marks ?? {})) {
+        writeAttendance(localStore(), session?.id, day, winner.marks, winner.updatedAt);
+      }
+      if (!sameMarks(winner.marks, attendanceMarks)) setAttendanceMarks(winner.marks);
+      return;
+    }
+    // An unstamped local register — hand-typed into the file, or written before stamps —
+    // shows here but stays silent, exactly as progress does: it has nothing to prove it is
+    // newer, and reporting it upward would overwrite what Drive holds.
+    if (winner.updatedAt && !sameMarks(winner.marks, attendanceRemote?.marks ?? {})) {
+      onAttendance?.(day, winner.marks, winner.updatedAt);
+    }
+  }, [session?.id, day, attendanceRemoteKey]);
+
+  // A player ticked. localStorage first and synchronously, then upward on App's debounce —
+  // the same path a Done tap takes. `state` is undefined when the cycle comes back round
+  // to unmarked, and unmarked is the ABSENCE of a mark, not a fourth value to store.
+  const handleAttendanceMark = (playerId, state) => {
+    const next = { ...attendanceMarks };
+    if (state) next[playerId] = state;
+    else delete next[playerId];
+    const stamp = now();
+    setAttendanceMarks(next);
+    writeAttendance(localStore(), session?.id, day, next, stamp);
+    onAttendance?.(day, next, stamp);
+  };
 
   const current = currentIndex(marks, blocks);
   const { done, skipped, remaining } = counts(marks, blocks);
@@ -288,10 +357,35 @@ export default function SessionRun({
     });
   };
 
-  // The accordion's only section today is the block list. Once squads exist, Sean
-  // wants a player list with attendance ticks as the FIRST collapsible section, above
-  // `rows` — this loop is deliberately just the blocks so that section can be
-  // prepended later without restructuring anything here.
+  // The register, prepended to the accordion — which this loop was left as just the
+  // blocks in order to allow. It is a section, not a block: it carries neither the NOW
+  // badge nor the current-block edge, and `current` above never sees it, because what is
+  // "current" is about which drill to run. An untaken register does not stop a drill
+  // being current and does not shift which one it is.
+  const registerTaken = Object.keys(attendanceMarks).length > 0;
+  const register = (
+    <section className="card run-attendance">
+      <button
+        type="button"
+        className="run-attendance-summary"
+        onClick={() => setRegisterOpen((open) => !open)}
+        aria-expanded={registerOpen}
+      >
+        <strong className="block-slot">Attendance</strong>
+        {registerTaken ? (
+          // The one number the rest of the night uses: it is what the swap picker means
+          // by turnout. Shown collapsed so the register does not need opening to read it.
+          <span className="chip ok-chip">{presentCount(attendanceMarks)} present</span>
+        ) : (
+          <span className="chip dim">not taken</span>
+        )}
+      </button>
+      {registerOpen ? (
+        <Attendance squad={squad} marks={attendanceMarks} onMark={handleAttendanceMark} />
+      ) : null}
+    </section>
+  );
+
   const rows = blocks.map((block, index) => {
     const isCurrent = index === current;
     const isOpen = isCurrent || opened.has(index);
@@ -341,6 +435,7 @@ export default function SessionRun({
         </div>
       ) : null}
 
+      {register}
       {rows}
     </div>
   );
