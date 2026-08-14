@@ -311,6 +311,16 @@ textarea, input, select {
 .app-name-sep { color: var(--dim); font-weight: 400; }
 .app-nav { flex: 1; }
 .app-version { margin-left: auto; }
+/* Three sections do not fit beside the wordmark on a phone. Left to wrap on its own the
+   nav spills ONE chip onto the next line, hanging under the others and reading like a
+   mistake — so below 520px it takes a row of its own, as a group. Rendered at 390px:
+   wordmark and version on the first line, the three sections evenly on the second. */
+@media (max-width: 520px) {
+  /* order:1 sends the nav last so the version rides up beside the wordmark on the first
+     line; without it the version wraps alone onto a third. */
+  .app-nav { flex: 1 0 100%; order: 1; }
+}
+
 /* A session under way, said twice: the dot catches the eye, the button's aria-label says
    it in words. Colour alone is no use in bright sun at the side of a pitch. */
 .nav-dot {
