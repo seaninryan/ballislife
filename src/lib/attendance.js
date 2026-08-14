@@ -60,15 +60,17 @@ export const turnout = (marks) =>
 // "tonight" to key off — a plan is edited days before and days after it is run — so the most
 // recent night is the only honest answer. ISO dates sort lexically, so that is the last key.
 //
-// Null, never zero, when there is nothing to go on: zero means "nobody turned up", and would
-// hide every drill in the picker. A night whose register was cleared is skipped for the same
-// reason — an empty register says nothing about how many were there.
+// Null when NOTHING was ever recorded — which is not zero, and callers must not confuse the
+// two. A night whose register was cleared is skipped: an empty register says nothing about
+// how many were there. A night where everybody was marked absent is NOT skipped, because
+// that register was taken and its answer is nobody: walking past it to reach an older night
+// reported last season's fifteen as this plan's turnout, with nothing saying how old it was.
+// Zero is the honest answer here; what to do with a useless suggestion is the caller's call.
 export function recordedTurnout(session) {
   const days = Object.keys(session?.attendance ?? {}).sort();
   for (let i = days.length - 1; i >= 0; i -= 1) {
     const side = sessionAttendance(session, days[i]);
-    const count = side ? turnout(side.marks) : 0;
-    if (count) return count;
+    if (side && Object.keys(side.marks).length) return turnout(side.marks);
   }
   return null;
 }

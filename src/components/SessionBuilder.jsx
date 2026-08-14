@@ -92,7 +92,12 @@ export default function SessionBuilder({ session, drills = [], squads = [], onCh
   // PLACEHOLDER rather than its value, so it is obvious both where the number came from and
   // that typing over it wins — and clearing the field falls back to it rather than to
   // nothing, which is why the same fallback drives the picker below.
-  const derivedTurnout = recordedTurnout(session);
+  //
+  // Zero is a real answer from the register — a night nobody came — but it is no use as a
+  // suggestion: as a placeholder it reads as tonight's number, and as a turnout it hides
+  // every drill that says how many it needs. Nothing to suggest is therefore shown as
+  // nothing, exactly like a plan that has never been run.
+  const derivedTurnout = recordedTurnout(session) || null;
   const turnoutNumber = session.turnout ?? derivedTurnout ?? undefined;
 
   // rawMinutes carries the block's own (possibly null) minutes through resolveBlocks,

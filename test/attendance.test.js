@@ -138,6 +138,17 @@ describe("recordedTurnout", () => {
     expect(recordedTurnout(session)).toBe(1);
   });
 
+  it("is zero for a cancelled night, rather than walking back to an older answer", () => {
+    // Everyone marked absent is a register that was taken, and its answer is nobody. Walking
+    // past it to the last night anyone came offered a year-old number as tonight's, with
+    // nothing on screen saying how old it was.
+    const session = { id: "s1", attendance: {
+      "2025-09-01": on("2025-09-01", { a: PRESENT, b: PRESENT, c: PRESENT }),
+      "2026-08-13": on("2026-08-13", { a: ABSENT, b: ABSENT, c: ABSENT }),
+    } };
+    expect(recordedTurnout(session)).toBe(0);
+  });
+
   it("skips a night whose register was cleared: an empty register says nothing", () => {
     const session = { id: "s1", attendance: {
       "2026-08-07": on("2026-08-07", { a: PRESENT, b: PRESENT }),

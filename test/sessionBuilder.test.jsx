@@ -242,6 +242,24 @@ describe("SessionBuilder", () => {
       expect(warmupOptions().some((o) => o.includes("Rondo 4v2"))).toBe(true);
     });
 
+    it("suggests nothing when the last register says nobody came", () => {
+      // A cancelled night is honestly zero, and zero is no use as a suggestion: as a
+      // placeholder it reads as tonight's number, and as a turnout it hides every drill
+      // that says how many it needs. So show no placeholder and offer everything.
+      const cancelled = {
+        ...baseSession(),
+        attendance: {
+          "2026-08-05": { marks: { a: "present", b: "present" }, updatedAt: "2026-08-05T19:00:00.000Z" },
+          "2026-08-12": { marks: { a: "absent", b: "absent" }, updatedAt: "2026-08-12T19:00:00.000Z" },
+        },
+      };
+      mount({ session: cancelled, drills });
+      expect(turnoutInput().value).toBe("");
+      expect(turnoutInput().placeholder).toBe("");
+      expect(warmupOptions().some((o) => o.includes("Rondo 4v2"))).toBe(true);
+      expect(warmupOptions().some((o) => o.includes("Cone weave"))).toBe(true);
+    });
+
     it("with no register and nothing typed, offers everything and suggests nothing", () => {
       mount({ session: baseSession(), drills });
       expect(turnoutInput().value).toBe("");
