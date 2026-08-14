@@ -1171,6 +1171,19 @@ describe("SessionRun attendance", () => {
     expect(container.querySelector(".run-attendance-summary").getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("shows a register taken on the laptop from the very first frame", () => {
+    // renderToStaticMarkup runs no effects, so this is the frame before reconciliation.
+    // The open/closed state was already derived from local+remote while the marks came
+    // from this device alone: the section rendered once as collapsed-and-"not taken",
+    // then flickered to "1 present" when the effect adopted what Drive held.
+    const s = { ...session(twoBlocks()), attendance: {
+      [DAY]: { marks: { [idOf("Alfie Ryan")]: PRESENT }, updatedAt: at("18:50") },
+    } };
+    const html = renderToStaticMarkup(<SessionRun {...base({ session: s, onAttendance: () => {} })} />);
+    expect(html).toContain("1 present");
+    expect(html).not.toMatch(/not taken/);
+  });
+
   it("opens and closes on its summary, like a block", () => {
     writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: PRESENT }, at("18:50"));
     mount(base());

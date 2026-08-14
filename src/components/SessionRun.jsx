@@ -23,7 +23,7 @@ import {
   counts, sessionProgress, mergeProgress, sameMarks, blockKey, migrateMarks,
 } from "../lib/progress.js";
 import {
-  readAttendance, localAttendance, writeAttendance, sessionAttendance, mergeAttendance,
+  localAttendance, writeAttendance, sessionAttendance, mergeAttendance,
   attendanceCounts,
 } from "../lib/attendance.js";
 import { currentPlayers } from "../lib/squads.js";
@@ -175,23 +175,25 @@ export default function SessionRun({
   const [marks, setMarks] = useState(readLocalMarks);
 
   // Tonight's register, kept exactly the way progress is (see lib/dayMarks.js, which both
-  // stores share): read from this device, reconciled below against what the session file
-  // holds. A tap is never allowed to wait on signal.
-  const readLocalAttendance = () => readAttendance(localStore(), session?.id, day);
-  const [attendanceMarks, setAttendanceMarks] = useState(readLocalAttendance);
-  // What the register would show at this instant, taking the session file into account as
-  // well as this device — used only to decide whether it has been taken yet, which the
-  // opening state below needs before the reconciliation effect has run.
+  // stores share): this device reconciled against what the session file holds. A tap is
+  // never allowed to wait on signal.
+  //
+  // The same merge the reconciliation effect below will settle on, run here so the first
+  // frame already shows it. Seeding the marks from this device alone while deriving the
+  // open/closed state from the merge made a register taken on the laptop render once as
+  // collapsed-and-"not taken" before the effect adopted it — one thing derived two ways,
+  // one frame apart.
   const registerAtOpen = () => mergeAttendance(
     localAttendance(localStore(), session?.id, day),
     sessionAttendance(session, day),
     Date.parse(now()),
   ).marks;
+  const [attendanceMarks, setAttendanceMarks] = useState(registerAtOpen);
   // Open when nothing is marked, closed once the register is taken: it is the first thing
   // you do at training and then not again. NOT recomputed from the marks on every render —
   // that would collapse the section under the coach's thumb on the first player he ticks.
   const [registerOpen, setRegisterOpen] = useState(
-    () => Object.keys(registerAtOpen()).length === 0,
+    () => Object.keys(attendanceMarks).length === 0,
   );
   // Blocks opened by hand to look back or peek ahead, independent of what is marked.
   // The current block is always open regardless of this set.
@@ -212,8 +214,11 @@ export default function SessionRun({
     // session's progress for one frame and then correcting it in an effect.
     setShownKey(progressKey);
     setMarks(readLocalMarks());
-    setAttendanceMarks(readLocalAttendance());
-    setRegisterOpen(Object.keys(registerAtOpen()).length === 0);
+    // One read for both, for the reason above: the register and whether it is open must
+    // never be derived from two different views of the same night.
+    const shownRegister = registerAtOpen();
+    setAttendanceMarks(shownRegister);
+    setRegisterOpen(Object.keys(shownRegister).length === 0);
     setOpened(new Set());
     setPicking(null);
   }
