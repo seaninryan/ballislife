@@ -1475,6 +1475,81 @@ describe("SessionRun attendance", () => {
   });
 });
 
+// The register collapsed correctly from the day it shipped — aria-expanded flipped, the
+// rows went away — and the owner never found it, because nothing about the summary row
+// looked tappable. Everything below is about making the affordance visible; none of it
+// changes what the toggle does.
+describe("SessionRun disclosure affordance", () => {
+  let container, root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+  });
+
+  const twoBlocks = () => [
+    { slot: "warmup", drill: "a", minutes: null, note: "" },
+    { slot: "skill", drill: "b", minutes: null, note: "" },
+  ];
+  const mount = () => {
+    root = createRoot(container);
+    act(() => {
+      root.render(
+        <SessionRun
+          session={session(twoBlocks())} drills={runDrills()} texts={{}}
+          today="2026-08-13" squad={u14a()} now={() => "2026-08-13T19:00:00.000Z"}
+        />,
+      );
+    });
+  };
+
+  it("marks the register's summary with a disclosure caret", () => {
+    mount();
+    const summary = container.querySelector(".run-attendance-summary");
+    expect(summary.querySelector(".disclosure")).not.toBeNull();
+  });
+
+  it("gives every block summary the same caret — they collapse the same way", () => {
+    // The blocks have always had exactly this problem; he is only used to them. One
+    // convention for "this row opens" beats two.
+    mount();
+    for (const summary of container.querySelectorAll(".run-block-summary")) {
+      expect(summary.querySelector(".disclosure")).not.toBeNull();
+    }
+  });
+
+  it("says nothing to a screen reader: aria-expanded on the button already does", () => {
+    mount();
+    expect(container.querySelector(".disclosure").getAttribute("aria-hidden")).toBe("true");
+    // And it adds no words to the summary, which several tests read as text.
+    expect(container.querySelector(".disclosure").textContent).toBe("");
+  });
+
+  it("turns to face the way the section is going, from the expanded state itself", () => {
+    // Driven off aria-expanded rather than a class of its own, so the caret cannot get out
+    // of step with what the button reports.
+    expect(styles).toMatch(/\[aria-expanded="true"\]\s+\.disclosure\s*\{[^}]*rotate/);
+    const rule = styles.match(/\.disclosure\s*\{([^}]*)\}/);
+    expect(rule).toBeTruthy();
+    // Drawn, not typed: a border triangle is not selectable, not announced, and not text.
+    expect(rule[1]).toMatch(/border-left:/);
+  });
+
+  it("does not animate under prefers-reduced-motion, and does not print", () => {
+    const reduced = styles.match(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\n\}/g) ?? [];
+    expect(reduced.some((b) => /\.disclosure[^}]*transition:\s*none/.test(b))).toBe(true);
+    const print = styles.slice(styles.indexOf("@media print"));
+    expect(print).toMatch(/\.disclosure\s*\{\s*display:\s*none/);
+  });
+});
+
 describe("SessionRun print stylesheet", () => {
   it("hides run-view controls and avoids breaking a block across a page", () => {
     expect(styles).toMatch(/@media print/);

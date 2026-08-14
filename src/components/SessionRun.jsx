@@ -32,6 +32,14 @@ import { localStore } from "../lib/browser.js";
 
 const STATE_LABEL = { [DONE]: "Done", [SKIPPED]: "Skipped" };
 
+// The caret on a summary row that opens and closes. aria-expanded on the button says so to
+// a screen reader and the content appearing says so afterwards, but neither says "tap me"
+// to someone who has never opened it — which is exactly how the register went unfound. It
+// is drawn in CSS and hidden from the accessibility tree, so it adds no words to a summary
+// and nothing is announced twice; which way it points comes from aria-expanded itself, so
+// it cannot get out of step with the button.
+const Disclosure = () => <span className="disclosure" aria-hidden="true" />;
+
 function BlockContent({ block, entry, today }) {
   if (block.missing) {
     return (
@@ -83,6 +91,7 @@ function RunBlock({
           onClick={onToggle}
           aria-expanded={isOpen}
         >
+          <Disclosure />
           {isCurrent ? <span className="run-block-now-badge">NOW</span> : null}
           <strong className="block-slot">{block.slot}</strong>
           {block.drill ? <span className="block-title">{block.drill.title}</span> : null}
@@ -401,6 +410,7 @@ export default function SessionRun({
         onClick={() => setRegisterOpen((open) => !open)}
         aria-expanded={registerOpen}
       >
+        <Disclosure />
         <strong className="block-slot">Attendance</strong>
         {registerTaken ? (
           // The one number the rest of the night uses: it is what the swap picker means by

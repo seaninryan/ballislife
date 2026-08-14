@@ -207,6 +207,24 @@ textarea, input, select {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer;
   flex: 1; min-width: 0;
 }
+/* The caret that says a summary row opens. Every one of these rows was already a button
+   with aria-expanded, and the owner still never found the register: nothing about the row
+   LOOKED tappable, and "the rows are gone" only tells you afterwards. A caret is the one
+   disclosure convention every phone user already reads.
+
+   Drawn as a border triangle rather than typed as a character: it stays out of the
+   summary's text (which several tests and the print sheet read), out of a selection, and
+   out of what a screen reader announces. Which way it points is driven off aria-expanded
+   on the button itself, so the mark cannot disagree with the state it is reporting. */
+.disclosure {
+  flex: 0 0 auto;
+  width: 0; height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid var(--dim);
+  transition: transform 120ms ease;
+}
+[aria-expanded="true"] .disclosure { transform: rotate(90deg); }
 .run-block-actions { margin-top: 10px; margin-bottom: 10px; }
 .banner.ok { background: #e2f3e8; color: #1a5c39; }
 
@@ -231,6 +249,9 @@ textarea, input, select {
    (coloured edge + badge text) still reads current without any motion at all. */
 @media (prefers-reduced-motion: reduce) {
   .run-block-now-badge { animation: none; }
+  /* The caret still turns, it just turns instantly: the direction is the signal, the
+     sweep is only decoration. */
+  .disclosure { transition: none; }
 }
 
 /* Choosing a drill, used mid-session to swap a block. The list scrolls inside itself
@@ -289,6 +310,9 @@ textarea, input, select {
   .run-controls button { display: none; }
   .run-block-actions { display: none; }
   .drill-picker { display: none; }
+  /* Nothing on paper opens, so a caret on every summary row is fifteen marks that mean
+     nothing there. */
+  .disclosure { display: none; }
   .run-block { break-inside: avoid; page-break-inside: avoid; }
 }
 
