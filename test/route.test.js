@@ -41,6 +41,27 @@ describe("parseHash", () => {
     expect(parseHash("#/session/x/nonsense")).toEqual({ view: "session", slug: "x" });
   });
 
+  it("reads the squad list", () => {
+    expect(parseHash("#/squads")).toEqual({ view: "squads", slug: null });
+  });
+
+  it("reads a single squad", () => {
+    expect(parseHash("#/squad/u14a")).toEqual({ view: "squad", slug: "u14a" });
+  });
+
+  it("treats a squad route with no id as the squad list", () => {
+    expect(parseHash("#/squad/")).toEqual({ view: "squads", slug: null });
+    expect(parseHash("#/squad")).toEqual({ view: "squads", slug: null });
+  });
+
+  it("decodes a percent-encoded squad id", () => {
+    expect(parseHash("#/squad/a%20b")).toEqual({ view: "squad", slug: "a b" });
+  });
+
+  it("ignores anything after a squad's id", () => {
+    expect(parseHash("#/squad/u14a/nonsense")).toEqual({ view: "squad", slug: "u14a" });
+  });
+
   it("reads a drill to read", () => {
     expect(parseHash("#/drill/rondo-4v2")).toEqual({ view: "read", slug: "rondo-4v2" });
   });
@@ -79,6 +100,12 @@ describe("formatHash", () => {
       .toBe("#/session/2026-08-12-pressing");
     expect(formatHash({ view: "run", slug: "2026-08-12-pressing" }))
       .toBe("#/session/2026-08-12-pressing/run");
+    expect(formatHash({ view: "squads" })).toBe("#/squads");
+    expect(formatHash({ view: "squad", slug: "u14a" })).toBe("#/squad/u14a");
+  });
+
+  it("falls back to the squad list for a squad view without a slug", () => {
+    expect(formatHash({ view: "squad", slug: null })).toBe("#/squads");
   });
 
   it("falls back to the session list for a run view without a slug", () => {
@@ -103,6 +130,9 @@ describe("formatHash", () => {
       { view: "session", slug: "a b" },
       { view: "run", slug: "2026-08-12-pressing" },
       { view: "run", slug: "a b" },
+      { view: "squads", slug: null },
+      { view: "squad", slug: "u14a" },
+      { view: "squad", slug: "a b" },
     ]) {
       expect(parseHash(formatHash(route))).toEqual(route);
     }
