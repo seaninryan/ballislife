@@ -6,6 +6,7 @@ import { parseDoc } from "../lib/frontmatter.js";
 import { splitSegments } from "../lib/markdown.js";
 import { renderProse } from "../lib/prose.js";
 import { readTicks, writeTicks, toggle } from "../lib/checklist.js";
+import { localStore } from "../lib/browser.js";
 import PitchDiagram from "./PitchDiagram.jsx";
 
 // The pitch block's line within the FILE = frontmatter lines + its line in the body.
@@ -15,7 +16,6 @@ function frontmatterLines(source, body) {
   return source.slice(0, consumed).split("\n").length - 1;
 }
 
-const storage = () => (typeof window !== "undefined" ? window.localStorage : null);
 
 // `interactive` opts a drill's checklists into being tickable. It requires `slug` and
 // `today` — the tick store is keyed by both, per lib/checklist.js. Ticks are NEVER
@@ -57,7 +57,7 @@ export default function DrillPreview({ source = "", interactive = false, slug, t
   // which is how the boxes end up clear again without anyone clearing them.
   useEffect(() => {
     if (!interactive || !containerRef.current) return;
-    const ticked = readTicks(storage(), slug, today);
+    const ticked = readTicks(localStore(), slug, today);
     for (const box of containerRef.current.querySelectorAll("input[data-tick]")) {
       if (ticked.has(Number(box.dataset.tick))) box.checked = true;
     }
@@ -73,8 +73,8 @@ export default function DrillPreview({ source = "", interactive = false, slug, t
     const target = e.target;
     if (target.tagName !== "INPUT" || target.type !== "checkbox" || target.dataset.tick === undefined) return;
     const index = Number(target.dataset.tick);
-    const current = readTicks(storage(), slug, today);
-    writeTicks(storage(), slug, today, toggle(current, index));
+    const current = readTicks(localStore(), slug, today);
+    writeTicks(localStore(), slug, today, toggle(current, index));
   }, [slug, today]);
 
   useEffect(() => {

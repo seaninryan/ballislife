@@ -64,7 +64,9 @@ export default function Catalogue({
   onOpen, onBack, duplicateFolders,
   editor, onEdit, onEditBack, onDelete, onKeepMine, onReload,
   onStartEdit, onCreate,
-  mode = "drills", onModeChange,
+  // Which section to render. The Drills/Sessions switch itself moved to the header, which
+  // is on screen everywhere; this only decides what goes under it.
+  mode = "drills",
   sessions = [], selectedSession, onOpenSession, onCreateSession,
   onSessionChange, onSessionBack, onDeleteSession,
   sessionsStatus, sessionsError, sessionsConflicts = [], sessionsResolving = [],
@@ -289,23 +291,6 @@ export default function Catalogue({
           Drive to look like <strong>2026-08-13</strong> and reload.
         </div>
       ) : null}
-
-      <div className="row">
-        <button
-          type="button"
-          className={`chip-button${mode !== "sessions" ? " active" : ""}`}
-          onClick={() => onModeChange?.("drills")}
-        >
-          Drills
-        </button>
-        <button
-          type="button"
-          className={`chip-button${mode === "sessions" ? " active" : ""}`}
-          onClick={() => onModeChange?.("sessions")}
-        >
-          Sessions
-        </button>
-      </div>
 
       {mode === "sessions" ? (
         <SessionList

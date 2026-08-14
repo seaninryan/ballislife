@@ -1415,3 +1415,67 @@ describe("App session run mode", () => {
     expect(location.hash).toBe("#/session/s1");
   });
 });
+
+// The Drills/Sessions switch used to be rendered by the browse view alone, so it could
+// only ever be tapped from the browse view. In the header it is one tap away from inside
+// the editor, the builder and the run view — the states it never had to leave before.
+describe("App header", () => {
+  it("goes home from the drill editor, leaving it rather than stranding the owner in it", async () => {
+    drive.readDrill.mockResolvedValue({ text: "---\ntitle: Alpha\n---\n\nAlpha body\n", modifiedTime: "T" });
+    await mount();
+    await openEditFor("Alpha");
+    expect(container.querySelector("textarea")).not.toBeNull();
+    await act(async () => { findButton("ballislife").click(); });
+    expect(container.querySelector("textarea")).toBe(null);
+    expect(container.textContent).toContain("Bravo"); // the grid is back
+    expect(location.hash).toBe("#/");
+  });
+
+  it("goes home from the run view, and the run view does not come back", async () => {
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: session("s1", "2026-08-12", [
+      { slot: "warmup", drill: "a", minutes: null, note: "" },
+      { slot: "skill", drill: null, minutes: null, note: "" },
+      { slot: "tactical", drill: null, minutes: null, note: "" },
+      { slot: "match", drill: null, minutes: null, note: "" },
+      { slot: "fun", drill: null, minutes: null, note: "" },
+    ]) }));
+    drive.readDrill.mockResolvedValue({ text: "---\ntitle: Alpha\n---\n\nbody a\n", modifiedTime: "T" });
+    await mount();
+    await openSession("2026-08-12");
+    await act(async () => { findButton("Run this session").click(); });
+    expect(container.textContent).toContain("body a");
+    await act(async () => { findButton("ballislife").click(); });
+    expect(container.textContent).not.toContain("body a");
+    expect(container.textContent).toContain("Bravo");
+    expect(location.hash).toBe("#/");
+  });
+
+  it("switches to Sessions from inside a drill, not only from the grid", async () => {
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: session("s1", "2026-08-12") }));
+    drive.readDrill.mockResolvedValue({ text: "---\ntitle: Alpha\n---\n\nAlpha body\n", modifiedTime: "T" });
+    await mount();
+    await openCard("Alpha");
+    expect(container.textContent).toContain("Alpha body");
+    await act(async () => { findButton("Sessions").click(); });
+    expect(container.textContent).not.toContain("Alpha body");
+    expect(container.textContent).toContain("2026-08-12");
+  });
+
+  it("says on the Sessions control that a session is under way, wherever the owner is", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: {
+      ...session("s1", today, [
+        { slot: "warmup", drill: "a", minutes: null, note: "" },
+        { slot: "skill", drill: "b", minutes: null, note: "" },
+      ]),
+      // Marked on the other device: one block done, one still to go.
+      progress: { [today]: { marks: { warmup: "done" }, updatedAt: `${today}T19:00:00.000Z` } },
+    } }));
+    drive.readDrill.mockResolvedValue({ text: "---\ntitle: Alpha\n---\n\nAlpha body\n", modifiedTime: "T" });
+    await mount();
+    // On the grid, nowhere near the session — which is the point.
+    expect(findButton("Sessions").querySelector(".nav-dot")).not.toBeNull();
+    await openCard("Alpha");
+    expect(findButton("Sessions").querySelector(".nav-dot")).not.toBeNull();
+  });
+});

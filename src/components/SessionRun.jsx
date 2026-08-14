@@ -21,8 +21,8 @@ import {
   DONE, SKIPPED, readProgress, localProgress, writeProgress, mark, reopen, currentIndex,
   counts, sessionProgress, mergeProgress, sameMarks, blockKey, migrateMarks,
 } from "../lib/progress.js";
+import { localStore } from "../lib/browser.js";
 
-const storage = () => (typeof window !== "undefined" ? window.localStorage : null);
 
 const STATE_LABEL = { [DONE]: "Done", [SKIPPED]: "Skipped" };
 
@@ -160,7 +160,7 @@ export default function SessionRun({
   // keyed by block index, and a mark must land on the drill it was made against even if
   // the plan has been reordered since. One helper per store so the migration cannot be
   // forgotten at one of the four places a store is read.
-  const readLocalMarks = () => migrateMarks(readProgress(storage(), session?.id, day), blocks);
+  const readLocalMarks = () => migrateMarks(readProgress(localStore(), session?.id, day), blocks);
   const readSide = (side) => (side ? { ...side, marks: migrateMarks(side.marks, blocks) } : side);
 
   const [marks, setMarks] = useState(readLocalMarks);
@@ -201,7 +201,7 @@ export default function SessionRun({
   useEffect(() => {
     // localProgress, not readProgress: null here means this device has nothing for tonight,
     // which must not be confused with this device having deliberately cleared everything.
-    const local = readSide(localProgress(storage(), session?.id, day));
+    const local = readSide(localProgress(localStore(), session?.id, day));
     // `now` goes in so mergeProgress can disbelieve a stamp far in the future, and so a
     // test with an injected clock is judged against that clock rather than the real one.
     const winner = mergeProgress(local, remote, Date.parse(now()));
@@ -209,7 +209,7 @@ export default function SessionRun({
       // The other device is ahead. Adopt it here, storage included, so the rest of
       // tonight works with no signal at all.
       if (!sameMarks(winner.marks, local?.marks ?? {})) {
-        writeProgress(storage(), session?.id, day, winner.marks, winner.updatedAt);
+        writeProgress(localStore(), session?.id, day, winner.marks, winner.updatedAt);
       }
       if (!sameMarks(winner.marks, marks)) setMarks(winner.marks);
       return;
@@ -236,7 +236,7 @@ export default function SessionRun({
   const persist = (next) => {
     const stamp = now();
     setMarks(next);
-    writeProgress(storage(), session?.id, day, next, stamp);
+    writeProgress(localStore(), session?.id, day, next, stamp);
     onProgress?.(day, next, stamp);
   };
 

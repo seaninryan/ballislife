@@ -280,3 +280,28 @@ textarea, input, select {
   .drill-picker { display: none; }
   .run-block { break-inside: avoid; page-break-inside: avoid; }
 }
+
+/* The only chrome on every screen. Wraps rather than scrolls: at 360px the version drops
+   under the nav instead of pushing it off the edge. */
+.app-header {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 10px 0 12px;
+}
+.app-home {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  background: none; border: none; padding: 4px 0; color: var(--accent);
+}
+.app-name { font-size: 20px; font-weight: 700; color: var(--text); }
+.app-nav { flex: 1; }
+.app-version { margin-left: auto; }
+/* A session under way, said twice: the dot catches the eye, the button's aria-label says
+   it in words. Colour alone is no use in bright sun at the side of a pitch. */
+.nav-dot {
+  display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%;
+  background: var(--accent); vertical-align: 1px;
+  animation: nav-dot-pulse 1.8s ease-in-out infinite;
+}
+.chip-button.active .nav-dot { background: #fff; }
+@keyframes nav-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .nav-dot { animation: none; } }
+@media print { .app-header { display: none; } }

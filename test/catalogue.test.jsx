@@ -91,6 +91,10 @@ describe("Catalogue", () => {
 });
 
 describe("Catalogue sessions switch", () => {
+  // The Drills/Sessions switch itself now lives in the header, which is on screen
+  // everywhere — that it offers both sections and marks the current one is asserted in
+  // test/header.test.jsx. What is left here is Catalogue's half: which section it renders
+  // for a given `mode`.
   it("defaults to the Drills view, showing the grid", () => {
     const drills = [
       { id: "a", slug: "rondo-4v2", title: "Rondo 4v2", category: "warmup", minutes: 10,
@@ -98,8 +102,9 @@ describe("Catalogue sessions switch", () => {
     ];
     const html = render({ status: "ready", drills });
     expect(html).toContain("Rondo 4v2");
-    expect(html).toMatch(/drills/i);
-    expect(html).toMatch(/sessions/i);
+    expect(html).toMatch(/new drill/i);
+    // Not the session list, which is what mode: "sessions" would have rendered.
+    expect(html).not.toMatch(/no sessions/i);
   });
 
   it("shows the session list when mode is sessions", () => {

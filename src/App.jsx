@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Catalogue from "./components/Catalogue.jsx";
+import Header from "./components/Header.jsx";
 import { initAuth, isSignedIn, signIn, signOut, startTokenKeepAlive, getAccessToken } from "./lib/driveAuth.js";
 import { aboutEmail } from "./lib/driveApi.js";
 import { isOwner } from "./lib/owner.js";
@@ -9,7 +10,8 @@ import {
 } from "./lib/drive.js";
 import { openEditor, reduce, shouldSave } from "./lib/editor.js";
 import { emptySession, resolveBlocks, setBlock } from "./lib/sessions.js";
-import { withSessionProgress } from "./lib/progress.js";
+import { withSessionProgress, activeSessionIds } from "./lib/progress.js";
+import { localStore, todayIso } from "./lib/browser.js";
 import { parseHash, formatHash } from "./lib/route.js";
 
 const SAVE_DEBOUNCE_MS = 900;
@@ -631,17 +633,21 @@ export default function App() {
     }
   }, [runSessionId]);
 
+  // Both directions now leave EVERY view, not just the one the other section could be
+  // reached from. These used to be reachable only from the browse view, so "Drills" never
+  // had to close a drill or an editor and "Sessions" never had a builder edit to flush;
+  // from the header they are one tap away from inside the editor, the builder and the run
+  // view, and each of those closes through the path that flushes its pending save.
   const onModeChange = useCallback((next) => {
     runRequestSeq.current++; // leaving run mode, if it was open, stales any in-flight fetch
     setRunSessionId(null);
+    closeEditor();
+    setSelected(null);
+    closeSessionBuilder();
     if (next === "sessions") {
-      closeEditor();
-      setSelected(null);
-      setSelectedSessionId(null);
       setMode("sessions");
       location.hash = formatHash({ view: "sessions" });
     } else {
-      closeSessionBuilder();
       setMode("drills");
       location.hash = formatHash({ view: "browse" });
     }
@@ -785,6 +791,9 @@ export default function App() {
   }, [status, drills, resolveRoute]);
 
   const sessionsList = Object.values(sessionsState.data.sessions);
+  // Computed here rather than in either consumer: the header and the session list must
+  // never disagree about which plan is under way, and this is the render that owns both.
+  const activeIds = activeSessionIds(sessionsList, todayIso(), localStore());
   // "Keep mine" writes ONE file, so every conflict is offered with the name of the plan it
   // is about — on whatever screen the owner is on, since a conflict he never sees is a plan
   // that never saves.
@@ -798,10 +807,17 @@ export default function App() {
 
   return (
     <div className="page">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1 style={{ margin: "10px 0" }}>ballislife</h1>
-        <span className="dim">v{__APP_VERSION__}</span>
-      </div>
+      <Header
+        mode={mode}
+        onModeChange={onModeChange}
+        // Home is the Drills path, not goBrowse: goBrowse only closes the drill editor, so
+        // from the run view or a half-edited plan it would change the URL and leave the
+        // builder or the run view on screen with its edit unflushed. onModeChange("drills")
+        // closes all three and flushes both saves on the way out.
+        onHome={() => onModeChange("drills")}
+        activeCount={activeIds.length}
+        version={__APP_VERSION__}
+      />
       <Catalogue
         status={status === "starting" ? "loading" : status}
         drills={drills}
@@ -826,7 +842,6 @@ export default function App() {
         onStartEdit={openEdit}
         onCreate={onCreate}
         mode={mode}
-        onModeChange={onModeChange}
         sessions={sessionsList}
         selectedSession={selectedSession}
         onOpenSession={onOpenSession}
