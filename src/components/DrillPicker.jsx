@@ -2,9 +2,9 @@
 // Choose a drill for a slot. Presentational: it is handed the catalogue and what the
 // slot wants, and reports the drill picked — it never touches a session or Drive.
 //
-// State here is only view state (search text, order, category toggle) and is deliberately
-// NOT lifted: closing the picker and reopening it should start clean rather than remember
-// last night's search.
+// State here is only view state (search text, order, the two filter toggles) and is
+// deliberately NOT lifted: closing the picker and reopening it should start clean rather
+// than remember last night's search.
 import React, { useState } from "react";
 import { rankDrills, SORTS } from "../lib/picker.js";
 import PitchDiagram from "./PitchDiagram.jsx";
@@ -15,9 +15,17 @@ export default function DrillPicker({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("relevance");
   const [sameCategoryOnly, setSameCategoryOnly] = useState(false);
+  // On by default — sizing the list to who is actually here is the whole reason the swap
+  // picker knows the turnout. But escapable, and labelled with the number it is using: the
+  // turnout is derived from a register that may be being taken while this picker is open,
+  // so it is allowed to be momentarily wrong, and a wrong one must never be able to leave
+  // the coach staring at an empty list with no way out of it.
+  const [fitsTurnoutOnly, setFitsTurnoutOnly] = useState(true);
+  const hasTurnout = Number.isFinite(turnout);
 
   const entries = rankDrills(drills, {
-    slot, tags, turnout, query, exclude, sort, sameCategoryOnly,
+    slot, tags, turnout: fitsTurnoutOnly ? turnout : undefined,
+    query, exclude, sort, sameCategoryOnly,
   });
 
   return (
@@ -47,13 +55,26 @@ export default function DrillPicker({
             {" "}only {slot} drills
           </label>
         ) : null}
+        {hasTurnout ? (
+          <label className="dim drill-picker-fits">
+            <input
+              type="checkbox"
+              checked={fitsTurnoutOnly}
+              onChange={(e) => setFitsTurnoutOnly(e.target.checked)}
+            />
+            {" "}only drills that fit {turnout}
+          </label>
+        ) : null}
         {onCancel ? <button type="button" onClick={onCancel}>Cancel</button> : null}
       </div>
 
       {entries.length === 0 ? (
+        // Naming every filter that is on: an empty list otherwise reads as "there is no
+        // such drill", and the toggle that would bring them back never gets looked for.
         <p className="dim">
           No drill matches{query ? ` “${query}”` : ""}
-          {sameCategoryOnly && slot ? ` in ${slot}` : ""}.
+          {sameCategoryOnly && slot ? ` in ${slot}` : ""}
+          {fitsTurnoutOnly && hasTurnout ? ` that fits ${turnout}` : ""}.
         </p>
       ) : (
         <ul className="drill-picker-list">

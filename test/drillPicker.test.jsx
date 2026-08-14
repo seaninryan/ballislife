@@ -87,11 +87,45 @@ describe("DrillPicker", () => {
     expect(titles()).toEqual(["High knees"]);
   });
 
+  // The turnout the picker is handed is derived from a register that is being taken WHILE
+  // the picker is open: one arrival ticked reads as a turnout of one. So the number is
+  // allowed to be momentarily wrong, and the way out of it has to be on this screen.
+  it("hides the drills that do not fit the turnout, by default", () => {
+    mount({ slot: "match", turnout: 4 });
+    expect(titles()).not.toContain("SSG 6v6"); // 12+
+  });
+
+  it("names the number it is filtering by, so a wrong one can be recognised", () => {
+    mount({ slot: "match", turnout: 4 });
+    expect(container.querySelector(".drill-picker-fits").textContent).toContain("4");
+  });
+
+  it("lets the turnout filter be switched off, so a wrong turnout cannot empty the list", () => {
+    mount({ slot: "match", turnout: 4 });
+    const box = container.querySelector(".drill-picker-fits input[type=checkbox]");
+    expect(box.checked).toBe(true);
+    act(() => { box.click(); });
+    expect(titles()).toContain("SSG 6v6");
+  });
+
+  it("offers no turnout toggle when there is no turnout to filter by", () => {
+    mount({ slot: "match" });
+    expect(container.querySelector(".drill-picker-fits")).toBeNull();
+  });
+
   it("says so when nothing matches, rather than showing an empty box", () => {
     mount({ slot: "warmup" });
     setInput(container.querySelector(".drill-picker-search"), "zzzz");
     expect(options()).toHaveLength(0);
     expect(container.textContent).toMatch(/no drill/i);
+  });
+
+  it("blames the turnout when the turnout is what emptied the list", () => {
+    // Otherwise the only honest reading of an empty picker is "there is no such drill",
+    // and the toggle that would bring them back never gets looked for.
+    mount({ slot: "match", drills: [d("ssg", "SSG 6v6", "match", 25, [], "12+")], turnout: 4 });
+    expect(options()).toHaveLength(0);
+    expect(container.querySelector(".drill-picker").textContent).toMatch(/fits 4/);
   });
 
   it("marks the shared tags and the matching category, so the order is explicable", () => {
