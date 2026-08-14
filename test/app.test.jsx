@@ -1486,3 +1486,29 @@ describe("App header", () => {
     expect(row.textContent).toContain("Resume");
   });
 });
+
+// Before sign-in there is nothing to navigate to and nothing to be told, so the screen is
+// the button and nothing else — no header, no sections, no version. Everything the header
+// offers is about a catalogue that has not been loaded yet.
+describe("App signed out", () => {
+  beforeEach(() => { auth.isSignedIn.mockReturnValue(false); });
+
+  it("shows the sign-in control and nothing else", async () => {
+    await mount();
+    const buttons = [...container.querySelectorAll("button")];
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain("Sign in");
+    // No way home, no sections, no version: the header is not rendered at all.
+    expect(container.querySelector(".app-header")).toBe(null);
+    expect(container.textContent).not.toContain("ball.is.life");
+    expect(container.textContent).not.toContain("test"); // __APP_VERSION__
+  });
+
+  it("signs in from it", async () => {
+    auth.signIn.mockResolvedValue(true);
+    await mount();
+    await act(async () => { findButton("Sign in").click(); });
+    expect(auth.signIn).toHaveBeenCalled();
+    expect(container.textContent).toContain("Alpha");
+  });
+});

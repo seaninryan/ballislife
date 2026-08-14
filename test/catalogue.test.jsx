@@ -8,9 +8,14 @@ import { openEditor } from "../src/lib/editor.js";
 const render = (props) => renderToStaticMarkup(<Catalogue {...props} />);
 
 describe("Catalogue", () => {
-  it("offers sign-in when signed out", () => {
+  it("offers sign-in when signed out, and holds nothing else", () => {
     const html = render({ status: "signed-out" });
     expect(html).toContain("Sign in");
+    // The centring wrapper, not a card: this screen is the button alone, positioned
+    // against the viewport (see .signin-screen).
+    expect(html).toContain("signin-screen");
+    expect(html).not.toContain("card");
+    expect(html.match(/<button/g)).toHaveLength(1);
   });
 
   it("says so while loading", () => {

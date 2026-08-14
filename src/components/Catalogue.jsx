@@ -77,9 +77,12 @@ export default function Catalogue({
   sessionsMigrated = 0, sessionsFailed = [], sessionsUnmigrated = [], sessionsLoadError,
   runSession, runTexts, onOpenRun, onRunBack, onRunSwap, onRunProgress,
 }) {
+  // The sign-in screen is the button and nothing else, centred in the viewport rather
+  // than in the page flow — App renders this one outside `.page`, so only the body's
+  // safe-area padding has to be taken off the height.
   if (status === "signed-out") {
     return (
-      <div className="card">
+      <div className="signin-screen">
         <button className="primary" onClick={onSignIn}>Sign in with Google</button>
       </div>
     );

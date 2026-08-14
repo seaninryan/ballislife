@@ -805,6 +805,11 @@ export default function App() {
   const selectedSession = selectedSessionId ? sessionsState.data.sessions[selectedSessionId] ?? null : null;
   const runSession = runSessionId ? sessionsState.data.sessions[runSessionId] ?? null : null;
 
+  // Nothing but the button before sign-in. The header is deliberately outside this
+  // return: its way home, its sections and the version are all about a catalogue that
+  // has not been loaded yet, and the version being invisible here is the accepted cost.
+  if (status === "signed-out") return <Catalogue status="signed-out" onSignIn={onSignIn} />;
+
   return (
     <div className="page">
       <Header

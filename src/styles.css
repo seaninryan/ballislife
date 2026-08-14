@@ -22,6 +22,17 @@ textarea, input, select {
   border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;
 }
 .page { padding: 0 10px 30px; }
+/* The whole sign-in screen. Centred in the VIEWPORT, so the button sits under the coach's
+   thumb rather than at the top of an empty page — dvh because a phone's toolbars make vh
+   taller than what is actually on screen, with vh first for anything that lacks it. The
+   body's safe-area padding comes off the height, or the two together overflow and the
+   centre drifts up. Rendered outside .page, so there is no page padding to allow for. */
+.signin-screen {
+  display: flex; align-items: center; justify-content: center;
+  min-height: calc(100vh - env(safe-area-inset-bottom));
+  min-height: calc(100dvh - env(safe-area-inset-bottom));
+  padding: 10px;
+}
 .card {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 10px; padding: 10px; margin: 8px 0;
