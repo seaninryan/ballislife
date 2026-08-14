@@ -11,6 +11,7 @@ import {
 import {
   readSessionsIndex, diffSessionsIndex, applySessionsDiff, sessionsFromIndex,
 } from "./sessionsIndex.js";
+import { parseSquads, EMPTY_SQUADS } from "./squads.js";
 
 export const FOLDER_NAME = "BallIsLife";
 export const INDEX_NAME = "index.json";
@@ -19,6 +20,7 @@ export const SESSIONS_NAME = "sessions.json";
 // Drive: it is the only copy of every plan as it stood before the split, and only he
 // should decide when to throw it away.
 export const SESSIONS_BACKUP_NAME = "sessions-before-split.json";
+export const SQUADS_NAME = "squads.json";
 
 // One silent-reauth retry, then give up. Ported from fancystats' saveWithRetry: an
 // expired token is the common failure and is invisible to the user when it works.
@@ -619,6 +621,82 @@ async function findLandedSessionFile(id, folder) {
     return matches.length === 1 ? matches[0] : null;
   } catch {
     return null;
+  }
+}
+
+// -- squads: one authoritative file ------------------------------------------
+// Sessions went per-file because they arrive at two a week and every Done tap rewrote all
+// of them. Neither pressure applies here — a handful of squads, each a page of names,
+// edited a few times a season — so `squads.json` is one file with no index and no cache.
+// It needs no module state of its own either: the file id comes back from the load, and
+// its baseline lives in `known` with every other file's, so forgetDriveState already
+// clears everything squads have.
+
+// -> { squads, fileId, modifiedTime, failed }
+//    squads: { [id]: squad }, empty when there is no file yet
+//    failed: null, or { reason, error } when a file EXISTS but could not be read
+//
+// The distinction is the whole point. An unreadable file coming back as `{}` is how a
+// corrupt sessions.json nearly lost every plan: the caller could not tell "no squads yet"
+// from "I could not read them", and wrote over what was there. So say which, and let the
+// caller refuse to save.
+export async function loadSquads(folder) {
+  return withRetry(async () => {
+    const token = getAccessToken();
+    const files = await api.listFiles(token, folder);
+    const file = files.find((f) => f.name === SQUADS_NAME) ?? null;
+    if (!file) return { squads: {}, fileId: null, modifiedTime: null, failed: null };
+
+    // Whatever Drive just reported is true of the file whether or not its contents parse,
+    // and `known` is the one authority on it.
+    known.set(file.id, file.modifiedTime);
+    const found = { fileId: file.id, modifiedTime: file.modifiedTime };
+
+    let raw;
+    try {
+      raw = await api.readFile(token, file.id);
+    } catch (error) {
+      // A 401 must still reach withRetry, which reauths and retries the load. Swallowed
+      // here, an expired token would look exactly like a corrupt squads.json and hold
+      // every save for a squad list that is perfectly fine.
+      if (error?.code === 401) throw error;
+      return { squads: {}, ...found, failed: { reason: "read", error } };
+    }
+    const parsed = parseSquads(raw);
+    if (!parsed.ok) return { squads: {}, ...found, failed: { reason: parsed.reason, error: null } };
+    return { squads: parsed.squads, ...found, failed: null };
+  });
+}
+
+// -> { ok: true, fileId, modifiedTime } | { ok: false, conflict: true, modifiedTime }
+//    | { ok: false, error }
+//
+// `fileId` is null until the file exists, so the first save creates it — no empty
+// squads.json is ever written just to have one. `baseModifiedTime` is what the caller
+// loaded; if Drive has since reported something else we refuse rather than clobber, and
+// hand back the current value so the caller can offer to reload.
+export async function saveSquads({ folder, fileId, data, baseModifiedTime }) {
+  const current = fileId ? known.get(fileId) : undefined;
+  if (current !== undefined && baseModifiedTime !== current) {
+    return { ok: false, conflict: true, modifiedTime: current };
+  }
+  // Spread EMPTY_SQUADS rather than repeat the version: squads.js owns the file's shape,
+  // and a version written here that parseSquads did not expect would be unreadable to us.
+  const body = JSON.stringify({ ...EMPTY_SQUADS, squads: data }, null, 2);
+  try {
+    return await withRetry(async () => {
+      const token = getAccessToken();
+      if (!fileId) {
+        const created = await api.createFile(token, folder, SQUADS_NAME, body);
+        known.set(created.id, created.modifiedTime);
+        return { ok: true, fileId: created.id, modifiedTime: created.modifiedTime };
+      }
+      const modifiedTime = await api.writeFile(token, fileId, body);
+      known.set(fileId, modifiedTime);
+      return { ok: true, fileId, modifiedTime };
+    });
+  } catch (error) {
+    return { ok: false, error };
   }
 }
 

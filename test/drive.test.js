@@ -4,7 +4,7 @@ import * as auth from "../src/lib/driveAuth.js";
 import {
   loadCatalogue, saveDrill, noteModifiedTime, knownModifiedTime, readDrill, FOLDER_NAME, INDEX_NAME,
   createDrill, deleteDrill, loadSessions, saveSession, deleteSession, forgetDriveState,
-  SESSIONS_NAME, SESSIONS_BACKUP_NAME,
+  SESSIONS_NAME, SESSIONS_BACKUP_NAME, loadSquads, saveSquads, SQUADS_NAME,
 } from "../src/lib/drive.js";
 
 vi.mock("../src/lib/driveApi.js");
@@ -950,6 +950,113 @@ describe("migrating the sessions.json blob", () => {
     expect(unmigrated).toEqual([
       expect.objectContaining({ id: "13/08/2026", reason: "unsafe-id" }),
     ]);
+  });
+});
+
+describe("loadSquads", () => {
+  const squadsFile = (squads) => JSON.stringify({ version: 1, squads });
+
+  it("reports no squads, and writes nothing, when there is no file yet", async () => {
+    api.listFiles.mockResolvedValue([{ id: "a", name: "a.md", modifiedTime: "T1" }]);
+    const r = await loadSquads("F1");
+    expect(r).toEqual({ squads: {}, fileId: null, modifiedTime: null, failed: null });
+    // A first load must not create the file: there is nothing to put in it, and a squads.json
+    // full of nothing is indistinguishable from one that lost its contents.
+    expect(api.createFile).not.toHaveBeenCalled();
+    expect(api.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("reads the squads, and the baseline a later save will need", async () => {
+    api.listFiles.mockResolvedValue([{ id: "sq", name: SQUADS_NAME, modifiedTime: "T5" }]);
+    api.readFile.mockResolvedValue(squadsFile({ u14a: { id: "u14a", name: "U14A Boys", players: [] } }));
+    const r = await loadSquads("F1");
+    expect(Object.keys(r.squads)).toEqual(["u14a"]);
+    expect(r).toMatchObject({ fileId: "sq", modifiedTime: "T5", failed: null });
+    expect(knownModifiedTime("sq")).toBe("T5");
+  });
+
+  it("says a file it could not download is unreadable, NOT empty", async () => {
+    // An unreadable file coming back as {} is exactly how a corrupt sessions.json nearly
+    // lost every plan: the caller could not tell "no squads" from "I could not read it".
+    api.listFiles.mockResolvedValue([{ id: "sq", name: SQUADS_NAME, modifiedTime: "T5" }]);
+    api.readFile.mockRejectedValue(Object.assign(new Error("flaky"), { code: 500 }));
+    const r = await loadSquads("F1");
+    expect(r.squads).toEqual({});
+    expect(r.failed).toMatchObject({ reason: "read" });
+    expect(r.fileId).toBe("sq");
+    // Reporting it is all the load does. Whether to overwrite is the caller's decision, so
+    // nothing here may touch the file.
+    expect(api.writeFile).not.toHaveBeenCalled();
+    expect(api.createFile).not.toHaveBeenCalled();
+  });
+
+  it("says a file whose JSON is broken is unreadable too, and why", async () => {
+    api.listFiles.mockResolvedValue([{ id: "sq", name: SQUADS_NAME, modifiedTime: "T5" }]);
+    api.readFile.mockResolvedValue("{");
+    const r = await loadSquads("F1");
+    expect(r.squads).toEqual({});
+    expect(r.failed).toMatchObject({ reason: "parse" });
+    expect(api.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("lets a 401 reach the retry rather than reporting the file unreadable", async () => {
+    // Swallowed here, an expired token would look exactly like a corrupt squads.json and
+    // hold every save for a squad list that is perfectly fine.
+    api.listFiles.mockResolvedValue([{ id: "sq", name: SQUADS_NAME, modifiedTime: "T5" }]);
+    api.readFile
+      .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
+      .mockResolvedValue(squadsFile({ u12: { id: "u12", name: "U12s", players: [] } }));
+    const r = await loadSquads("F1");
+    expect(r.failed).toBe(null);
+    expect(Object.keys(r.squads)).toEqual(["u12"]);
+    expect(auth.ensureFreshToken).toHaveBeenCalled();
+  });
+});
+
+describe("saveSquads", () => {
+  const data = { u14a: { id: "u14a", name: "U14A Boys", players: [{ id: "a", name: "A" }] } };
+
+  it("creates the file on the first save, and remembers its baseline", async () => {
+    api.createFile.mockResolvedValue({ id: "sq", modifiedTime: "T1" });
+    const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+    expect(r).toEqual({ ok: true, fileId: "sq", modifiedTime: "T1" });
+    const [, folder, name, body] = api.createFile.mock.calls[0];
+    expect([folder, name]).toEqual(["F1", SQUADS_NAME]);
+    expect(JSON.parse(body)).toEqual({ version: 1, squads: data });
+    expect(knownModifiedTime("sq")).toBe("T1");
+  });
+
+  it("writes the existing file and returns the new modifiedTime", async () => {
+    noteModifiedTime("sq", "T1");
+    api.writeFile.mockResolvedValue("T2");
+    const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
+    expect(r).toEqual({ ok: true, fileId: "sq", modifiedTime: "T2" });
+    expect(knownModifiedTime("sq")).toBe("T2");
+  });
+
+  it("refuses to overwrite a file that moved underneath it", async () => {
+    noteModifiedTime("sq", "T2");
+    const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
+    expect(r).toEqual({ ok: false, conflict: true, modifiedTime: "T2" });
+    expect(api.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed write rather than throwing", async () => {
+    noteModifiedTime("sq", "T1");
+    const boom = Object.assign(new Error("offline"), { code: 500 });
+    api.writeFile.mockRejectedValue(boom);
+    const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
+    expect(r).toEqual({ ok: false, error: boom });
+  });
+
+  it("retries once on a 401", async () => {
+    noteModifiedTime("sq", "T1");
+    api.writeFile
+      .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
+      .mockResolvedValue("T2");
+    const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
+    expect(r).toMatchObject({ ok: true, modifiedTime: "T2" });
+    expect(api.writeFile).toHaveBeenCalledTimes(2);
   });
 });
 
