@@ -12,41 +12,48 @@ const fakeStorage = () => {
 };
 
 describe("states", () => {
-  it("has three, and unmarked is not one of them", () => {
+  it("has three, and no mark is one of them: absent", () => {
     expect(STATES).toEqual([PRESENT, ABSENT, EXCUSED]);
   });
 });
 
+// The register is taken by exception: everyone starts absent and is ticked as they arrive
+// or send word. So an unmarked player is not a fourth thing to count — he is absent, which
+// is exactly what the screen shows for him.
 describe("attendanceCounts", () => {
-  it("counts each state, with everyone unmarked to begin with", () => {
+  it("counts everyone as absent to begin with", () => {
     expect(attendanceCounts({}, P("a", "b", "c")))
-      .toEqual({ present: 0, absent: 0, excused: 0, unmarked: 3 });
+      .toEqual({ present: 0, absent: 3, excused: 0 });
   });
 
-  it("counts a player missing from the map as unmarked, not as absent", () => {
-    // The whole reason unmarked is a fourth thing: a register nobody took must not read as
-    // twenty absences.
+  it("counts a player missing from the map as absent, like the screen shows him", () => {
     expect(attendanceCounts({ a: PRESENT, b: ABSENT }, P("a", "b", "c")))
-      .toEqual({ present: 1, absent: 1, excused: 0, unmarked: 1 });
+      .toEqual({ present: 1, absent: 2, excused: 0 });
+  });
+
+  it("adds up to the squad, so the line is self-checking", () => {
+    const players = P("a", "b", "c", "d");
+    const { present, absent, excused } = attendanceCounts({ a: PRESENT, b: EXCUSED }, players);
+    expect(present + absent + excused).toBe(players.length);
   });
 
   it("ignores a mark for someone not in the list, so a player who left cannot inflate it", () => {
     expect(attendanceCounts({ a: PRESENT, gone: PRESENT }, P("a")))
-      .toEqual({ present: 1, absent: 0, excused: 0, unmarked: 0 });
+      .toEqual({ present: 1, absent: 0, excused: 0 });
   });
 
-  it("ignores a state it does not recognise, counting that player as unmarked", () => {
+  it("ignores a state it does not recognise, counting that player as absent", () => {
     expect(attendanceCounts({ a: "injured" }, P("a")))
-      .toEqual({ present: 0, absent: 0, excused: 0, unmarked: 1 });
+      .toEqual({ present: 0, absent: 1, excused: 0 });
   });
 
   it("survives junk: no marks, no players, null", () => {
-    expect(attendanceCounts(null, null)).toEqual({ present: 0, absent: 0, excused: 0, unmarked: 0 });
+    expect(attendanceCounts(null, null)).toEqual({ present: 0, absent: 0, excused: 0 });
     expect(attendanceCounts(undefined, P("a")))
-      .toEqual({ present: 0, absent: 0, excused: 0, unmarked: 1 });
-    expect(attendanceCounts({ a: PRESENT }, [])).toEqual({ present: 0, absent: 0, excused: 0, unmarked: 0 });
+      .toEqual({ present: 0, absent: 1, excused: 0 });
+    expect(attendanceCounts({ a: PRESENT }, [])).toEqual({ present: 0, absent: 0, excused: 0 });
     expect(attendanceCounts({ a: PRESENT }, [null, undefined]))
-      .toEqual({ present: 0, absent: 0, excused: 0, unmarked: 2 });
+      .toEqual({ present: 0, absent: 2, excused: 0 });
   });
 });
 
@@ -69,12 +76,26 @@ describe("turnout", () => {
 });
 
 describe("nextState", () => {
-  it("cycles through the register with one control per player", () => {
-    // Twenty taps to take a register, so one control per row beats three buttons.
+  it("cycles three states: absent, present, excused, absent again", () => {
+    // There is no unmarked state to come back round to, because an unmarked row already
+    // reads as absent — a fourth stop on the cycle that looks identical to the first is a
+    // tap that appears to do nothing.
+    expect(nextState(ABSENT)).toBe(PRESENT);
+    expect(nextState(PRESENT)).toBe(EXCUSED);
+    expect(nextState(EXCUSED)).toBe(ABSENT);
+  });
+
+  it("takes an unmarked row to present: it is showing absent, so it moves off absent", () => {
+    // The one tap that matters most — someone arrived — is the first tap on any row.
     expect(nextState(undefined)).toBe(PRESENT);
-    expect(nextState(PRESENT)).toBe(ABSENT);
-    expect(nextState(ABSENT)).toBe(EXCUSED);
-    expect(nextState(EXCUSED)).toBe(undefined); // back to unmarked
+  });
+
+  it("never returns undefined: a tap always stores something", () => {
+    // What makes "the register was taken" answerable at all: the day's entry exists
+    // because he touched it, so a night he never touched still records nothing.
+    for (const state of [undefined, PRESENT, ABSENT, EXCUSED, "injured", null]) {
+      expect(STATES).toContain(nextState(state));
+    }
   });
 
   it("starts an unknown or junk state at present, rather than getting stuck", () => {

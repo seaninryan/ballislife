@@ -19,6 +19,16 @@ export const ABSENT = "absent";
 export const EXCUSED = "excused";
 export const STATES = [PRESENT, ABSENT, EXCUSED];
 
+// The register is taken BY EXCEPTION: everyone starts absent and is ticked as they arrive or
+// send word, which for fifteen players is a handful of taps instead of fifteen. So an
+// unmarked player is not a state of his own — he is absent, and the screen says so.
+//
+// Two things this deliberately does NOT do. It does not write those absences: only taps are
+// stored, so the night's entry existing still means "the register was taken", and a session
+// he never touched still records nothing — which is what lets history tell "never took it"
+// apart from "nobody came". And it does not change what a stored mark means: a stored
+// `absent` is still an absence he stood over.
+
 const store = createDayMarks({
   storageKey: "ballislife_attendance",
   field: "attendance",
@@ -35,16 +45,17 @@ export const mergeAttendance = mergeSides;
 export { sameMarks };
 
 // Counts only the players passed in, so someone who has since left the squad does not
-// inflate tonight's numbers. Unmarked is a state of its own and not a synonym for absent:
-// before the register is taken nobody is anything.
+// inflate tonight's numbers. Everything that is not a present or an excused mark — no mark,
+// or a state from a hand-edited file that this version does not know — counts as absent,
+// which is what the row shows. Three numbers that always add up to the squad: a line that
+// checks itself at a glance.
 export function attendanceCounts(marks, players) {
-  const counts = { present: 0, absent: 0, excused: 0, unmarked: 0 };
+  const counts = { present: 0, absent: 0, excused: 0 };
   for (const player of players ?? []) {
     const state = marks?.[player?.id];
     if (state === PRESENT) counts.present += 1;
-    else if (state === ABSENT) counts.absent += 1;
     else if (state === EXCUSED) counts.excused += 1;
-    else counts.unmarked += 1;
+    else counts.absent += 1;
   }
   return counts;
 }
@@ -75,11 +86,20 @@ export function recordedTurnout(session) {
   return null;
 }
 
-// One control per player, cycling: unmarked -> present -> absent -> excused -> unmarked.
-// A register is twenty taps, and one tappable row beats three buttons per row on a phone
-// held in one hand at the side of a pitch. Anything unrecognised starts the cycle rather
-// than trapping the row on a state it cannot leave.
+// One control per player, cycling absent -> present -> excused -> absent. One tappable row
+// beats three buttons per row on a phone held in one hand at the side of a pitch.
+//
+// Three stops, not four: unmarked used to be the fourth, and it cannot be one any more
+// because an unmarked row is already showing Absent — a stop that looks identical to the
+// one before it is a tap that appears to do nothing. It also always returns a state, so a
+// tap always stores something, which is what keeps "he took the register and everyone was
+// out" distinguishable from "he never opened it".
+//
+// An unmarked row is showing absent, so it moves off absent like an absent one: to present,
+// which is the tap that matters — someone arrived. Anything unrecognised does the same
+// rather than trapping the row on a state it cannot leave.
+const CYCLE = [ABSENT, PRESENT, EXCUSED];
 export function nextState(state) {
-  const index = STATES.indexOf(state);
-  return index === -1 ? PRESENT : STATES[index + 1];
+  const index = CYCLE.indexOf(state);
+  return index === -1 ? PRESENT : CYCLE[(index + 1) % CYCLE.length];
 }

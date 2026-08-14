@@ -290,12 +290,11 @@ export default function SessionRun({
   }, [session?.id, day, attendanceRemoteKey]);
 
   // A player ticked. localStorage first and synchronously, then upward on App's debounce —
-  // the same path a Done tap takes. `state` is undefined when the cycle comes back round
-  // to unmarked, and unmarked is the ABSENCE of a mark, not a fourth value to store.
+  // the same path a Done tap takes. Every stop on the cycle is a real state now, so a tap
+  // always stores one: what is NOT stored is the fourteen players he never touched, who
+  // read as absent without anything being written for them.
   const handleAttendanceMark = (playerId, state) => {
-    const next = { ...attendanceMarks };
-    if (state) next[playerId] = state;
-    else delete next[playerId];
+    const next = { ...attendanceMarks, [playerId]: state };
     const stamp = now();
     setAttendanceMarks(next);
     writeAttendance(localStore(), session?.id, day, next, stamp);
@@ -375,22 +374,25 @@ export default function SessionRun({
   // collapsed header say "2 present" above a register reading "1 present", once a marked
   // player had left the squad, or a plan's squad had been swapped under an old register.
   const players = currentPlayers(squad);
-  const {
-    present: presentNow, absent: absentNow, excused: excusedNow, unmarked: unmarkedCount,
-  } = attendanceCounts(attendanceMarks, players);
-  const registerTaken = presentNow + absentNow + excusedNow > 0;
-  // A register IN PROGRESS is not a turnout. Only once every current player is accounted
-  // for does the present count describe the squad rather than how far down the list the
-  // coach has got: six ticked with nine still to mark is not a squad of six, and a first
-  // tap of "absent" is not a turnout of zero. Until then it is unknown — undefined, which
-  // is what makes the picker offer everything rather than nothing.
-  const registerComplete = players.length > 0 && unmarkedCount === 0;
+  const { present: presentNow } = attendanceCounts(attendanceMarks, players);
+  // The register was taken if he touched it — an entry for tonight, not a full one. There
+  // is no such thing as a half-taken register since everyone starts absent, so this is the
+  // whole of the distinction that is left, and it is worth keeping: a night with no entry
+  // records nothing at all, rather than fifteen absences nobody stood over.
+  const registerTaken = players.length > 0 && Object.keys(attendanceMarks).length > 0;
   // What the swap picker means by turnout: the number typed on the plan if there is one —
-  // a hand-typed number always beats a derived one, half-taken register or not — otherwise
-  // how many are actually here, once that can be answered.
+  // a hand-typed number always beats a derived one — otherwise the present count, as soon
+  // as the register has been touched at all. Before that it is unknown (undefined), which
+  // is what makes the picker offer everything rather than nothing.
+  //
+  // One tick then Swap therefore means a turnout of one, and a picker with almost nothing
+  // in it. That is the honest reading of the register, and it is survivable because the
+  // picker's turnout filter can be switched off there and then — see DrillPicker. Guessing
+  // "he cannot mean one" instead would need a rule for when a register is finished, which
+  // is exactly the thing default-absent removed.
   const effectiveTurnout = Number.isFinite(session?.turnout)
     ? session.turnout
-    : registerComplete ? presentNow : undefined;
+    : registerTaken ? presentNow : undefined;
   const register = (
     <section className="card run-attendance">
       <button
@@ -401,17 +403,11 @@ export default function SessionRun({
       >
         <strong className="block-slot">Attendance</strong>
         {registerTaken ? (
-          <>
-            {/* The one number the rest of the night uses: it is what the swap picker means
-                by turnout. Shown collapsed so the register does not need opening to read it. */}
-            <span className="chip ok-chip">{presentNow} present</span>
-            {/* A half-taken register collapses looking exactly like a finished one, and the
-                reason you glance at this line is to check you got everybody. Say what is
-                still outstanding rather than leaving it to be inferred from a count. */}
-            {unmarkedCount > 0 ? (
-              <span className="chip warn-chip">{unmarkedCount} to go</span>
-            ) : null}
-          </>
+          // The one number the rest of the night uses: it is what the swap picker means by
+          // turnout. Shown collapsed so the register does not need opening to read it, and
+          // shown alone — nothing is outstanding any more, and the absent and excused
+          // counts are one tap away in the register itself.
+          <span className="chip ok-chip">{presentNow} present</span>
         ) : (
           <span className="chip dim">not taken</span>
         )}

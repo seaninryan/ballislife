@@ -68,58 +68,70 @@ describe("Attendance", () => {
     expect(rowFor("Danny Mitchell").textContent).toContain("Excused");
   });
 
-  it("cycles one control per row: unmarked, present, absent, excused, unmarked again", () => {
+  it("shows an untouched squad as absent — that is the working assumption", () => {
+    // Mark by exception: everybody is absent until he says otherwise, and the screen says
+    // so rather than leaving fifteen blank rows to be read as "nothing decided yet".
+    mount({ squad: u14a(), marks: {} });
+    expect(rows()).toHaveLength(15);
+    for (const row of rows()) expect(row.textContent).toContain("Absent");
+    expect(rowFor("Kevin").className).toContain("attendance-absent");
+  });
+
+  it("cycles one control per row: absent, present, excused, absent again", () => {
     const squad = u14a();
     const kevin = squad.players.find((p) => p.name === "Kevin");
     const onMark = vi.fn();
 
+    // An untouched row is showing Absent, so the first tap moves it off absent — the tap
+    // that matters, someone arrived, is one tap on any row.
     mount({ squad, marks: {}, onMark });
+    act(() => { rowFor("Kevin").click(); });
+    expect(onMark).toHaveBeenLastCalledWith(kevin.id, PRESENT);
+
+    mount({ squad, marks: { [kevin.id]: ABSENT }, onMark });
     act(() => { rowFor("Kevin").click(); });
     expect(onMark).toHaveBeenLastCalledWith(kevin.id, PRESENT);
 
     mount({ squad, marks: { [kevin.id]: PRESENT }, onMark });
     act(() => { rowFor("Kevin").click(); });
-    expect(onMark).toHaveBeenLastCalledWith(kevin.id, ABSENT);
-
-    mount({ squad, marks: { [kevin.id]: ABSENT }, onMark });
-    act(() => { rowFor("Kevin").click(); });
     expect(onMark).toHaveBeenLastCalledWith(kevin.id, EXCUSED);
 
-    // Round the cycle: excused taps back to unmarked, which is the absence of a state
-    // rather than a fourth value.
+    // Round the cycle. Excused goes to an EXPLICIT absent, not to no mark at all: there is
+    // no unmarked state left to reach, because it would look identical to this one.
     mount({ squad, marks: { [kevin.id]: EXCUSED }, onMark });
     act(() => { rowFor("Kevin").click(); });
-    expect(onMark).toHaveBeenLastCalledWith(kevin.id, undefined);
+    expect(onMark).toHaveBeenLastCalledWith(kevin.id, ABSENT);
   });
 
-  it("treats a state it does not recognise as unmarked rather than trapping the row", () => {
+  it("treats a state it does not recognise as absent rather than trapping the row", () => {
     const squad = u14a();
     const [alfie] = squad.players;
     const onMark = vi.fn();
     mount({ squad, marks: { [alfie.id]: "injured" }, onMark });
     expect(rowFor("Alfie Ryan").textContent).not.toMatch(/injured/i);
+    expect(rowFor("Alfie Ryan").textContent).toContain("Absent");
     act(() => { rowFor("Alfie Ryan").click(); });
     expect(onMark).toHaveBeenLastCalledWith(alfie.id, PRESENT);
   });
 
-  it("summarises the register, counting what is still to do", () => {
+  it("summarises the register in three numbers that add up to the squad", () => {
     const squad = u14a();
     const [a, b, c, d] = squad.players;
     mount({ squad, marks: { [a.id]: PRESENT, [b.id]: PRESENT, [c.id]: ABSENT, [d.id]: EXCUSED } });
     const summary = container.querySelector(".attendance-summary").textContent;
     expect(summary).toContain("2 present");
-    expect(summary).toContain("1 absent");
+    // The eleven nobody has touched are absent, and are counted as such.
+    expect(summary).toContain("12 absent");
     expect(summary).toContain("1 excused");
-    expect(summary).toContain("11 to go");
+    // Nothing is outstanding any more, so nothing says it is.
+    expect(summary).not.toMatch(/to go/);
   });
 
-  it("says nothing is left to do once every player is marked", () => {
-    const squad = u14a();
-    const marks = Object.fromEntries(squad.players.map((p) => [p.id, PRESENT]));
-    mount({ squad, marks });
+  it("summarises an untouched register as everybody absent", () => {
+    mount({ squad: u14a(), marks: {} });
     const summary = container.querySelector(".attendance-summary").textContent;
-    expect(summary).toContain("15 present");
-    expect(summary).not.toMatch(/to go/);
+    expect(summary).toContain("0 present");
+    expect(summary).toContain("15 absent");
   });
 
   it("does not show a player who has left, and does not touch their mark", () => {
@@ -137,7 +149,7 @@ describe("Attendance", () => {
     // Their mark is not counted against tonight either, and nothing was reported that
     // would remove it.
     expect(container.querySelector(".attendance-summary").textContent).toContain("0 present");
-    expect(container.querySelector(".attendance-summary").textContent).toContain("14 to go");
+    expect(container.querySelector(".attendance-summary").textContent).toContain("14 absent");
     expect(onMark).not.toHaveBeenCalled();
     expect(marks).toEqual({ [gone.id]: PRESENT });
   });

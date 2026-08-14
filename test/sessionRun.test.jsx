@@ -1108,6 +1108,14 @@ describe("SessionRun attendance", () => {
     expect(rows()).toHaveLength(15);
   });
 
+  it("starts with everybody absent, and says so", () => {
+    // Mark by exception: he ticks the ones who arrive or send word. Nothing is stored for
+    // any of them yet — the screen is showing the assumption, not a record.
+    mount(base());
+    for (const row of rows()) expect(row.textContent).toContain("Absent");
+    expect(readAttendance(localStorage, "s1", DAY)).toEqual({});
+  });
+
   it("is closed once the register has been taken — and then not again", () => {
     writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: PRESENT }, at("18:50"));
     mount(base());
@@ -1117,25 +1125,24 @@ describe("SessionRun attendance", () => {
     expect(container.querySelector(".run-attendance").textContent).toMatch(/1 present/);
   });
 
-  it("collapsed, says how many are still to mark — a half-taken register looks finished otherwise", () => {
-    // The reason to glance at this line is to check you got everybody, and 15 names is
-    // more than anyone holds in their head while a session is starting.
+  it("collapsed, shows the one number the rest of the night uses and nothing else", () => {
+    // Nothing is outstanding any more — an untouched name is an absence, not a gap — so
+    // there is no "N to go" to show. What is left is the present count, which is what the
+    // swap picker means by turnout; the breakdown is one tap away in the register itself.
     writeAttendance(localStorage, "s1", DAY, {
       [idOf("Kevin")]: PRESENT, [idOf("Alfie Ryan")]: PRESENT, [idOf("Jack Melia")]: ABSENT,
     }, at("18:50"));
     mount(base());
     const summary = container.querySelector(".run-attendance").textContent;
     expect(summary).toMatch(/2 present/);
-    expect(summary).toMatch(/12 to go/);
+    expect(summary).not.toMatch(/to go/);
   });
 
-  it("collapsed, says nothing about what is left once every player is marked", () => {
-    const marks = Object.fromEntries(squad.players.map((p) => [p.id, PRESENT]));
-    writeAttendance(localStorage, "s1", DAY, marks, at("18:50"));
+  it("collapsed, still says nothing was taken when nothing was touched", () => {
+    // The distinction that survives the change: a night he never took the register on
+    // records nothing at all, and must not read as fifteen absences he stood over.
     mount(base());
-    const summary = container.querySelector(".run-attendance").textContent;
-    expect(summary).toMatch(/15 present/);
-    expect(summary).not.toMatch(/to go/);
+    expect(container.querySelector(".run-attendance-summary").textContent).toMatch(/not taken/);
   });
 
   // The collapsed header and the register open beneath it are the same screen: two numbers
@@ -1156,11 +1163,10 @@ describe("SessionRun attendance", () => {
     const open = container.querySelector(".attendance-summary").textContent;
 
     // 14 in the squad, one of them ticked: the departed player's mark is last month's
-    // record, not tonight's count.
+    // record, not tonight's count. The other 13 are absent, marked or not.
     expect(header).toMatch(/1 present/);
     expect(open).toMatch(/1 present/);
-    expect(header).toMatch(/13 to go/);
-    expect(open).toMatch(/13 to go/);
+    expect(open).toMatch(/13 absent/);
   });
 
   it("is closed when the register was taken on the other device", () => {
@@ -1215,15 +1221,27 @@ describe("SessionRun attendance", () => {
     expect(rowFor("Cillian Conlan").textContent).toContain("Present");
   });
 
-  it("cycling a player round to unmarked removes the mark rather than storing a fourth state", () => {
+  it("cycling a player round from excused stores an explicit absent, not an empty register", () => {
+    // Removing the key would leave the row showing exactly what it showed before — absent —
+    // while quietly emptying the register, and an empty register is how a night he never
+    // took one is recognised. So the last stop on the cycle is a stored value like the rest.
     const onAttendance = vi.fn();
     const kevin = idOf("Kevin");
     writeAttendance(localStorage, "s1", DAY, { [kevin]: "excused" }, at("18:50"));
     mount(base({ onAttendance }));
     act(() => { container.querySelector(".run-attendance-summary").click(); }); // it opens closed
     act(() => { rowFor("Kevin").click(); });
-    expect(readAttendance(localStorage, "s1", DAY)).toEqual({});
-    expect(onAttendance).toHaveBeenLastCalledWith(DAY, {}, at("19:00"));
+    expect(readAttendance(localStorage, "s1", DAY)).toEqual({ [kevin]: ABSENT });
+    expect(onAttendance).toHaveBeenLastCalledWith(DAY, { [kevin]: ABSENT }, at("19:00"));
+    expect(rowFor("Kevin").textContent).toContain("Absent");
+  });
+
+  it("stores only what he actually tapped: the other fourteen absences are not invented", () => {
+    // Default-absent is a reading of the register, never a write to it. Storing fifteen
+    // absences on the first tap would record a claim he never made about anyone else.
+    mount(base());
+    act(() => { rowFor("Kevin").click(); });
+    expect(readAttendance(localStorage, "s1", DAY)).toEqual({ [idOf("Kevin")]: PRESENT });
   });
 
   it("works with no onAttendance at all: the tap is still kept on this device", () => {
@@ -1332,8 +1350,8 @@ describe("SessionRun attendance", () => {
         [...container.querySelectorAll("button")].find((b) => b.textContent === "Swap").click();
       });
     };
-    // A FINISHED register: six here, the other nine accounted for. Only a finished one is
-    // a turnout — see the part-taken tests below.
+    // Six here, the other nine marked absent. Since default-absent this is the same answer
+    // as sixPresent() below — both are a register that says six.
     const sixOfFifteen = () => Object.fromEntries(
       squad.players.map((p, i) => [p.id, i < 6 ? PRESENT : ABSENT]),
     );
@@ -1358,7 +1376,7 @@ describe("SessionRun attendance", () => {
       expect(offered()).not.toContain("Charlie");
     });
 
-    it("a typed turnout wins over a part-taken register too, not just a finished one", () => {
+    it("a typed turnout wins over a register of a few ticks too", () => {
       writeAttendance(localStorage, "s1", DAY, sixPresent(), at("18:50"));
       const s = { ...session(twoBlocks()), turnout: 22 };
       mount(base({ session: s, drills: sizedDrills(), onSwap: () => {} }));
@@ -1369,38 +1387,55 @@ describe("SessionRun attendance", () => {
 
     it("offers everything while the register is untaken, rather than nothing", () => {
       // An untaken register is not a turnout of zero, which would hide every drill that
-      // says how many it needs.
+      // says how many it needs. This is the one case that stays unknown: there is no entry
+      // for the night at all, so nothing has been said about who is here.
       mount(base({ drills: sizedDrills(), onSwap: () => {} }));
       expect(offered()).toEqual([]); // the picker is not open yet
       swap();
       expect(offered()).toEqual(expect.arrayContaining(["Charlie", "Delta"]));
     });
 
-    it("offers everything while the register is only part-taken: six ticked is not a squad of six", () => {
-      // Six present and nine still to mark says nothing about how many are on the pitch —
-      // it is how far down the list the coach has got. Sizing the picker to it drops the
-      // big-squad drills the moment he starts ticking.
+    it("six ticked present IS a turnout of six: there is no half-taken register any more", () => {
+      // The old rule waited for every player to be marked, because an unmarked player was
+      // unaccounted for. Now he is absent — six ticked among fifteen absences is a squad of
+      // six, and that is what the picker should be sized to.
       writeAttendance(localStorage, "s1", DAY, sixPresent(), at("18:50"));
       mount(base({ drills: sizedDrills(), onSwap: () => {} }));
       swap();
-      expect(offered()).toEqual(expect.arrayContaining(["Charlie", "Delta"]));
+      expect(offered()).toContain("Charlie");
+      expect(offered()).not.toContain("Delta");
     });
 
-    it("a first mark of absent is not a turnout of zero, which would offer nothing at all", () => {
-      // The coach's first action is often a no-show: two taps on one row. That must not
-      // empty the picker.
-      writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: ABSENT }, at("18:50"));
+    it("a register of one arrival sizes the picker to one — and says so, escapably", () => {
+      // The cost of the rule above, and it is real: one tick then Swap offers almost
+      // nothing. The picker's own turnout toggle is the way out, and it names the number
+      // so a wrong one is recognisable rather than mysterious.
+      writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: PRESENT }, at("18:50"));
       mount(base({ drills: sizedDrills(), onSwap: () => {} }));
       swap();
+      expect(offered()).toEqual(["Bravo"]);
+      const box = container.querySelector(".drill-picker-fits input[type=checkbox]");
+      expect(container.querySelector(".drill-picker-fits").textContent).toContain("1");
+      act(() => { box.click(); });
       expect(offered()).toEqual(expect.arrayContaining(["Charlie", "Delta"]));
     });
 
-    it("a finished register where nobody came IS a turnout of zero", () => {
+    it("a register where nobody came IS a turnout of zero", () => {
       const marks = Object.fromEntries(squad.players.map((p) => [p.id, ABSENT]));
       writeAttendance(localStorage, "s1", DAY, marks, at("18:50"));
       mount(base({ drills: sizedDrills(), onSwap: () => {} }));
       swap();
       // Nothing sized fits nobody; the drill that says nothing about numbers still does.
+      expect(offered()).toEqual(["Bravo"]);
+    });
+
+    it("one absence marked is a taken register, and its answer is nobody yet", () => {
+      // Two taps on one row used to leave the turnout unknown. It is a turnout of zero now,
+      // which is the honest reading of "the register says nobody is here" — and the toggle
+      // above is what makes that safe.
+      writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: ABSENT }, at("18:50"));
+      mount(base({ drills: sizedDrills(), onSwap: () => {} }));
+      swap();
       expect(offered()).toEqual(["Bravo"]);
     });
 
