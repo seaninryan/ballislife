@@ -175,6 +175,7 @@ export function forgetDriveState() {
   ambiguousSessionIds.clear();
   unreadableSessionIds.clear();
   sessionsFolders.clear();
+  squadsAbsentIn = null;
 }
 
 // -> { ok: true, modifiedTime } | { ok: false, conflict: true, modifiedTime }
@@ -645,7 +646,11 @@ export async function loadSquads(folder) {
     const token = getAccessToken();
     const files = await api.listFiles(token, folder);
     const file = files.find((f) => f.name === SQUADS_NAME) ?? null;
-    if (!file) return { squads: {}, fileId: null, modifiedTime: null, failed: null };
+    if (!file) {
+      squadsAbsentIn = folder;
+      return { squads: {}, fileId: null, modifiedTime: null, failed: null };
+    }
+    squadsAbsentIn = null;
 
     // Whatever Drive just reported is true of the file whether or not its contents parse,
     // and `known` is the one authority on it.
@@ -689,6 +694,9 @@ export async function saveSquads({ folder, fileId, data, baseModifiedTime }) {
       if (!fileId) {
         const created = await api.createFile(token, folder, SQUADS_NAME, body);
         known.set(created.id, created.modifiedTime);
+        // The folder is no longer one we know to be empty of squads, so a later create
+        // failure here has nothing to adopt — as it should not: the file exists now.
+        squadsAbsentIn = null;
         return { ok: true, fileId: created.id, modifiedTime: created.modifiedTime };
       }
       const modifiedTime = await api.writeFile(token, fileId, body);
@@ -696,14 +704,20 @@ export async function saveSquads({ folder, fileId, data, baseModifiedTime }) {
       return { ok: true, fileId, modifiedTime };
     });
   } catch (error) {
-    // Same recovery as saveSession, and for the same reason: a create whose reply was lost
-    // is the expected failure on a bad connection, and the file may well be there.
-    // Believing the failure means the next save creates a SECOND squads.json — and squads
-    // have no duplicate guard to fall back on, so loadSquads would then read whichever the
-    // listing returned first: half the squad list, at random, with nothing to say so.
-    // One listing, only on this path: doing it per save would cost a request every time.
-    if (!fileId) {
-      const landed = await findLandedSquadsFile(folder);
+    // A create whose reply was lost is the expected failure on a bad connection, and the
+    // file may well be there. Believing the failure means the next save creates a SECOND
+    // squads.json — and squads have no duplicate guard to fall back on, so loadSquads would
+    // then read whichever the listing returned first: half the squad list, at random.
+    //
+    // saveSession recovers from this by adopting the one file named for its plan, because a
+    // file named for plan X can only be our own work. That premise DOES NOT carry over:
+    // squads.json names everyone, so the file in the folder is just as likely to be the
+    // owner's whole roster, written by a device that never heard of this one. Adopting it
+    // reports a save that never happened and points the next write at his real list.
+    // Hence findLandedSquadsFile's two proofs, and hence recovering only from a failure that
+    // could actually have written something.
+    if (!fileId && couldHaveLanded(error)) {
+      const landed = await findLandedSquadsFile(folder, body);
       if (landed) {
         known.set(landed.id, landed.modifiedTime);
         return { ok: true, fileId: landed.id, modifiedTime: landed.modifiedTime };
@@ -713,16 +727,41 @@ export async function saveSquads({ folder, fileId, data, baseModifiedTime }) {
   }
 }
 
-// The squads.json a create may have written before its reply was lost, or null. Anything
-// other than exactly one match is null: none means nothing landed, and more than one means
-// adopting either would be writing into a file picked at random — the very thing this
-// guard exists to prevent. A failure here is answered the same way, and the caller reports
-// the original error, which is the truthful thing to say when we could not find out.
-async function findLandedSquadsFile(folder) {
+// Could this failure have left a file behind? A 4xx is Drive answering — it refused, and
+// nothing was written — so there is no lost reply to recover from and a listing could only
+// find somebody else's file. A dropped connection (no code) or a 5xx is the case this
+// recovery exists for: the request may well have been carried out before the reply was lost.
+const couldHaveLanded = (error) => {
+  const code = error?.code;
+  return code === undefined || code === null || code === 0 || code >= 500;
+};
+
+// The folder whose listing THIS RUN saw with no squads.json in it, or null. Only a load
+// that positively found none can put a folder here; finding a file, or never looking,
+// leaves it null — and so does a sign-out, via forgetDriveState.
+let squadsAbsentIn = null;
+
+// The squads.json this create wrote before its reply was lost, or null. Two independent
+// proofs are required before a file is adopted, because getting this wrong means writing
+// this device's list over the owner's entire roster:
+//
+//   1. A load of THIS folder, in this run, saw no squads.json at all. Without that, a file
+//      found here predates us and is nobody's business but its author's.
+//   2. Its contents are byte-identical to the body this create just sent. A file that
+//      appeared since that load but says something else was written by something else.
+//
+// Anything other than exactly one match is null too: none means nothing landed, and more
+// than one means adopting either would be writing into a file picked at random. A failure
+// looking is answered the same way — the caller then reports the original error, which is
+// the truthful thing to say when we could not find out.
+async function findLandedSquadsFile(folder, body) {
+  if (squadsAbsentIn !== folder) return null;
   try {
-    const files = await api.listFiles(getAccessToken(), folder);
-    const matches = files.filter((f) => f.name === SQUADS_NAME);
-    return matches.length === 1 ? matches[0] : null;
+    const token = getAccessToken();
+    const matches = (await api.listFiles(token, folder)).filter((f) => f.name === SQUADS_NAME);
+    if (matches.length !== 1) return null;
+    const raw = await api.readFile(token, matches[0].id);
+    return raw === body ? matches[0] : null;
   } catch {
     return null;
   }

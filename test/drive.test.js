@@ -1062,17 +1062,31 @@ describe("saveSquads", () => {
   // A create whose reply was lost is the expected failure on a bad connection, and the file
   // may well be there. Believing the failure means the next save creates a SECOND
   // squads.json, after which loadSquads silently reads whichever the listing returns first
-  // — half the squad list, at random, with no way to tell. saveSession has carried this
-  // recovery since the same bug bit the plans.
+  // — half the squad list, at random, with no way to tell.
+  //
+  // But squads.json names EVERYONE, so adopting the wrong one is adopting somebody else's
+  // whole roster and writing this device's list over it. Adoption therefore needs two
+  // independent proofs that the file is the one this create wrote: a load of THIS folder
+  // that positively found no squads.json, and contents byte-identical to what was just sent.
   describe("a create whose reply never came back", () => {
     const boom = Object.assign(new Error("offline"), { code: 0 });
+    const body = JSON.stringify({ version: 1, squads: data }, null, 2);
+    // The load that says "there is no squads.json here", which is what makes a file that
+    // appears afterwards attributable to this create at all.
+    const loadFoundNothing = async () => {
+      api.listFiles.mockResolvedValue([{ id: "a", name: "a.md", modifiedTime: "T0" }]);
+      await loadSquads("F1");
+      api.listFiles.mockReset();
+    };
 
     it("adopts the file the create actually wrote, rather than making a second one", async () => {
+      await loadFoundNothing();
       api.createFile.mockRejectedValue(boom);
       api.listFiles.mockResolvedValue([
         { id: "a", name: "a.md", modifiedTime: "T0" },
         { id: "sq", name: SQUADS_NAME, modifiedTime: "T1" },
       ]);
+      api.readFile.mockResolvedValue(body);
       const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
       expect(r).toEqual({ ok: true, fileId: "sq", modifiedTime: "T1" });
       // And its baseline is known, so the next save writes that file instead of conflicting.
@@ -1080,7 +1094,42 @@ describe("saveSquads", () => {
       expect(api.createFile).toHaveBeenCalledTimes(1);
     });
 
+    it("NEVER adopts a squads.json this run never saw the absence of", async () => {
+      // The reported bug. The load threw, so nothing is known about the folder — and the
+      // squads.json sitting in it is the owner's real roster, full of players. Adopting it
+      // reports success, and the next save writes this device's near-empty list over the lot.
+      api.createFile.mockRejectedValue(boom);
+      api.listFiles.mockResolvedValue([{ id: "sq", name: SQUADS_NAME, modifiedTime: "T1" }]);
+      api.readFile.mockResolvedValue(JSON.stringify({ version: 1, squads: { real: {} } }));
+      const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+      expect(r).toEqual({ ok: false, error: boom });
+      expect(knownModifiedTime("sq")).toBe(null);
+    });
+
+    it("NEVER adopts a file whose contents are not what this create sent", async () => {
+      // The load found nothing, but a laptop created the real squads.json in between. Only
+      // the contents can tell that apart from our own create landing.
+      await loadFoundNothing();
+      api.createFile.mockRejectedValue(boom);
+      api.listFiles.mockResolvedValue([{ id: "sq", name: SQUADS_NAME, modifiedTime: "T1" }]);
+      api.readFile.mockResolvedValue(JSON.stringify({ version: 1, squads: { real: {} } }));
+      const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+      expect(r).toEqual({ ok: false, error: boom });
+    });
+
+    it("does not go looking at all when the create was REFUSED rather than lost", async () => {
+      // A 403 is Drive saying it did not write the file. There is no lost reply to recover
+      // from, so a listing here can only find somebody else's file.
+      await loadFoundNothing();
+      const denied = Object.assign(new Error("forbidden"), { code: 403 });
+      api.createFile.mockRejectedValue(denied);
+      const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+      expect(r).toEqual({ ok: false, error: denied });
+      expect(api.listFiles).not.toHaveBeenCalled();
+    });
+
     it("reports the failure when nothing landed", async () => {
+      await loadFoundNothing();
       api.createFile.mockRejectedValue(boom);
       api.listFiles.mockResolvedValue([{ id: "a", name: "a.md", modifiedTime: "T0" }]);
       const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
@@ -1090,18 +1139,32 @@ describe("saveSquads", () => {
     it("adopts nothing when two files already claim the name", async () => {
       // Writing into whichever one the listing happened to return first is the very thing
       // this guard exists to prevent, so the truthful answer is the original failure.
+      await loadFoundNothing();
       api.createFile.mockRejectedValue(boom);
       api.listFiles.mockResolvedValue([
         { id: "sq1", name: SQUADS_NAME, modifiedTime: "T1" },
         { id: "sq2", name: SQUADS_NAME, modifiedTime: "T2" },
       ]);
+      api.readFile.mockResolvedValue(body);
       const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
       expect(r).toEqual({ ok: false, error: boom });
     });
 
     it("says the original failure when it could not even look", async () => {
+      await loadFoundNothing();
       api.createFile.mockRejectedValue(boom);
       api.listFiles.mockRejectedValue(new Error("still offline"));
+      const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+      expect(r).toEqual({ ok: false, error: boom });
+    });
+
+    it("says the original failure when the candidate could not be read back", async () => {
+      // Unverified is unadoptable: the point of the read is that nothing else establishes
+      // whose file this is.
+      await loadFoundNothing();
+      api.createFile.mockRejectedValue(boom);
+      api.listFiles.mockResolvedValue([{ id: "sq", name: SQUADS_NAME, modifiedTime: "T1" }]);
+      api.readFile.mockRejectedValue(new Error("still offline"));
       const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
       expect(r).toEqual({ ok: false, error: boom });
     });
