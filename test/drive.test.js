@@ -1028,6 +1028,7 @@ describe("saveSquads", () => {
 
   it("writes the existing file and returns the new modifiedTime", async () => {
     noteModifiedTime("sq", "T1");
+    api.fileModifiedTime.mockResolvedValue("T1");
     api.writeFile.mockResolvedValue("T2");
     const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
     expect(r).toEqual({ ok: true, fileId: "sq", modifiedTime: "T2" });
@@ -1041,8 +1042,51 @@ describe("saveSquads", () => {
     expect(api.writeFile).not.toHaveBeenCalled();
   });
 
+  // `known` only learns anything from a LOAD, so a phone left open all day still believes
+  // the baseline it opened with — and squads.json is every player of every squad, so an
+  // unnoticed write from the laptop reverts the lot. One extra request, on a file saved a
+  // few times a season, buys the check that the local baseline cannot make.
+  describe("checking Drive right before the write", () => {
+    it("refuses when Drive's copy has moved since we loaded it", async () => {
+      noteModifiedTime("sq", "T1");
+      api.fileModifiedTime.mockResolvedValue("T9"); // the laptop wrote while we sat idle
+      const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
+      expect(r).toEqual({ ok: false, conflict: true, modifiedTime: "T9" });
+      expect(api.writeFile).not.toHaveBeenCalled();
+      // And the newly learned baseline is remembered, so "Keep mine" writes against it.
+      expect(knownModifiedTime("sq")).toBe("T9");
+    });
+
+    it("writes when Drive still has the version we loaded", async () => {
+      noteModifiedTime("sq", "T1");
+      api.fileModifiedTime.mockResolvedValue("T1");
+      api.writeFile.mockResolvedValue("T2");
+      const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
+      expect(r).toEqual({ ok: true, fileId: "sq", modifiedTime: "T2" });
+      expect(api.fileModifiedTime).toHaveBeenCalledWith("tok", "sq");
+    });
+
+    it("does not check on the create path, where there is no file to check", async () => {
+      api.createFile.mockResolvedValue({ id: "sq", modifiedTime: "T1" });
+      await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+      expect(api.fileModifiedTime).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing when the check itself failed", async () => {
+      // Unverified is not the same as unchanged: writing here is exactly the overwrite this
+      // check exists to prevent, and the edit is safe in memory until the next attempt.
+      noteModifiedTime("sq", "T1");
+      const boom = Object.assign(new Error("offline"), { code: 0 });
+      api.fileModifiedTime.mockRejectedValue(boom);
+      const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
+      expect(r).toEqual({ ok: false, error: boom });
+      expect(api.writeFile).not.toHaveBeenCalled();
+    });
+  });
+
   it("reports a failed write rather than throwing", async () => {
     noteModifiedTime("sq", "T1");
+    api.fileModifiedTime.mockResolvedValue("T1");
     const boom = Object.assign(new Error("offline"), { code: 500 });
     api.writeFile.mockRejectedValue(boom);
     const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
@@ -1051,6 +1095,7 @@ describe("saveSquads", () => {
 
   it("retries once on a 401", async () => {
     noteModifiedTime("sq", "T1");
+    api.fileModifiedTime.mockResolvedValue("T1");
     api.writeFile
       .mockRejectedValueOnce(Object.assign(new Error("auth"), { code: 401 }))
       .mockResolvedValue("T2");
@@ -1174,6 +1219,7 @@ describe("saveSquads", () => {
       // just a failed write, and a listing per failed keystroke would cost a request on the
       // connection that is already struggling.
       noteModifiedTime("sq", "T1");
+      api.fileModifiedTime.mockResolvedValue("T1");
       api.writeFile.mockRejectedValue(boom);
       const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
       expect(r).toEqual({ ok: false, error: boom });

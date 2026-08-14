@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   aboutEmail, findFolder, findAllFolders, findChildFolder, createFolder, listFiles,
-  readFile, writeFile, createFile, renameFile, trashFile,
+  readFile, fileModifiedTime, writeFile, createFile, renameFile, trashFile,
 } from "../src/lib/driveApi.js";
 
 const ok = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
@@ -136,6 +136,21 @@ describe("readFile", () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => "hello" });
     expect(await readFile("tok", "ID")).toBe("hello");
     expect(lastCall()[0]).toContain("alt=media");
+  });
+});
+
+describe("fileModifiedTime", () => {
+  it("asks for one field: what Drive has for this file right now", async () => {
+    fetchMock.mockResolvedValue(ok({ modifiedTime: "T7" }));
+    expect(await fileModifiedTime("tok", "ID")).toBe("T7");
+    const [url] = lastCall();
+    expect(url).toContain("/drive/v3/files/ID");
+    expect(url).toContain("fields=modifiedTime");
+  });
+
+  it("returns null when Drive reports none", async () => {
+    fetchMock.mockResolvedValue(ok({}));
+    expect(await fileModifiedTime("tok", "ID")).toBe(null);
   });
 });
 

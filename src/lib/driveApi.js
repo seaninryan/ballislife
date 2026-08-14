@@ -86,6 +86,14 @@ export async function readFile(token, fileId) {
   return res.text();
 }
 
+// -> what Drive has for this file RIGHT NOW, or null. One field, so it is the cheapest
+// question we can ask, and the only one a caller can trust just before a write: a baseline
+// learned at load time says nothing about what has happened since.
+export async function fileModifiedTime(token, fileId) {
+  const body = await json(token, `${FILES}/${fileId}?fields=modifiedTime`);
+  return body.modifiedTime ?? null;
+}
+
 // -> the new modifiedTime, so the caller can update its conflict baseline.
 export async function writeFile(token, fileId, text) {
   const body = await json(token, `${UPLOAD}/${fileId}?uploadType=media&fields=modifiedTime`, {

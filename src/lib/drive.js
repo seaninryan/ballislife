@@ -680,6 +680,9 @@ export async function loadSquads(folder) {
 // squads.json is ever written just to have one. `baseModifiedTime` is what the caller
 // loaded; if Drive has since reported something else we refuse rather than clobber, and
 // hand back the current value so the caller can offer to reload.
+//
+// Unlike saveDrill and saveSession, that comparison is made against Drive itself, one
+// request before every write. See the check inside.
 export async function saveSquads({ folder, fileId, data, baseModifiedTime }) {
   const current = fileId ? known.get(fileId) : undefined;
   if (current !== undefined && baseModifiedTime !== current) {
@@ -698,6 +701,16 @@ export async function saveSquads({ folder, fileId, data, baseModifiedTime }) {
         // failure here has nothing to adopt — as it should not: the file exists now.
         squadsAbsentIn = null;
         return { ok: true, fileId: created.id, modifiedTime: created.modifiedTime };
+      }
+      // Ask Drive what it has RIGHT NOW, rather than trusting `known` — which only a load
+      // refreshes. A phone left open at the side of a pitch all day still believes the
+      // baseline it opened with, so a write from the laptop in between was invisible and
+      // this save silently reverted it. saveDrill and saveSession share that gap, but a
+      // drill or a plan is one thing; squads.json is every player of every squad.
+      const live = await api.fileModifiedTime(token, fileId);
+      if (live !== baseModifiedTime) {
+        known.set(fileId, live);
+        return { ok: false, conflict: true, modifiedTime: live };
       }
       const modifiedTime = await api.writeFile(token, fileId, body);
       known.set(fileId, modifiedTime);
