@@ -326,3 +326,19 @@ textarea, input, select {
 /* The plan you are in the middle of, found at a glance among a year of them. */
 .session-row-active .session-row { border-color: var(--accent); border-left-width: 4px; }
 .active-chip { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Squads. A squad list is read the same way a session list is, so it reuses .card and the
+   same full-width tappable row. */
+.squad-row { display: block; width: 100%; text-align: left; cursor: pointer; }
+/* A player row is typed into standing up, one-handed, so the field and its Remove control
+   are both a thumb high — 44px is the smallest target that is reliably hit without
+   looking. The field takes whatever width is left rather than a fixed one: names run long
+   and the input must not push Remove off the edge. */
+.squad-player { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+.squad-player input { flex: 1; min-width: 0; min-height: 44px; font-size: 16px; }
+.squad-player button { min-height: 44px; }
+.squad-add { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+.squad-add input { flex: 1; min-width: 0; min-height: 44px; font-size: 16px; }
+.squad-add button { min-height: 44px; }
+.squad-departed > summary { cursor: pointer; }
+.squad-player-gone { min-height: 44px; justify-content: space-between; }
