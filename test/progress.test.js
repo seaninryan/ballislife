@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   DONE, SKIPPED, readProgress, writeProgress, mark, reopen, currentIndex, counts,
   readStamp, localProgress, sessionProgress, withSessionProgress, mergeProgress, sameMarks,
-  blockKey, migrateMarks,
+  blockKey, migrateMarks, activeSessionIds,
 } from "../src/lib/progress.js";
 
 const fakeStorage = () => {
@@ -364,5 +364,68 @@ describe("sameMarks", () => {
     // An index-keyed entry left by an older version is compared against one that has been
     // through JSON, where every key is a string.
     expect(sameMarks({ 0: DONE }, { "0": DONE })).toBe(true);
+  });
+});
+
+describe("activeSessionIds", () => {
+  const DAY = "2026-08-14";
+  const at = (t) => `${DAY}T${t}:00.000Z`;
+  const B = (...slots) => slots.map((slot) => ({ slot }));
+  const S = (id, blocks, progress) => ({ id, date: id, blocks, progress });
+  const twoBlocks = () => B("warmup", "skill");
+
+  it("a plan with nothing marked is not under way — being dated today is not enough", () => {
+    expect(activeSessionIds([S("a", twoBlocks())], DAY, fakeStorage())).toEqual([]);
+  });
+
+  it("one block marked and one still to go is under way", () => {
+    const store = fakeStorage();
+    writeProgress(store, "a", DAY, { warmup: DONE }, at("19:00"));
+    expect(activeSessionIds([S("a", twoBlocks())], DAY, store)).toEqual(["a"]);
+  });
+
+  it("every block settled is finished, not under way", () => {
+    const store = fakeStorage();
+    writeProgress(store, "a", DAY, { warmup: DONE, skill: SKIPPED }, at("19:00"));
+    expect(activeSessionIds([S("a", twoBlocks())], DAY, store)).toEqual([]);
+  });
+
+  it("counts marks made on another device, from the session file", () => {
+    const progress = { [DAY]: { marks: { warmup: DONE }, updatedAt: at("19:00") } };
+    expect(activeSessionIds([S("a", twoBlocks(), progress)], DAY, fakeStorage())).toEqual(["a"]);
+  });
+
+  it("ignores another day's marks", () => {
+    const progress = { "2026-08-13": { marks: { warmup: DONE }, updatedAt: "2026-08-13T19:00:00.000Z" } };
+    expect(activeSessionIds([S("a", twoBlocks(), progress)], DAY, fakeStorage())).toEqual([]);
+  });
+
+  it("respects a clear made later on this device", () => {
+    // Start over on the phone must stop the app claiming the session is still running.
+    const store = fakeStorage();
+    writeProgress(store, "a", DAY, {}, at("20:00"));
+    const progress = { [DAY]: { marks: { warmup: DONE }, updatedAt: at("19:00") } };
+    expect(activeSessionIds([S("a", twoBlocks(), progress)], DAY, store)).toEqual([]);
+  });
+
+  it("counts index-keyed marks left by an older version", () => {
+    const store = fakeStorage();
+    writeProgress(store, "a", DAY, { 0: DONE }, at("19:00"));
+    expect(activeSessionIds([S("a", twoBlocks())], DAY, store)).toEqual(["a"]);
+  });
+
+  it("names only the plans actually under way", () => {
+    const store = fakeStorage();
+    writeProgress(store, "b", DAY, { warmup: DONE }, at("19:00"));
+    expect(activeSessionIds([S("a", twoBlocks()), S("b", twoBlocks())], DAY, store)).toEqual(["b"]);
+  });
+
+  it("a plan with no blocks is never under way, and junk input is survivable", () => {
+    const store = fakeStorage();
+    writeProgress(store, "a", DAY, { warmup: DONE }, at("19:00"));
+    expect(activeSessionIds([S("a", [])], DAY, store)).toEqual([]);
+    expect(activeSessionIds(undefined, DAY, store)).toEqual([]);
+    expect(activeSessionIds([undefined, null], DAY, store)).toEqual([]);
+    expect(activeSessionIds([S("a", twoBlocks())], DAY, null)).toEqual([]);
   });
 });

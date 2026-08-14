@@ -193,6 +193,32 @@ export function currentIndex(marks, blocks) {
   return -1;
 }
 
+// Which plans are mid-run today: at least one block marked, at least one still to go. A
+// plan merely DATED today is not under way (nothing has happened yet) and one whose every
+// block is settled is finished, not under way.
+//
+// Reads the whole local store ONCE rather than per session: localStorage keeps only
+// today's entry, but the session file's copy has to be checked for every plan, and this
+// runs on every render of the header.
+export function activeSessionIds(sessions, day, storage) {
+  const store = readAll(storage);
+  const active = [];
+  for (const session of sessions ?? []) {
+    const blocks = session?.blocks ?? [];
+    if (!blocks.length) continue;
+    const entry = store[session?.id];
+    const local = entry && entry.date === day
+      ? { marks: cleanMarks(entry.marks), updatedAt: cleanStamp(entry.updatedAt) }
+      : null;
+    const winner = mergeProgress(local, sessionProgress(session, day));
+    const marks = migrateMarks(winner.marks, blocks);
+    if (Object.keys(marks).length && currentIndex(marks, blocks) !== -1) {
+      active.push(session.id);
+    }
+  }
+  return active;
+}
+
 export function counts(marks, blocks) {
   const list = blocks ?? [];
   let done = 0;
