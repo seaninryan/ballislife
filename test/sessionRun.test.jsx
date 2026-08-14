@@ -1294,12 +1294,17 @@ describe("SessionRun attendance", () => {
         [...container.querySelectorAll("button")].find((b) => b.textContent === "Swap").click();
       });
     };
+    // A FINISHED register: six here, the other nine accounted for. Only a finished one is
+    // a turnout — see the part-taken tests below.
+    const sixOfFifteen = () => Object.fromEntries(
+      squad.players.map((p, i) => [p.id, i < 6 ? PRESENT : ABSENT]),
+    );
     const sixPresent = () => Object.fromEntries(
       squad.players.slice(0, 6).map((p) => [p.id, PRESENT]),
     );
 
     it("uses the register's count when the plan has no turnout typed on it", () => {
-      writeAttendance(localStorage, "s1", DAY, sixPresent(), at("18:50"));
+      writeAttendance(localStorage, "s1", DAY, sixOfFifteen(), at("18:50"));
       mount(base({ drills: sizedDrills(), onSwap: () => {} }));
       swap();
       expect(offered()).toContain("Charlie"); // 6-8 fits the six who came
@@ -1307,6 +1312,15 @@ describe("SessionRun attendance", () => {
     });
 
     it("a turnout typed on the plan still wins over the register", () => {
+      writeAttendance(localStorage, "s1", DAY, sixOfFifteen(), at("18:50"));
+      const s = { ...session(twoBlocks()), turnout: 22 };
+      mount(base({ session: s, drills: sizedDrills(), onSwap: () => {} }));
+      swap();
+      expect(offered()).toContain("Delta");
+      expect(offered()).not.toContain("Charlie");
+    });
+
+    it("a typed turnout wins over a part-taken register too, not just a finished one", () => {
       writeAttendance(localStorage, "s1", DAY, sixPresent(), at("18:50"));
       const s = { ...session(twoBlocks()), turnout: 22 };
       mount(base({ session: s, drills: sizedDrills(), onSwap: () => {} }));
@@ -1324,8 +1338,40 @@ describe("SessionRun attendance", () => {
       expect(offered()).toEqual(expect.arrayContaining(["Charlie", "Delta"]));
     });
 
-    it("follows the register as it is taken, without leaving the run view", () => {
+    it("offers everything while the register is only part-taken: six ticked is not a squad of six", () => {
+      // Six present and nine still to mark says nothing about how many are on the pitch —
+      // it is how far down the list the coach has got. Sizing the picker to it drops the
+      // big-squad drills the moment he starts ticking.
+      writeAttendance(localStorage, "s1", DAY, sixPresent(), at("18:50"));
       mount(base({ drills: sizedDrills(), onSwap: () => {} }));
+      swap();
+      expect(offered()).toEqual(expect.arrayContaining(["Charlie", "Delta"]));
+    });
+
+    it("a first mark of absent is not a turnout of zero, which would offer nothing at all", () => {
+      // The coach's first action is often a no-show: two taps on one row. That must not
+      // empty the picker.
+      writeAttendance(localStorage, "s1", DAY, { [idOf("Kevin")]: ABSENT }, at("18:50"));
+      mount(base({ drills: sizedDrills(), onSwap: () => {} }));
+      swap();
+      expect(offered()).toEqual(expect.arrayContaining(["Charlie", "Delta"]));
+    });
+
+    it("a finished register where nobody came IS a turnout of zero", () => {
+      const marks = Object.fromEntries(squad.players.map((p) => [p.id, ABSENT]));
+      writeAttendance(localStorage, "s1", DAY, marks, at("18:50"));
+      mount(base({ drills: sizedDrills(), onSwap: () => {} }));
+      swap();
+      // Nothing sized fits nobody; the drill that says nothing about numbers still does.
+      expect(offered()).toEqual(["Bravo"]);
+    });
+
+    it("follows the register as it is taken, without leaving the run view", () => {
+      writeAttendance(localStorage, "s1", DAY, Object.fromEntries(
+        squad.players.slice(6).map((p) => [p.id, ABSENT]),
+      ), at("18:50"));
+      mount(base({ drills: sizedDrills(), onSwap: () => {} }));
+      act(() => { container.querySelector(".run-attendance-summary").click(); });
       for (const name of ["Alfie Ryan", "Cillian Conlan", "Danny Mitchell", "Aaron Cummins",
         "Matthew Drysdale", "Daragh B Kelly"]) {
         act(() => { rowFor(name).click(); });
@@ -1333,6 +1379,13 @@ describe("SessionRun attendance", () => {
       swap();
       expect(offered()).toContain("Charlie");
       expect(offered()).not.toContain("Delta");
+    });
+
+    it("a plan with no squad is never sized by a register it cannot have", () => {
+      // Nobody to tick is not nobody there: an empty roster must read as unknown, not zero.
+      mount(base({ squad: null, drills: sizedDrills(), onSwap: () => {} }));
+      swap();
+      expect(offered()).toEqual(expect.arrayContaining(["Charlie", "Delta"]));
     });
   });
 

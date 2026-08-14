@@ -365,14 +365,20 @@ export default function SessionRun({
   // "current" is about which drill to run. An untaken register does not stop a drill
   // being current and does not shift which one it is.
   const registerTaken = Object.keys(attendanceMarks).length > 0;
-  const { unmarked: unmarkedCount } = attendanceCounts(attendanceMarks, currentPlayers(squad));
+  const players = currentPlayers(squad);
+  const { unmarked: unmarkedCount } = attendanceCounts(attendanceMarks, players);
+  // A register IN PROGRESS is not a turnout. Only once every current player is accounted
+  // for does the present count describe the squad rather than how far down the list the
+  // coach has got: six ticked with nine still to mark is not a squad of six, and a first
+  // tap of "absent" is not a turnout of zero. Until then it is unknown — undefined, which
+  // is what makes the picker offer everything rather than nothing.
+  const registerComplete = players.length > 0 && unmarkedCount === 0;
   // What the swap picker means by turnout: the number typed on the plan if there is one —
-  // a hand-typed number always beats a derived one — otherwise how many are actually here.
-  // An UNTAKEN register is not a turnout of zero: undefined means "unknown", which is what
-  // stops every drill that says how many it needs disappearing before the register is taken.
+  // a hand-typed number always beats a derived one, half-taken register or not — otherwise
+  // how many are actually here, once that can be answered.
   const effectiveTurnout = Number.isFinite(session?.turnout)
     ? session.turnout
-    : registerTaken ? presentCount(attendanceMarks) : undefined;
+    : registerComplete ? presentCount(attendanceMarks) : undefined;
   const register = (
     <section className="card run-attendance">
       <button
