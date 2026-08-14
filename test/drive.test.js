@@ -1058,6 +1058,65 @@ describe("saveSquads", () => {
     expect(r).toMatchObject({ ok: true, modifiedTime: "T2" });
     expect(api.writeFile).toHaveBeenCalledTimes(2);
   });
+
+  // A create whose reply was lost is the expected failure on a bad connection, and the file
+  // may well be there. Believing the failure means the next save creates a SECOND
+  // squads.json, after which loadSquads silently reads whichever the listing returns first
+  // — half the squad list, at random, with no way to tell. saveSession has carried this
+  // recovery since the same bug bit the plans.
+  describe("a create whose reply never came back", () => {
+    const boom = Object.assign(new Error("offline"), { code: 0 });
+
+    it("adopts the file the create actually wrote, rather than making a second one", async () => {
+      api.createFile.mockRejectedValue(boom);
+      api.listFiles.mockResolvedValue([
+        { id: "a", name: "a.md", modifiedTime: "T0" },
+        { id: "sq", name: SQUADS_NAME, modifiedTime: "T1" },
+      ]);
+      const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+      expect(r).toEqual({ ok: true, fileId: "sq", modifiedTime: "T1" });
+      // And its baseline is known, so the next save writes that file instead of conflicting.
+      expect(knownModifiedTime("sq")).toBe("T1");
+      expect(api.createFile).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports the failure when nothing landed", async () => {
+      api.createFile.mockRejectedValue(boom);
+      api.listFiles.mockResolvedValue([{ id: "a", name: "a.md", modifiedTime: "T0" }]);
+      const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+      expect(r).toEqual({ ok: false, error: boom });
+    });
+
+    it("adopts nothing when two files already claim the name", async () => {
+      // Writing into whichever one the listing happened to return first is the very thing
+      // this guard exists to prevent, so the truthful answer is the original failure.
+      api.createFile.mockRejectedValue(boom);
+      api.listFiles.mockResolvedValue([
+        { id: "sq1", name: SQUADS_NAME, modifiedTime: "T1" },
+        { id: "sq2", name: SQUADS_NAME, modifiedTime: "T2" },
+      ]);
+      const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+      expect(r).toEqual({ ok: false, error: boom });
+    });
+
+    it("says the original failure when it could not even look", async () => {
+      api.createFile.mockRejectedValue(boom);
+      api.listFiles.mockRejectedValue(new Error("still offline"));
+      const r = await saveSquads({ folder: "F1", fileId: null, data, baseModifiedTime: null });
+      expect(r).toEqual({ ok: false, error: boom });
+    });
+
+    it("does not go looking when the file was already known", async () => {
+      // Only the create path can duplicate a file. A failed write to a known file id is
+      // just a failed write, and a listing per failed keystroke would cost a request on the
+      // connection that is already struggling.
+      noteModifiedTime("sq", "T1");
+      api.writeFile.mockRejectedValue(boom);
+      const r = await saveSquads({ folder: "F1", fileId: "sq", data, baseModifiedTime: "T1" });
+      expect(r).toEqual({ ok: false, error: boom });
+      expect(api.listFiles).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("deleteDrill", () => {

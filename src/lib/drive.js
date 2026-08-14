@@ -696,7 +696,35 @@ export async function saveSquads({ folder, fileId, data, baseModifiedTime }) {
       return { ok: true, fileId, modifiedTime };
     });
   } catch (error) {
+    // Same recovery as saveSession, and for the same reason: a create whose reply was lost
+    // is the expected failure on a bad connection, and the file may well be there.
+    // Believing the failure means the next save creates a SECOND squads.json — and squads
+    // have no duplicate guard to fall back on, so loadSquads would then read whichever the
+    // listing returned first: half the squad list, at random, with nothing to say so.
+    // One listing, only on this path: doing it per save would cost a request every time.
+    if (!fileId) {
+      const landed = await findLandedSquadsFile(folder);
+      if (landed) {
+        known.set(landed.id, landed.modifiedTime);
+        return { ok: true, fileId: landed.id, modifiedTime: landed.modifiedTime };
+      }
+    }
     return { ok: false, error };
+  }
+}
+
+// The squads.json a create may have written before its reply was lost, or null. Anything
+// other than exactly one match is null: none means nothing landed, and more than one means
+// adopting either would be writing into a file picked at random — the very thing this
+// guard exists to prevent. A failure here is answered the same way, and the caller reports
+// the original error, which is the truthful thing to say when we could not find out.
+async function findLandedSquadsFile(folder) {
+  try {
+    const files = await api.listFiles(getAccessToken(), folder);
+    const matches = files.filter((f) => f.name === SQUADS_NAME);
+    return matches.length === 1 ? matches[0] : null;
+  } catch {
+    return null;
   }
 }
 
