@@ -1117,6 +1117,27 @@ describe("SessionRun attendance", () => {
     expect(container.querySelector(".run-attendance").textContent).toMatch(/1 present/);
   });
 
+  it("collapsed, says how many are still to mark — a half-taken register looks finished otherwise", () => {
+    // The reason to glance at this line is to check you got everybody, and 15 names is
+    // more than anyone holds in their head while a session is starting.
+    writeAttendance(localStorage, "s1", DAY, {
+      [idOf("Kevin")]: PRESENT, [idOf("Alfie Ryan")]: PRESENT, [idOf("Jack Melia")]: ABSENT,
+    }, at("18:50"));
+    mount(base());
+    const summary = container.querySelector(".run-attendance").textContent;
+    expect(summary).toMatch(/2 present/);
+    expect(summary).toMatch(/12 to go/);
+  });
+
+  it("collapsed, says nothing about what is left once every player is marked", () => {
+    const marks = Object.fromEntries(squad.players.map((p) => [p.id, PRESENT]));
+    writeAttendance(localStorage, "s1", DAY, marks, at("18:50"));
+    mount(base());
+    const summary = container.querySelector(".run-attendance").textContent;
+    expect(summary).toMatch(/15 present/);
+    expect(summary).not.toMatch(/to go/);
+  });
+
   it("is closed when the register was taken on the other device", () => {
     const s = { ...session(twoBlocks()), attendance: {
       [DAY]: { marks: { [idOf("Alfie Ryan")]: PRESENT }, updatedAt: at("18:50") },

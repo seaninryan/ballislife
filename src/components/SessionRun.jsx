@@ -25,7 +25,9 @@ import {
 import {
   readAttendance, localAttendance, writeAttendance, sessionAttendance, mergeAttendance,
   turnout as presentCount,
+  attendanceCounts,
 } from "../lib/attendance.js";
+import { currentPlayers } from "../lib/squads.js";
 import { localStore } from "../lib/browser.js";
 
 
@@ -363,6 +365,7 @@ export default function SessionRun({
   // "current" is about which drill to run. An untaken register does not stop a drill
   // being current and does not shift which one it is.
   const registerTaken = Object.keys(attendanceMarks).length > 0;
+  const { unmarked: unmarkedCount } = attendanceCounts(attendanceMarks, currentPlayers(squad));
   // What the swap picker means by turnout: the number typed on the plan if there is one —
   // a hand-typed number always beats a derived one — otherwise how many are actually here.
   // An UNTAKEN register is not a turnout of zero: undefined means "unknown", which is what
@@ -380,9 +383,17 @@ export default function SessionRun({
       >
         <strong className="block-slot">Attendance</strong>
         {registerTaken ? (
-          // The one number the rest of the night uses: it is what the swap picker means
-          // by turnout. Shown collapsed so the register does not need opening to read it.
-          <span className="chip ok-chip">{presentCount(attendanceMarks)} present</span>
+          <>
+            {/* The one number the rest of the night uses: it is what the swap picker means
+                by turnout. Shown collapsed so the register does not need opening to read it. */}
+            <span className="chip ok-chip">{presentCount(attendanceMarks)} present</span>
+            {/* A half-taken register collapses looking exactly like a finished one, and the
+                reason you glance at this line is to check you got everybody. Say what is
+                still outstanding rather than leaving it to be inferred from a count. */}
+            {unmarkedCount > 0 ? (
+              <span className="chip warn-chip">{unmarkedCount} to go</span>
+            ) : null}
+          </>
         ) : (
           <span className="chip dim">not taken</span>
         )}
