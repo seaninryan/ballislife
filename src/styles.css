@@ -393,8 +393,13 @@ textarea, input, select {
    because this screen is read in bright sun. A marked row is tinted to match its chip so
    a half-taken register can be scanned at a glance, at a strength that still leaves the
    text well clear of it. */
+/* Absent is deliberately NOT tinted, unlike the other two. It is the resting state now
+   that the register defaults to it, so nobody marked absent has done anything wrong — and
+   rendered in warning pink, opening the register showed fifteen red rows for a session
+   where nothing had happened yet. The eye should be pulled to who has ARRIVED, which is
+   the information that changes; the chip still says "Absent" in words for anyone reading
+   the row itself. */
 .attendance-present { background: #f2faf5; border-color: #bfe0cd; }
-.attendance-absent { background: #fef6f5; border-color: #f0c2ba; }
 .attendance-excused { background: #fefaef; border-color: #e7d9a4; }
 .attendance-empty { margin: 4px 0; }
 

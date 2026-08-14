@@ -23,7 +23,10 @@ import { PRESENT, ABSENT, EXCUSED, attendanceCounts, nextState } from "../lib/at
 const LABEL = { [PRESENT]: "Present", [ABSENT]: "Absent", [EXCUSED]: "Excused" };
 // Reusing the chip recipe the run view already uses for Done/Skipped, so a state reads
 // the same way wherever it appears.
-const CHIP = { [PRESENT]: "ok-chip", [ABSENT]: "err-chip", [EXCUSED]: "warn-chip" };
+// Absent gets the PLAIN chip, not err-chip: it is the resting state now that the register
+// defaults to it, and an error-red chip on twelve rows says something is wrong when nothing
+// is. Present and excused are the marks the coach actually made, so those keep their colour.
+const CHIP = { [PRESENT]: "ok-chip", [ABSENT]: "", [EXCUSED]: "warn-chip" };
 
 export default function Attendance({ squad, marks = {}, onMark }) {
   if (!squad) {

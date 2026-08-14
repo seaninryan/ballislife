@@ -59,6 +59,23 @@ describe("Attendance", () => {
     expect(rowFor("Darragh C Kelly").textContent).not.toContain("Present");
   });
 
+  it("does not paint absent as a problem — it is the resting state, not an alarm", () => {
+    // Rendered with the real squad, an err-chip on absent gave fifteen red rows for a
+    // session where nothing had happened yet. Absent is now the default the register
+    // starts from, so the colour belongs on the marks the coach actually made.
+    const squad = u14a();
+    const alfie = squad.players.find((p) => p.name === "Alfie Ryan").id;
+    mount({ squad, marks: { [alfie]: PRESENT } });
+    const absentRow = rowFor("Danny Mitchell");
+    expect(absentRow.textContent).toContain("Absent");
+    // The row keeps its state class — it IS absent — but nothing tints it. Asserting on
+    // the stylesheet rather than the class name tests the property that matters.
+    expect(absentRow.querySelector(".chip").className).not.toMatch(/err-chip|warn-chip|ok-chip/);
+    // The two states he DID assert stay coloured.
+    expect(rowFor("Alfie Ryan").querySelector(".chip").className).toMatch(/ok-chip/);
+    expect(styles).not.toMatch(/\.attendance-absent\s*\{/);
+  });
+
   it("says each state in words, not by colour alone — this is read in bright sun", () => {
     const squad = u14a();
     const [alfie, cillian, danny] = squad.players;
