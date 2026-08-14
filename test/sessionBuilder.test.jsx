@@ -245,6 +245,16 @@ describe("SessionBuilder", () => {
       expect(squadSelect().value).toBe("gone");
       expect(squadSelect().textContent).toContain("Old squad");
     });
+
+    it("re-picking the deleted squad changes nothing, rather than erasing it", () => {
+      // Its own option is the one thing in the list that is not a squad to choose, and
+      // choosing it fell through to "no squad": squadId AND the free-text name both
+      // cleared, wiping the only surviving record of who that night was for.
+      const onChange = vi.fn();
+      mount({ session: { ...baseSession(), squadId: "gone", squad: "Old squad" }, drills, squads, onChange });
+      choose(squadSelect(), "gone");
+      expect(onChange).not.toHaveBeenCalled();
+    });
   });
 
   it("offers a Run this session control that calls onRun", () => {

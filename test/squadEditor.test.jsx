@@ -132,4 +132,16 @@ describe("SquadEditor", () => {
     type(playerInputs()[0], "Sean R");
     expect(onChange.mock.calls.at(-1)[0].players[0].name).toBe("Sean R");
   });
+
+  it("reports nothing at all when the rename changed nothing", () => {
+    // renamePlayer refuses a blank name and hands back the squad it was given. Reporting
+    // that as a change marks the file dirty, so deleting the last character of a name cost
+    // a full write of every squad — over a phone connection, for nothing.
+    const onChange = vi.fn();
+    mount({ squad: squad(), onChange });
+    type(playerInputs()[0], "");
+    expect(onChange).not.toHaveBeenCalled();
+    // The half-typed text is still the editor's business, though: the field stays cleared.
+    expect(playerInputs()[0].value).toBe("");
+  });
 });

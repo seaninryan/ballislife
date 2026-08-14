@@ -305,7 +305,7 @@ export default function Catalogue({
   return (
     <>
       {sessionsBanner}
-        {squadsBanner}
+      {squadsBanner}
 
       {duplicateFolders ? (
         <div className="banner warn">

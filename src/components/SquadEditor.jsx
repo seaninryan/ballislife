@@ -30,7 +30,12 @@ export default function SquadEditor({ squad, onChange, onBack, onDelete }) {
 
   const rename = (id, value) => {
     setDrafts((d) => ({ ...d, [id]: value }));
-    onChange?.(renamePlayer(squad, id, value));
+    // renamePlayer hands back the squad it was given when there is nothing to do — a blank
+    // name, or an id it does not know. Reporting that as a change marks the whole file
+    // dirty, so deleting the last character of a name cost a full write of every squad
+    // over a phone connection, for nothing. The half-typed text above is still ours to keep.
+    const next = renamePlayer(squad, id, value);
+    if (next !== squad) onChange?.(next);
   };
 
   // Once the field is left, whatever the model actually holds is the truth again — so a

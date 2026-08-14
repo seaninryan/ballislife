@@ -106,6 +106,10 @@ export default function SessionBuilder({ session, drills = [], squads = [], onCh
   // display already reads. Both are set together so they can never drift apart, and both
   // are cleared together — "no squad" means no squad, not a name with nothing behind it.
   const setSquad = (id) => {
+    // Re-picking the deleted squad's own option is choosing what is already chosen. Without
+    // this it fell through to "no squad" and cleared BOTH fields, erasing the only surviving
+    // record of who that night was for.
+    if (id && id === session.squadId) return;
     const squad = squads.find((s) => s.id === id);
     onChange?.(squad
       ? { ...session, squadId: squad.id, squad: squad.name }
