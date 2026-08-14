@@ -20,6 +20,56 @@ describe("parseSquads", () => {
     expect(parseSquads("{").reason).toBe("parse");
     expect(parseSquads('{"version":9,"squads":{}}').reason).toBe("version");
   });
+
+  // These files are read and edited by hand, so a player written the obvious way — as a
+  // bare name — is a plausible thing to find. Left alone, `p.id === undefined` matched
+  // `undefined === undefined` in every mutator and the string was spread into an object:
+  // typing one character saved {"0":"S","1":"e",…}. Repair what can be repaired on the way
+  // in, so nothing downstream ever meets a player that is not {id, name}.
+  describe("repairing a hand-edited file", () => {
+    const read = (squads) => parseSquads(JSON.stringify({ version: 1, squads }));
+
+    it("gives a bare-string player a proper id and name", () => {
+      const r = read({ u14a: { id: "u14a", name: "U14A", players: ["Sean Ryan", "  Ali Khan  "] } });
+      expect(r.ok).toBe(true);
+      expect(r.squads.u14a.players).toEqual([
+        { id: "sean-ryan", name: "Sean Ryan" },
+        { id: "ali-khan", name: "Ali Khan" },
+      ]);
+    });
+
+    it("keeps two people with the same id apart, so renaming one cannot rename both", () => {
+      const r = read({
+        u14a: { id: "u14a", name: "U14A", players: [{ id: "x", name: "A" }, { id: "x", name: "B" }] },
+      });
+      expect(r.squads.u14a.players.map((p) => p.id)).toEqual(["x", "b"]);
+    });
+
+    it("keeps the fields it does not own, like who has left", () => {
+      const r = read({
+        u14a: { id: "u14a", name: "U14A", players: [{ id: "x", name: "A", left: true }] },
+      });
+      expect(r.squads.u14a.players[0]).toEqual({ id: "x", name: "A", left: true });
+    });
+
+    it("gives a player with a broken id one made from their name", () => {
+      const r = read({ u14a: { id: "u14a", name: "U14A", players: [{ id: "", name: "Ali Khan" }] } });
+      expect(r.squads.u14a.players).toEqual([{ id: "ali-khan", name: "Ali Khan" }]);
+    });
+
+    it("drops what cannot be repaired rather than carrying a nameless player", () => {
+      const r = read({
+        u14a: { id: "u14a", name: "U14A", players: [null, 7, { id: "x" }, { name: "  " }, "Ali"] },
+      });
+      expect(r.squads.u14a.players).toEqual([{ id: "ali", name: "Ali" }]);
+    });
+
+    it("answers a players field that is not a list with no players", () => {
+      expect(read({ u14a: { id: "u14a", name: "U14A", players: "Sean" } }).squads.u14a.players)
+        .toEqual([]);
+      expect(read({ u14a: { id: "u14a", name: "U14A" } }).squads.u14a.players).toEqual([]);
+    });
+  });
 });
 
 describe("playerId", () => {
@@ -74,6 +124,24 @@ describe("a squad's players", () => {
   it("restores a player to their original place in the list", () => {
     const back = restorePlayer(removePlayer(squad(), "ali-khan"), "ali-khan");
     expect(currentPlayers(back).map((p) => p.id)).toEqual(["sean-ryan", "ali-khan", "sean-ryan-2"]);
+  });
+
+  // Belt and braces behind parseSquads: an id that is not a real id must never match a
+  // player, because `undefined === undefined` matching every malformed row is what spread a
+  // bare string into an object and wrote it to Drive.
+  it("refuses an id that is not a real id, rather than matching anything", () => {
+    const s = squad();
+    for (const bad of [undefined, null, "", 7, {}]) {
+      expect(renamePlayer(s, bad, "Whoever")).toBe(s);
+      expect(removePlayer(s, bad)).toBe(s);
+      expect(restorePlayer(s, bad)).toBe(s);
+    }
+  });
+
+  it("changes ONE player when two somehow share an id", () => {
+    const s = { id: "u14a", name: "U14A", players: [{ id: "x", name: "A" }, { id: "x", name: "B" }] };
+    expect(renamePlayer(s, "x", "C").players.map((p) => p.name)).toEqual(["C", "B"]);
+    expect(removePlayer(s, "x").players.map((p) => p.left)).toEqual([true, undefined]);
   });
 
   it("survives being asked about nobody, or about no squad at all", () => {
