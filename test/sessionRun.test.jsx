@@ -1138,6 +1138,31 @@ describe("SessionRun attendance", () => {
     expect(summary).not.toMatch(/to go/);
   });
 
+  // The collapsed header and the register open beneath it are the same screen: two numbers
+  // for the same question is a bug however each is arrived at. Nothing compared them before,
+  // which is how they came to disagree.
+  it("the collapsed header and the open register agree once a marked player leaves the squad", () => {
+    const gone = idOf("Alfie Ryan");
+    const shrunk = {
+      ...squad,
+      players: squad.players.map((p) => (p.id === gone ? { ...p, left: true } : p)),
+    };
+    writeAttendance(localStorage, "s1", DAY,
+      { [gone]: PRESENT, [idOf("Kevin")]: PRESENT }, at("18:50"));
+    mount(base({ squad: shrunk }));
+
+    const header = container.querySelector(".run-attendance-summary").textContent;
+    act(() => { container.querySelector(".run-attendance-summary").click(); });
+    const open = container.querySelector(".attendance-summary").textContent;
+
+    // 14 in the squad, one of them ticked: the departed player's mark is last month's
+    // record, not tonight's count.
+    expect(header).toMatch(/1 present/);
+    expect(open).toMatch(/1 present/);
+    expect(header).toMatch(/13 to go/);
+    expect(open).toMatch(/13 to go/);
+  });
+
   it("is closed when the register was taken on the other device", () => {
     const s = { ...session(twoBlocks()), attendance: {
       [DAY]: { marks: { [idOf("Alfie Ryan")]: PRESENT }, updatedAt: at("18:50") },

@@ -24,7 +24,6 @@ import {
 } from "../lib/progress.js";
 import {
   readAttendance, localAttendance, writeAttendance, sessionAttendance, mergeAttendance,
-  turnout as presentCount,
   attendanceCounts,
 } from "../lib/attendance.js";
 import { currentPlayers } from "../lib/squads.js";
@@ -364,9 +363,17 @@ export default function SessionRun({
   // badge nor the current-block edge, and `current` above never sees it, because what is
   // "current" is about which drill to run. An untaken register does not stop a drill
   // being current and does not shift which one it is.
-  const registerTaken = Object.keys(attendanceMarks).length > 0;
+  // Every number this screen shows comes from ONE count, bounded by the squad on screen —
+  // the same bound Attendance itself uses. lib/attendance.turnout() is deliberately
+  // unbounded, because a mark says someone was here whatever the list says afterwards, but
+  // that is the historical record and this is tonight: reaching for it here made the
+  // collapsed header say "2 present" above a register reading "1 present", once a marked
+  // player had left the squad, or a plan's squad had been swapped under an old register.
   const players = currentPlayers(squad);
-  const { unmarked: unmarkedCount } = attendanceCounts(attendanceMarks, players);
+  const {
+    present: presentNow, absent: absentNow, excused: excusedNow, unmarked: unmarkedCount,
+  } = attendanceCounts(attendanceMarks, players);
+  const registerTaken = presentNow + absentNow + excusedNow > 0;
   // A register IN PROGRESS is not a turnout. Only once every current player is accounted
   // for does the present count describe the squad rather than how far down the list the
   // coach has got: six ticked with nine still to mark is not a squad of six, and a first
@@ -378,7 +385,7 @@ export default function SessionRun({
   // how many are actually here, once that can be answered.
   const effectiveTurnout = Number.isFinite(session?.turnout)
     ? session.turnout
-    : registerComplete ? presentCount(attendanceMarks) : undefined;
+    : registerComplete ? presentNow : undefined;
   const register = (
     <section className="card run-attendance">
       <button
@@ -392,7 +399,7 @@ export default function SessionRun({
           <>
             {/* The one number the rest of the night uses: it is what the swap picker means
                 by turnout. Shown collapsed so the register does not need opening to read it. */}
-            <span className="chip ok-chip">{presentCount(attendanceMarks)} present</span>
+            <span className="chip ok-chip">{presentNow} present</span>
             {/* A half-taken register collapses looking exactly like a finished one, and the
                 reason you glance at this line is to check you got everybody. Say what is
                 still outstanding rather than leaving it to be inferred from a count. */}
