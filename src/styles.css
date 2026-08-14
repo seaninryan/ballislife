@@ -352,3 +352,38 @@ textarea, input, select {
 .squad-add button { min-height: 44px; }
 .squad-departed > summary { cursor: pointer; }
 .squad-player-gone { min-height: 44px; justify-content: space-between; }
+
+/* The register, at the top of the run view. The whole row is the control — fifteen taps
+   standing up, one-handed, so 44px is the floor the squad editor already settled on and
+   the name sits at 16px so it is readable at arm's length. The state chip is pushed to
+   the right edge: the eye runs down the names, and the words Present/Absent/Excused line
+   up in a column of their own. */
+.attendance-summary { margin: 2px 0 6px; }
+.attendance-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; min-height: 44px; text-align: left; cursor: pointer;
+  padding: 6px 10px; margin: 6px 0;
+}
+.attendance-name { font-size: 16px; overflow-wrap: anywhere; }
+/* Colour is a second signal only — the chip says the state in words (see Attendance.jsx),
+   because this screen is read in bright sun. A marked row is tinted to match its chip so
+   a half-taken register can be scanned at a glance, at a strength that still leaves the
+   text well clear of it. */
+.attendance-present { background: #f2faf5; border-color: #bfe0cd; }
+.attendance-absent { background: #fef6f5; border-color: #f0c2ba; }
+.attendance-excused { background: #fefaef; border-color: #e7d9a4; }
+.attendance-empty { margin: 4px 0; }
+
+/* The register is a section like a block, but emphatically NOT a block: it never carries
+   the NOW badge or the current-block edge, because what is current is about drills. It
+   only borrows the summary row's look. */
+.run-attendance-summary {
+  background: none; border: none; padding: 8px 0; margin: 0; text-align: left;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer;
+  flex: 1; min-width: 0;
+}
+@media print {
+  /* On paper the register is a list of names to write on, so it prints — but the tap
+     targets are meaningless there, so it prints as plain rows. */
+  .attendance-row { border-color: var(--line); }
+}
