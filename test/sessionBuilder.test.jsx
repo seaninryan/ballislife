@@ -182,6 +182,75 @@ describe("SessionBuilder", () => {
     expect(updated.turnout).toBe(7);
   });
 
+  // Turnout is typed by hand OR answered by the register, and a hand-typed number always
+  // wins: the input keeps showing what was typed, with the register's count as its
+  // placeholder so it is obvious where the other number came from.
+  describe("turnout from the register", () => {
+    // Six present on the most recent night: rondo-4v2 (6-8) fits, cone-weave (20+) does not.
+    const withRegister = (extra = {}) => ({
+      ...baseSession(),
+      attendance: {
+        "2026-08-05": { marks: { a: "present" }, updatedAt: "2026-08-05T19:00:00.000Z" },
+        "2026-08-12": {
+          marks: {
+            a: "present", b: "present", c: "present", d: "present", e: "present", f: "present",
+            g: "absent", h: "excused",
+          },
+          updatedAt: "2026-08-12T19:00:00.000Z",
+        },
+      },
+      ...extra,
+    });
+    const turnoutInput = () => container.querySelector("input[type=number]");
+    const warmupOptions = () => [
+      ...container.querySelectorAll(".session-block select")[0].querySelectorAll("option"),
+    ].map((o) => o.textContent);
+
+    it("shows the register's count as the placeholder, leaving the field empty", () => {
+      mount({ session: withRegister(), drills });
+      expect(turnoutInput().value).toBe("");
+      expect(turnoutInput().placeholder).toBe("6");
+    });
+
+    it("offers only the drills that fit the number who actually turned up", () => {
+      mount({ session: withRegister(), drills });
+      expect(warmupOptions().some((o) => o.includes("Rondo 4v2"))).toBe(true);
+      expect(warmupOptions().some((o) => o.includes("Cone weave"))).toBe(false);
+    });
+
+    it("a hand-typed turnout wins over the register, and the count stays visible as the placeholder", () => {
+      mount({ session: withRegister({ turnout: 22 }), drills });
+      expect(turnoutInput().value).toBe("22");
+      expect(turnoutInput().placeholder).toBe("6");
+      expect(warmupOptions().some((o) => o.includes("Cone weave"))).toBe(true);
+      expect(warmupOptions().some((o) => o.includes("Rondo 4v2"))).toBe(false);
+    });
+
+    it("clearing the input goes back to the register's count, not to nothing", () => {
+      const onChange = vi.fn();
+      mount({ session: withRegister({ turnout: 22 }), drills, onChange });
+      act(() => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(turnoutInput(), "");
+        turnoutInput().dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const updated = onChange.mock.calls.at(-1)[0];
+      expect(updated.turnout).toBe(null);
+      // App hands the cleared session back: the register answers again.
+      mount({ session: updated, drills });
+      expect(turnoutInput().placeholder).toBe("6");
+      expect(warmupOptions().some((o) => o.includes("Rondo 4v2"))).toBe(true);
+    });
+
+    it("with no register and nothing typed, offers everything and suggests nothing", () => {
+      mount({ session: baseSession(), drills });
+      expect(turnoutInput().value).toBe("");
+      expect(turnoutInput().placeholder).toBe("");
+      expect(warmupOptions().some((o) => o.includes("Rondo 4v2"))).toBe(true);
+      expect(warmupOptions().some((o) => o.includes("Cone weave"))).toBe(true);
+    });
+  });
+
   it("reordering with ↓ calls onChange with the blocks swapped", () => {
     const onChange = vi.fn();
     mount({ session: baseSession(), drills, onChange });

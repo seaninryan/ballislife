@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  PRESENT, ABSENT, EXCUSED, STATES, attendanceCounts, turnout, nextState,
+  PRESENT, ABSENT, EXCUSED, STATES, attendanceCounts, turnout, nextState, recordedTurnout,
   readAttendance, writeAttendance, localAttendance, sessionAttendance, withSessionAttendance,
 } from "../src/lib/attendance.js";
 
@@ -116,5 +116,47 @@ describe("the store", () => {
     const session = withSessionAttendance({ id: "s1" }, "2026-08-07", { a: PRESENT }, "2026-08-07T18:00:00.000Z");
     const next = withSessionAttendance(session, "2026-08-14", { a: ABSENT }, "2026-08-14T18:00:00.000Z");
     expect(Object.keys(next.attendance)).toEqual(["2026-08-07", "2026-08-14"]);
+  });
+});
+
+// What the builder shows as its turnout placeholder: it is looking at a plan rather than
+// running one, so there is no "today" to key off — the answer is whatever the last register
+// taken against this plan says.
+describe("recordedTurnout", () => {
+  const on = (day, marks) => ({ marks, updatedAt: `${day}T19:00:00.000Z` });
+
+  it("is the present count of the only night a register was taken", () => {
+    const session = { id: "s1", attendance: { "2026-08-14": on("2026-08-14", { a: PRESENT, b: PRESENT, c: ABSENT }) } };
+    expect(recordedTurnout(session)).toBe(2);
+  });
+
+  it("is the most recent night's, not the first — a plan gets run again next week", () => {
+    const session = { id: "s1", attendance: {
+      "2026-08-07": on("2026-08-07", { a: PRESENT, b: PRESENT, c: PRESENT }),
+      "2026-08-14": on("2026-08-14", { a: PRESENT }),
+    } };
+    expect(recordedTurnout(session)).toBe(1);
+  });
+
+  it("skips a night whose register was cleared: an empty register says nothing", () => {
+    const session = { id: "s1", attendance: {
+      "2026-08-07": on("2026-08-07", { a: PRESENT, b: PRESENT }),
+      "2026-08-14": on("2026-08-14", {}),
+    } };
+    expect(recordedTurnout(session)).toBe(2);
+  });
+
+  it("is null when no register has ever been taken — which is not zero", () => {
+    // Zero would mean "nobody turned up", and would hide every drill in the picker.
+    expect(recordedTurnout({ id: "s1" })).toBe(null);
+    expect(recordedTurnout({ id: "s1", attendance: {} })).toBe(null);
+    expect(recordedTurnout(null)).toBe(null);
+    expect(recordedTurnout({ id: "s1", attendance: { "2026-08-14": on("2026-08-14", {}) } })).toBe(null);
+  });
+
+  it("survives a hand-edited attendance block", () => {
+    expect(recordedTurnout({ attendance: "nonsense" })).toBe(null);
+    expect(recordedTurnout({ attendance: { "2026-08-14": "nonsense" } })).toBe(null);
+    expect(recordedTurnout({ attendance: { "2026-08-14": { marks: { a: "here-ish" } } } })).toBe(null);
   });
 });

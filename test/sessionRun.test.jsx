@@ -1256,6 +1256,65 @@ describe("SessionRun attendance", () => {
     expect(container.querySelectorAll(".run-block-now-badge")).toHaveLength(1);
   });
 
+  // Swapping mid-session is the moment turnout matters most: the plan did not survive the
+  // eleven who actually turned up, and the picker must stop offering the drill that needs
+  // twenty. So the register answers it, unless a number was typed on the plan.
+  describe("turnout for the swap picker", () => {
+    const sizedDrills = () => [
+      { ...drill("a", "Alpha", 10, "warmup"), players: "6-8" },
+      { ...drill("b", "Bravo", 10, "skill"), players: null },
+      { ...drill("c", "Charlie", 5, "warmup"), players: "6-8" },
+      { ...drill("d", "Delta", 5, "warmup"), players: "20+" },
+    ];
+    const offered = () => [...container.querySelectorAll(".drill-picker-option .block-title")]
+      .map((e) => e.textContent);
+    const swap = () => {
+      act(() => {
+        [...container.querySelectorAll("button")].find((b) => b.textContent === "Swap").click();
+      });
+    };
+    const sixPresent = () => Object.fromEntries(
+      squad.players.slice(0, 6).map((p) => [p.id, PRESENT]),
+    );
+
+    it("uses the register's count when the plan has no turnout typed on it", () => {
+      writeAttendance(localStorage, "s1", DAY, sixPresent(), at("18:50"));
+      mount(base({ drills: sizedDrills(), onSwap: () => {} }));
+      swap();
+      expect(offered()).toContain("Charlie"); // 6-8 fits the six who came
+      expect(offered()).not.toContain("Delta"); // 20+ does not
+    });
+
+    it("a turnout typed on the plan still wins over the register", () => {
+      writeAttendance(localStorage, "s1", DAY, sixPresent(), at("18:50"));
+      const s = { ...session(twoBlocks()), turnout: 22 };
+      mount(base({ session: s, drills: sizedDrills(), onSwap: () => {} }));
+      swap();
+      expect(offered()).toContain("Delta");
+      expect(offered()).not.toContain("Charlie");
+    });
+
+    it("offers everything while the register is untaken, rather than nothing", () => {
+      // An untaken register is not a turnout of zero, which would hide every drill that
+      // says how many it needs.
+      mount(base({ drills: sizedDrills(), onSwap: () => {} }));
+      expect(offered()).toEqual([]); // the picker is not open yet
+      swap();
+      expect(offered()).toEqual(expect.arrayContaining(["Charlie", "Delta"]));
+    });
+
+    it("follows the register as it is taken, without leaving the run view", () => {
+      mount(base({ drills: sizedDrills(), onSwap: () => {} }));
+      for (const name of ["Alfie Ryan", "Cillian Conlan", "Danny Mitchell", "Aaron Cummins",
+        "Matthew Drysdale", "Daragh B Kelly"]) {
+        act(() => { rowFor(name).click(); });
+      }
+      swap();
+      expect(offered()).toContain("Charlie");
+      expect(offered()).not.toContain("Delta");
+    });
+  });
+
   it("a register survives a remount on the same day, and a new day starts clean", () => {
     mount(base());
     act(() => { rowFor("Sean Coughlan").click(); });

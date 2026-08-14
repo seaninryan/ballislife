@@ -55,6 +55,24 @@ export function attendanceCounts(marks, players) {
 export const turnout = (marks) =>
   Object.values(marks ?? {}).filter((state) => state === PRESENT).length;
 
+// The turnout a PLAN can be said to have, for a screen that is looking at one rather than
+// running it: the present count from the last register taken against it. The builder has no
+// "tonight" to key off — a plan is edited days before and days after it is run — so the most
+// recent night is the only honest answer. ISO dates sort lexically, so that is the last key.
+//
+// Null, never zero, when there is nothing to go on: zero means "nobody turned up", and would
+// hide every drill in the picker. A night whose register was cleared is skipped for the same
+// reason — an empty register says nothing about how many were there.
+export function recordedTurnout(session) {
+  const days = Object.keys(session?.attendance ?? {}).sort();
+  for (let i = days.length - 1; i >= 0; i -= 1) {
+    const side = sessionAttendance(session, days[i]);
+    const count = side ? turnout(side.marks) : 0;
+    if (count) return count;
+  }
+  return null;
+}
+
 // One control per player, cycling: unmarked -> present -> absent -> excused -> unmarked.
 // A register is twenty taps, and one tappable row beats three buttons per row on a phone
 // held in one hand at the side of a pitch. Anything unrecognised starts the cycle rather

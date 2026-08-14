@@ -9,6 +9,7 @@
 // nothing about what fits or what a block is worth.
 import React, { useState } from "react";
 import { SLOTS, resolveBlocks, totalMinutes, emptySlots, fitsSquad, setBlock, moveBlock } from "../lib/sessions.js";
+import { recordedTurnout } from "../lib/attendance.js";
 
 function BlockRow({ block, index, count, drills, turnout, onChange, onMove }) {
   const [showAll, setShowAll] = useState(false);
@@ -87,7 +88,12 @@ function BlockRow({ block, index, count, drills, turnout, onChange, onMove }) {
 
 export default function SessionBuilder({ session, drills = [], squads = [], onChange, onBack, onDelete, onRun }) {
   const turnout = session.turnout ?? "";
-  const turnoutNumber = session.turnout ?? undefined;
+  // What the register says, if one has been taken against this plan. It is the input's
+  // PLACEHOLDER rather than its value, so it is obvious both where the number came from and
+  // that typing over it wins — and clearing the field falls back to it rather than to
+  // nothing, which is why the same fallback drives the picker below.
+  const derivedTurnout = recordedTurnout(session);
+  const turnoutNumber = session.turnout ?? derivedTurnout ?? undefined;
 
   // rawMinutes carries the block's own (possibly null) minutes through resolveBlocks,
   // which overwrites `minutes` with the resolved figure — the input needs the raw value
@@ -151,6 +157,7 @@ export default function SessionBuilder({ session, drills = [], squads = [], onCh
               type="number"
               min="0"
               value={turnout}
+              placeholder={derivedTurnout != null ? String(derivedTurnout) : ""}
               onChange={(e) => setTurnout(e.target.value)}
               style={{ width: 64 }}
             />
