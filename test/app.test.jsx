@@ -1733,6 +1733,39 @@ describe("App squads", () => {
     }
   });
 
+  it("does not carry a half-typed name from one squad to the next", async () => {
+    // The editor holds the in-progress text for a row keyed by player id, and App swaps the
+    // squad underneath it without unmounting. Two squads whose players share an id — the
+    // ordinary case, since ids are made from names — then showed squad A's cleared draft on
+    // squad B's row: a wrong name, in an editable field, one keystroke from being saved.
+    drive.loadSquads.mockResolvedValue(squadsLoad({
+      a: squad("a", "Alpha Squad", [{ id: "sean-ryan", name: "Sean Ryan" }]),
+      b: squad("b", "Bravo Squad", [{ id: "sean-ryan", name: "Sean Ryan (B)" }]),
+    }));
+    drive.saveSquads.mockResolvedValue({ ok: true, fileId: "sq", modifiedTime: "Q2" });
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    const typeInput = async (el, value) => {
+      await act(async () => {
+        setter.call(el, value);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+    location.hash = "#/squad/a";
+    await mount();
+
+    await typeInput(container.querySelector(".squad-player input"), "");
+    await typeInput(container.querySelector(".squad-add input"), "Ali Khan");
+
+    await act(async () => {
+      location.hash = "#/squad/b";
+      window.dispatchEvent(new Event("hashchange"));
+    });
+
+    expect(container.querySelector(".squad-name").value).toBe("Bravo Squad");
+    expect(container.querySelector(".squad-player input").value).toBe("Sean Ryan (B)");
+    expect(container.querySelector(".squad-add input").value).toBe("");
+  });
+
   it("deletes a squad only after confirmation", async () => {
     drive.loadSquads.mockResolvedValue(squadsLoad({ u14a: squad("u14a", "U14A Boys") }));
     drive.saveSquads.mockResolvedValue({ ok: true, fileId: "sq", modifiedTime: "Q2" });

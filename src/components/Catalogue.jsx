@@ -264,7 +264,14 @@ export default function Catalogue({
       <div>
         {sessionsBanner}
         {squadsBanner}
+        {/* Keyed by squad, so switching squads is a new editor rather than the same one
+            handed different data. Its half-typed names live in state keyed by player id,
+            and ids are made from names — so two squads sharing a player id showed one
+            squad's cleared draft on the other's row: a wrong name, in an editable field,
+            one keystroke from being saved. Back, forward and a pasted #/squad/<id> all
+            change the squad without unmounting. */}
         <SquadEditor
+          key={selectedSquad.id}
           squad={selectedSquad}
           onChange={onSquadChange}
           onBack={onSquadBack}
