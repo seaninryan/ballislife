@@ -1547,6 +1547,30 @@ describe("App squads", () => {
     expect(container.textContent).toContain("2026-08-12");
   });
 
+  it("holds every save when the squads load THREW, rather than creating a second file", async () => {
+    // A load that threw leaves us knowing nothing about squads.json — including whether
+    // there is one. Left as "no file yet", the next save takes the create path and writes a
+    // SECOND squads.json, after which loadSquads reads whichever the listing returns first.
+    drive.loadSquads.mockRejectedValue(Object.assign(new Error("boom"), { code: 500 }));
+    vi.spyOn(window, "prompt").mockReturnValue("U14A Boys");
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSquads();
+      await act(async () => { findButton("New squad").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+
+      expect(drive.saveSquads).not.toHaveBeenCalled();
+      // The edit is not thrown away, and the banner says both true things: what failed, and
+      // that nothing will be written until it works.
+      expect(container.querySelector(".squad-name").value).toBe("U14A Boys");
+      expect(banners()).toMatch(/squads could not be loaded/i);
+      expect(banners()).toMatch(/this device only/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("makes a new squad from a name, with an id of its own", async () => {
     vi.spyOn(window, "prompt").mockReturnValue("U14A Boys");
     drive.saveSquads.mockResolvedValue({ ok: true, fileId: "sq", modifiedTime: "Q2" });

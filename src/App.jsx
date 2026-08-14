@@ -603,6 +603,13 @@ export default function App() {
         } catch (e) {
           // Nothing in Drive has been changed by a failed load, and everything else on
           // screen still works. Say so rather than blanking the app.
+          //
+          // And hold every save: a load that threw tells us NOTHING about squads.json —
+          // not even whether there is one. Leaving the state at its initial value is
+          // byte-identical to "there is no file yet", so the next save takes the create
+          // path and writes a SECOND squads.json, which loadSquads then picks between at
+          // random. Unknown gets the same answer as unreadable.
+          setSquadsState({ ...squadsStateRef.current, blocked: { reason: "load" } });
           setSquadsLoadError(e);
         }
       }

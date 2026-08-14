@@ -68,12 +68,18 @@ function SquadsSaveBanner({ status, error, conflict, resolving, blocked, loadErr
   return (
     <>
       {loadError ? (
+        // A load that threw and a file that would not parse are both "we must not write
+        // over what we cannot see", but only one of them knows a squads.json is there — so
+        // the failed load says the true thing about itself rather than inventing a file.
         <div className="banner err">
           Your squads could not be loaded: {friendlyError(loadError)} Nothing in Drive has
-          been changed, and everything else here still works. Reload to try again.
+          been changed, and everything else here still works — but saving squads is held
+          until they load, because writing without having read them could destroy every
+          player in the list. Anything you change here is kept on this device only. Reload
+          to try again.
         </div>
       ) : null}
-      {blocked ? (
+      {blocked && !loadError ? (
         <div className="banner err">
           Your <strong>squads.json</strong> in Drive exists but could not be read
           ({blocked.reason}), so saving squads is blocked — writing over a file we could not
