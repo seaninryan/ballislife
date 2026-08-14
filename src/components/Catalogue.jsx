@@ -68,6 +68,9 @@ export default function Catalogue({
   // is on screen everywhere; this only decides what goes under it.
   mode = "drills",
   sessions = [], selectedSession, onOpenSession, onCreateSession,
+  // The plans that are mid-run today, computed once in App so the header and this list
+  // cannot disagree about which one it is.
+  activeSessionIds = [],
   onSessionChange, onSessionBack, onDeleteSession,
   sessionsStatus, sessionsError, sessionsConflicts = [], sessionsResolving = [],
   onKeepMineSessions, onReloadSessions,
@@ -299,6 +302,7 @@ export default function Catalogue({
           onOpen={onOpenSession}
           onCreate={onCreateSession}
           onRun={onOpenRun}
+          activeIds={activeSessionIds}
         />
       ) : (
         <>

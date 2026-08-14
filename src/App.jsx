@@ -843,6 +843,7 @@ export default function App() {
         onCreate={onCreate}
         mode={mode}
         sessions={sessionsList}
+        activeSessionIds={activeIds}
         selectedSession={selectedSession}
         onOpenSession={onOpenSession}
         onCreateSession={onCreateSession}

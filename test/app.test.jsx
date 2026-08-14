@@ -1477,5 +1477,12 @@ describe("App header", () => {
     expect(findButton("Sessions").querySelector(".nav-dot")).not.toBeNull();
     await openCard("Alpha");
     expect(findButton("Sessions").querySelector(".nav-dot")).not.toBeNull();
+    // And the same plan is the one marked on the sessions page — one derivation, so the
+    // header and the list cannot name different plans.
+    await act(async () => { findButton("Sessions").click(); });
+    const row = container.querySelector(".session-row-active");
+    expect(row).not.toBeNull();
+    expect(row.textContent).toContain(today);
+    expect(row.textContent).toContain("Resume");
   });
 });

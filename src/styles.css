@@ -305,3 +305,7 @@ textarea, input, select {
 @keyframes nav-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .nav-dot { animation: none; } }
 @media print { .app-header { display: none; } }
+
+/* The plan you are in the middle of, found at a glance among a year of them. */
+.session-row-active .session-row { border-color: var(--accent); border-left-width: 4px; }
+.active-chip { background: var(--accent); border-color: var(--accent); color: #fff; }

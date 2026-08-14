@@ -12,6 +12,14 @@ const drills = [
 
 const render = (props) => renderToStaticMarkup(<SessionList {...props} />);
 
+// The same static render, parsed, for assertions that are about one row rather than the
+// page: "this plan is marked and that one is not" cannot be asked of a string.
+const mount = (props) => {
+  const el = document.createElement("div");
+  el.innerHTML = render(props);
+  return el;
+};
+
 describe("SessionList", () => {
   it("renders one row per session, newest date first", () => {
     const sessions = [
@@ -57,6 +65,24 @@ describe("SessionList", () => {
   it("explains an empty list rather than rendering nothing", () => {
     const html = render({ sessions: [], drills });
     expect(html).toMatch(/no sessions/i);
+  });
+
+  it("marks the plan that is under way, and offers to resume rather than start it", () => {
+    const sessions = [emptySession("2026-08-14", "2026-08-14", "U12s"),
+      emptySession("2026-08-13", "2026-08-13", "U12s")];
+    const container = mount({ sessions, drills, onRun: () => {}, activeIds: ["2026-08-14"] });
+    const rows = container.querySelectorAll(".session-row-wrap");
+    expect(rows[0].className).toContain("session-row-active");
+    expect(rows[0].textContent).toMatch(/under way/i);
+    expect(rows[0].textContent).toContain("Resume");
+    // The other plan is untouched.
+    expect(rows[1].className).not.toContain("session-row-active");
+    expect(rows[1].textContent).toContain("Run this session");
+  });
+
+  it("marks nothing when no plan is under way", () => {
+    const container = mount({ sessions: [emptySession("2026-08-14", "2026-08-14", "U12s")], drills, onRun: () => {} });
+    expect(container.querySelector(".session-row-active")).toBeNull();
   });
 
   it("offers a Run this session control on each row", () => {
