@@ -20,9 +20,12 @@ export default function Header({ mode = "drills", onModeChange, onHome, activeCo
       </button>
 
       <nav className="row app-nav">
+        {/* `mode === "drills"`, never `mode !== "sessions"`: that held while there were
+            two sections and quietly broke the moment there were three, lighting Drills up
+            while the owner was standing in Squads. */}
         <button
           type="button"
-          className={`chip-button${mode !== "sessions" ? " active" : ""}`}
+          className={`chip-button${mode === "drills" ? " active" : ""}`}
           onClick={() => onModeChange?.("drills")}
         >
           Drills
@@ -35,6 +38,13 @@ export default function Header({ mode = "drills", onModeChange, onHome, activeCo
         >
           Sessions
           {running ? <span className="nav-dot" aria-hidden="true" /> : null}
+        </button>
+        <button
+          type="button"
+          className={`chip-button${mode === "squads" ? " active" : ""}`}
+          onClick={() => onModeChange?.("squads")}
+        >
+          Squads
         </button>
       </nav>
 

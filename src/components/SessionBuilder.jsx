@@ -85,7 +85,7 @@ function BlockRow({ block, index, count, drills, turnout, onChange, onMove }) {
   );
 }
 
-export default function SessionBuilder({ session, drills = [], onChange, onBack, onDelete, onRun }) {
+export default function SessionBuilder({ session, drills = [], squads = [], onChange, onBack, onDelete, onRun }) {
   const turnout = session.turnout ?? "";
   const turnoutNumber = session.turnout ?? undefined;
 
@@ -102,6 +102,18 @@ export default function SessionBuilder({ session, drills = [], onChange, onBack,
 
   const patchBlock = (index, patch) => onChange?.(setBlock(session, index, patch));
   const move = (from, to) => onChange?.(moveBlock(session, from, to));
+  // The id is what attendance will point at; the free-text name is what every existing
+  // display already reads. Both are set together so they can never drift apart, and both
+  // are cleared together — "no squad" means no squad, not a name with nothing behind it.
+  const setSquad = (id) => {
+    const squad = squads.find((s) => s.id === id);
+    onChange?.(squad
+      ? { ...session, squadId: squad.id, squad: squad.name }
+      : { ...session, squadId: null, squad: "" });
+  };
+  // A squad deleted since this plan was written. It is still named rather than dropped:
+  // an empty picker would silently re-point a night's plan at whatever squad sorts first.
+  const missingSquad = session.squadId && !squads.some((s) => s.id === session.squadId);
   const setTurnout = (v) => onChange?.({ ...session, turnout: v === "" ? null : Number(v) });
   const setLength = (v) => onChange?.({ ...session, length: v === "" ? null : Number(v) });
 
@@ -138,6 +150,18 @@ export default function SessionBuilder({ session, drills = [], onChange, onBack,
               onChange={(e) => setTurnout(e.target.value)}
               style={{ width: 64 }}
             />
+          </label>
+          <label className="dim">
+            Squad:{" "}
+            <select value={session.squadId ?? ""} onChange={(e) => setSquad(e.target.value)}>
+              <option value="">No squad</option>
+              {squads.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {missingSquad ? (
+                <option value={session.squadId}>
+                  {session.squad || session.squadId} (no longer one of your squads)
+                </option>
+              ) : null}
+            </select>
           </label>
           <label className="dim">
             Session length (minutes):{" "}

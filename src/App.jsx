@@ -6,10 +6,12 @@ import { aboutEmail } from "./lib/driveApi.js";
 import { isOwner } from "./lib/owner.js";
 import {
   loadCatalogue, readDrill, saveDrill, createDrill, deleteDrill, knownModifiedTime,
-  loadSessions, saveSession, deleteSession,
+  loadSessions, saveSession, deleteSession, loadSquads, saveSquads,
 } from "./lib/drive.js";
 import { openEditor, reduce, shouldSave } from "./lib/editor.js";
 import { emptySession, resolveBlocks, setBlock } from "./lib/sessions.js";
+import { emptySquad, linkSquadId } from "./lib/squads.js";
+import { slugify } from "./lib/drills.js";
 import { withSessionProgress, activeSessionIds } from "./lib/progress.js";
 import { localStore, todayIso } from "./lib/browser.js";
 import { parseHash, formatHash } from "./lib/route.js";
@@ -58,6 +60,27 @@ export default function App() {
   // screen: the catalogue is already loaded by then, and hiding it costs more than it saves.
   const [sessionsUnmigrated, setSessionsUnmigrated] = useState([]);
   const [sessionsLoadError, setSessionsLoadError] = useState(null);
+  // Every squad lives in ONE file, so unlike the plans there is one baseline, one dirty
+  // flag and one conflict for the lot — the pre-split sessions shape, which is right here
+  // for the reasons the plan gives: a handful of squads, edited a few times a season.
+  const [squadsState, setSquadsStateRaw] = useState({
+    data: {},            // id -> squad
+    fileId: null,        // null until squads.json exists; the first save creates it
+    modifiedTime: null,  // the conflict baseline Drive last reported
+    dirty: false,
+    // Drive has moved on. The edit is kept and NOT re-sent — the baseline has been moved to
+    // what Drive reported, so re-sending would silently win — until the owner answers.
+    conflict: false,
+    // The load found a squads.json it could not read. Every save is held while this is set:
+    // writing over a file we could not read is how a corrupt sessions.json nearly lost every
+    // plan. Only a reload, after the file is fixed in Drive, clears it.
+    blocked: null,       // null | { reason }
+    status: "idle",      // idle | dirty | saving | failed
+    error: null,
+  });
+  const [squadsLoadError, setSquadsLoadError] = useState(null);
+  const [squadsResolving, setSquadsResolving] = useState(false);
+  const [selectedSquadId, setSelectedSquadId] = useState(null);
   const folderRef = useRef(null);
   // A monotonic token, not the drill id: reopening the SAME drill starts a second
   // request that an id check cannot tell from the first, so the slower response won.
@@ -333,6 +356,147 @@ export default function App() {
 
   useEffect(() => () => clearTimeout(sessionsSaveTimer.current), []);
 
+  // Same ref-beside-state pattern as the plans: the debounce callback reads the latest
+  // squads without being re-created on every keystroke.
+  const squadsStateRef = useRef(squadsState);
+  const setSquadsState = useCallback((next) => {
+    squadsStateRef.current = next;
+    setSquadsStateRaw(next);
+  }, []);
+  const squadsSaveTimer = useRef(null);
+  // Two flushes overlapping would write the same file twice against the same baseline, and
+  // Drive would report the second as a conflict against our own first write.
+  const squadsSaving = useRef(false);
+
+  // Writes the whole squad list, one file, against the one baseline.
+  const flushSquadsSave = useCallback(async () => {
+    if (squadsSaving.current) return;
+    const start = squadsStateRef.current;
+    // Nothing to send; already refused by Drive and waiting for an answer; or held because
+    // the file in Drive could not be read and must not be written over.
+    if (!start.dirty || start.conflict || start.blocked) return;
+    squadsSaving.current = true;
+    setSquadsState({ ...start, status: "saving" });
+
+    const sent = start.data;
+    let result;
+    try {
+      result = await saveSquads({
+        folder: folderRef.current,
+        fileId: start.fileId,
+        data: sent,
+        baseModifiedTime: start.modifiedTime,
+      });
+    } catch (error) {
+      // saveSquads reports rather than throws, but a rejection here must still not take the
+      // app down with it — the edit is in memory and the next change retries.
+      result = { ok: false, error };
+    } finally {
+      squadsSaving.current = false;
+    }
+
+    const latest = squadsStateRef.current;
+    if (result.ok) {
+      // Identity, not equality: an edit made WHILE this save was in flight has not reached
+      // Drive, so the list stays dirty and is written again rather than reported as saved.
+      const stillDirty = latest.data !== sent;
+      setSquadsState({
+        ...latest,
+        // The fileId only arrives with the save that created the file.
+        fileId: result.fileId ?? latest.fileId,
+        modifiedTime: result.modifiedTime,
+        dirty: stillDirty,
+        status: stillDirty ? "dirty" : "idle",
+        error: null,
+      });
+      if (stillDirty) squadsSaveTimer.current = setTimeout(flushSquadsSave, SAVE_DEBOUNCE_MS);
+    } else if (result.conflict) {
+      // Adopt what Drive reports so "Keep mine" can write over it, and never touch `data`:
+      // the owner's version is what must survive until he chooses.
+      setSquadsState({ ...latest, modifiedTime: result.modifiedTime, conflict: true, status: "dirty" });
+    } else {
+      // A failure stops the automatic retry — it waits for the next edit, the same terms
+      // the drill editor and the plans offer.
+      setSquadsState({ ...latest, status: "failed", error: result.error });
+    }
+  }, [setSquadsState]);
+
+  const scheduleSquadsSave = useCallback(() => {
+    clearTimeout(squadsSaveTimer.current);
+    squadsSaveTimer.current = setTimeout(flushSquadsSave, SAVE_DEBOUNCE_MS);
+  }, [flushSquadsSave]);
+
+  // One squad changed: merge it in by id and mark the file dirty. A conflict is not cleared
+  // by editing further — Drive is still ahead of us — only Keep mine or Reload resolves it.
+  const onSquadChange = useCallback((squad) => {
+    const cur = squadsStateRef.current;
+    setSquadsState({
+      ...cur,
+      data: { ...cur.data, [squad.id]: squad },
+      dirty: true,
+      status: "dirty",
+    });
+    scheduleSquadsSave();
+  }, [setSquadsState, scheduleSquadsSave]);
+
+  // Closes the squad on screen, flushing any unsaved change first — the squads equivalent
+  // of closeEditor and closeSessionBuilder.
+  const closeSquadEditor = useCallback(() => {
+    clearTimeout(squadsSaveTimer.current);
+    flushSquadsSave();
+    setSelectedSquadId(null);
+  }, [flushSquadsSave]);
+
+  const onSquadBack = useCallback(() => {
+    closeSquadEditor();
+    location.hash = formatHash({ view: "squads" });
+  }, [closeSquadEditor]);
+
+  const onOpenSquad = useCallback((squad) => {
+    setSelectedSquadId(squad.id);
+    location.hash = formatHash({ view: "squad", slug: squad.id });
+  }, []);
+
+  // The baseline was already moved to Drive's current value when the conflict was reported,
+  // so clearing the flag is enough for the next flush to send our version and win.
+  const onKeepMineSquads = useCallback(() => {
+    const cur = squadsStateRef.current;
+    if (!cur.conflict) return;
+    if (squadsResolving) return; // a Reload is on the wire; that answer wins
+    setSquadsState({ ...cur, conflict: false, dirty: true, status: "dirty" });
+    squadsSaveTimer.current = setTimeout(flushSquadsSave, 0);
+  }, [setSquadsState, flushSquadsSave, squadsResolving]);
+
+  // Takes Drive's squads, dropping this device's unsaved edit to them — which is what
+  // Reload means. Also what stops a double tap issuing two concurrent loads.
+  const onReloadSquads = useCallback(async () => {
+    if (squadsResolving) return;
+    setSquadsResolving(true);
+    let loaded;
+    try {
+      loaded = await loadSquads(folderRef.current);
+    } catch (e) {
+      setSquadsResolving(false);
+      setSquadsLoadError(e);
+      return;
+    }
+    setSquadsResolving(false);
+    setSquadsState({
+      ...squadsStateRef.current,
+      data: loaded.squads ?? {},
+      fileId: loaded.fileId ?? null,
+      modifiedTime: loaded.modifiedTime ?? null,
+      dirty: false,
+      conflict: false,
+      blocked: loaded.failed ?? null,
+      status: "idle",
+      error: null,
+    });
+    setSquadsLoadError(null);
+  }, [setSquadsState, squadsResolving]);
+
+  useEffect(() => () => clearTimeout(squadsSaveTimer.current), []);
+
   // Whether the plans have had their one automatic load. They are loaded once, with the
   // first catalogue, and never again by a later one: `load` also runs on New drill and
   // Delete drill, and replacing the sessions state there threw away every unsaved edit and
@@ -342,6 +506,28 @@ export default function App() {
   // so even a failed one is not retried behind a plan the owner has since typed into; the
   // banner asks him to reload the page instead. Reload (per plan) is the other way in.
   const sessionsLoaded = useRef(false);
+  // The same one-automatic-load rule, for the same reason: a drill-side action must not
+  // reach into squad state, where an unsaved edit may be the only copy.
+  const squadsLoaded = useRef(false);
+
+  // Gives every plan that names its squad only in free text the id of the squad of that
+  // name. IN MEMORY ONLY, deliberately: this is a change to a session, so marking them
+  // dirty would be honest — and would fire one write per plan the moment the app opens, on
+  // the connection least able to take it, for a link that costs nothing to recompute next
+  // time. The next real edit to a plan carries its link to Drive with it.
+  const linkSessionsToSquads = useCallback((squads) => {
+    if (!Object.keys(squads).length) return;
+    const cur = sessionsStateRef.current;
+    const linked = {};
+    let changed = false;
+    for (const [id, sess] of Object.entries(cur.data.sessions)) {
+      const next = linkSquadId(sess, squads);
+      linked[id] = next;
+      if (next !== sess) changed = true;
+    }
+    // `dirty` is untouched on purpose — see above.
+    if (changed) setSessionsState({ ...cur, data: { ...cur.data, sessions: linked } });
+  }, [setSessionsState]);
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -390,6 +576,36 @@ export default function App() {
           setSessionsLoadError(e);
         }
       }
+      // Squads load after the plans, because linking a plan to its squad needs both. Its
+      // own try/catch for the same reason the sessions load has one — and its OWN error
+      // state rather than the sessions one, so a failure here cannot report "your session
+      // plans could not be loaded" about plans that loaded perfectly well. Once only, for
+      // the same reason: `load` also runs on New drill and Delete drill, and replacing the
+      // squads state there would throw away an unsaved edit or an unanswered conflict.
+      if (!squadsLoaded.current) {
+        squadsLoaded.current = true;
+        try {
+          const { squads, fileId, modifiedTime, failed: unreadable } = await loadSquads(folderId);
+          setSquadsState({
+            data: squads ?? {},
+            fileId: fileId ?? null,
+            modifiedTime: modifiedTime ?? null,
+            dirty: false,
+            conflict: false,
+            // A squads.json that exists but could not be read. Holding every save is the
+            // whole point of the load reporting it separately from "there are no squads".
+            blocked: unreadable ?? null,
+            status: "idle",
+            error: null,
+          });
+          setSquadsLoadError(null);
+          linkSessionsToSquads(squads ?? {});
+        } catch (e) {
+          // Nothing in Drive has been changed by a failed load, and everything else on
+          // screen still works. Say so rather than blanking the app.
+          setSquadsLoadError(e);
+        }
+      }
       setStatus("ready");
       return loaded;
     } catch (e) {
@@ -397,7 +613,7 @@ export default function App() {
       setStatus("error");
       return null;
     }
-  }, [setSessionsState]);
+  }, [setSessionsState, setSquadsState, linkSessionsToSquads]);
 
   useEffect(() => {
     let cancelled = false;
@@ -644,14 +860,52 @@ export default function App() {
     closeEditor();
     setSelected(null);
     closeSessionBuilder();
+    // A squad is edited in place with a debounced save, exactly like a plan, so leaving it
+    // for another section has to go through the path that flushes it — otherwise the last
+    // name typed before the tap is dropped.
+    closeSquadEditor();
     if (next === "sessions") {
       setMode("sessions");
       location.hash = formatHash({ view: "sessions" });
+    } else if (next === "squads") {
+      setMode("squads");
+      location.hash = formatHash({ view: "squads" });
     } else {
       setMode("drills");
       location.hash = formatHash({ view: "browse" });
     }
-  }, [closeEditor, closeSessionBuilder]);
+  }, [closeEditor, closeSessionBuilder, closeSquadEditor]);
+
+  // A new squad: a name, and an id made from it that no existing squad already has.
+  const onCreateSquad = useCallback(() => {
+    const name = window.prompt("Name for the new squad? (e.g. U14A Boys)");
+    if (!name || !name.trim()) return;
+    const base = slugify(name.trim());
+    const existing = squadsStateRef.current.data;
+    let id = base;
+    for (let n = 2; existing[id]; n++) id = `${base}-${n}`;
+    onSquadChange(emptySquad(id, name.trim()));
+    setSelected(null);
+    setMode("squads");
+    setSelectedSquadId(id);
+    location.hash = formatHash({ view: "squad", slug: id });
+  }, [onSquadChange]);
+
+  // Deleting a squad rewrites the one file, so it goes through the ordinary save path. The
+  // plans that named it keep their `squadId`: it is the only record of who a night was for,
+  // and blanking it would rewrite history the squad list has no business rewriting.
+  const onDeleteSquad = useCallback(() => {
+    const id = selectedSquadId;
+    if (!id) return;
+    if (!window.confirm("Delete this squad? The plans that name it keep their record of it.")) return;
+    const cur = squadsStateRef.current;
+    const rest = { ...cur.data };
+    delete rest[id];
+    setSquadsState({ ...cur, data: rest, dirty: true, status: "dirty" });
+    scheduleSquadsSave();
+    setSelectedSquadId(null);
+    location.hash = formatHash({ view: "squads" });
+  }, [selectedSquadId, setSquadsState, scheduleSquadsSave]);
 
   // Makes an id from the date and theme (2026-08-12-pressing), guarding against a
   // collision with an existing session, then opens the builder on it.
@@ -735,6 +989,10 @@ export default function App() {
     // must not leave the run view showing regardless of what Catalogue would render.
     if (route.view !== "run" && runSessionId) { runRequestSeq.current++; setRunSessionId(null); }
 
+    // Leaving the squad section by URL has to flush the squad on screen, the same way
+    // leaving it by the header does.
+    if (route.view !== "squads" && route.view !== "squad" && selectedSquadId) closeSquadEditor();
+
     if (route.view === "sessions") {
       closeEditor();
       setSelected(null);
@@ -758,6 +1016,26 @@ export default function App() {
       if (runSessionId !== sess.id) openRun(sess);
       return;
     }
+    if (route.view === "squads") {
+      closeEditor();
+      setSelected(null);
+      closeSessionBuilder();
+      if (mode !== "squads") setMode("squads");
+      if (selectedSquadId) setSelectedSquadId(null);
+      return;
+    }
+    if (route.view === "squad") {
+      const squad = squadsStateRef.current.data[route.slug];
+      // A squad that is gone — deleted here or on the other device — falls back to the
+      // list rather than showing an empty editor.
+      if (!squad) { location.hash = formatHash({ view: "squads" }); return; }
+      closeEditor();
+      setSelected(null);
+      closeSessionBuilder();
+      if (mode !== "squads") setMode("squads");
+      if (selectedSquadId !== squad.id) setSelectedSquadId(squad.id);
+      return;
+    }
     if (route.view === "browse") {
       if (mode !== "drills") { closeSessionBuilder(); setMode("drills"); }
       return;
@@ -771,7 +1049,8 @@ export default function App() {
     } else if (selected?.id !== drill.id) {
       openDrill(drill);
     }
-  }, [status, drills, selected, mode, selectedSessionId, runSessionId, openEdit, openDrill, openRun, closeEditor, closeSessionBuilder]);
+  }, [status, drills, selected, mode, selectedSessionId, runSessionId, selectedSquadId,
+    openEdit, openDrill, openRun, closeEditor, closeSessionBuilder, closeSquadEditor]);
 
   // A ref so the hashchange listener (registered once) always calls the CURRENT
   // resolveRoute rather than the stale one captured when the listener was attached.
@@ -802,6 +1081,8 @@ export default function App() {
     const theme = sess?.theme?.trim();
     return { id, label: sess?.date ? (theme ? `${sess.date} · ${theme}` : sess.date) : id };
   });
+  const squadsList = Object.values(squadsState.data);
+  const selectedSquad = selectedSquadId ? squadsState.data[selectedSquadId] ?? null : null;
   const selectedSession = selectedSessionId ? sessionsState.data.sessions[selectedSessionId] ?? null : null;
   const runSession = runSessionId ? sessionsState.data.sessions[runSessionId] ?? null : null;
 
@@ -871,6 +1152,21 @@ export default function App() {
         onRunBack={onRunBack}
         onRunSwap={onRunSwap}
         onRunProgress={onRunProgress}
+        squads={squadsList}
+        selectedSquad={selectedSquad}
+        onOpenSquad={onOpenSquad}
+        onCreateSquad={onCreateSquad}
+        onSquadChange={onSquadChange}
+        onSquadBack={onSquadBack}
+        onDeleteSquad={onDeleteSquad}
+        squadsStatus={squadsState.status}
+        squadsError={squadsState.error}
+        squadsConflict={squadsState.conflict}
+        squadsResolving={squadsResolving}
+        squadsBlocked={squadsState.blocked}
+        squadsLoadError={squadsLoadError}
+        onKeepMineSquads={onKeepMineSquads}
+        onReloadSquads={onReloadSquads}
       />
     </div>
   );

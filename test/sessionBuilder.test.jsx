@@ -46,8 +46,8 @@ describe("SessionBuilder", () => {
 
   it("the picker offers drills matching the slot's category", () => {
     mount({ session: baseSession(), drills });
-    const selects = container.querySelectorAll("select");
-    const warmupSelect = selects[0]; // first block is warmup
+    // Scoped to the block rows: the header card has a squad picker of its own now.
+    const warmupSelect = container.querySelectorAll(".session-block select")[0];
     const options = [...warmupSelect.querySelectorAll("option")].map((o) => o.textContent);
     expect(options.some((o) => o.includes("Rondo 4v2"))).toBe(true);
     expect(options.some((o) => o.includes("3v2"))).toBe(false);
@@ -56,7 +56,7 @@ describe("SessionBuilder", () => {
   it("with a turnout set, a drill that does not fit is not offered", () => {
     // Turnout lives on the session (not local UI state), so it's set via the session prop.
     mount({ session: { ...baseSession(), turnout: 22 }, drills });
-    const warmupSelect = container.querySelectorAll("select")[0];
+    const warmupSelect = container.querySelectorAll(".session-block select")[0];
     const options = [...warmupSelect.querySelectorAll("option")].map((o) => o.textContent);
     // rondo-4v2 needs 6-8 players, 22 turnout does not fit; cone-weave needs 20+, fits.
     expect(options.some((o) => o.includes("Rondo 4v2"))).toBe(false);
@@ -67,7 +67,7 @@ describe("SessionBuilder", () => {
     mount({ session: baseSession(), drills });
     const toggles = [...container.querySelectorAll("input[type=checkbox]")];
     act(() => { toggles[0].click(); });
-    const warmupSelect = container.querySelectorAll("select")[0];
+    const warmupSelect = container.querySelectorAll(".session-block select")[0];
     const options = [...warmupSelect.querySelectorAll("option")].map((o) => o.textContent);
     expect(options.some((o) => o.includes("3v2"))).toBe(true);
   });
@@ -167,7 +167,7 @@ describe("SessionBuilder", () => {
     mount({ session: s, drills, onChange });
     const turnoutInput = container.querySelector("input[type=number]");
     expect(turnoutInput.value).toBe("22");
-    const warmupSelect = container.querySelectorAll("select")[0];
+    const warmupSelect = container.querySelectorAll(".session-block select")[0];
     const options = [...warmupSelect.querySelectorAll("option")].map((o) => o.textContent);
     // rondo-4v2 needs 6-8 players, 22 turnout does not fit.
     expect(options.some((o) => o.includes("Rondo 4v2"))).toBe(false);
@@ -191,6 +191,60 @@ describe("SessionBuilder", () => {
     expect(onChange).toHaveBeenCalled();
     const updated = onChange.mock.calls[0][0];
     expect(updated.blocks.map((b) => b.slot)).toEqual(["skill", "warmup", "tactical", "match", "fun"]);
+  });
+
+  describe("the squad picker", () => {
+    const squads = [
+      { id: "u14a", name: "U14A Boys", players: [] },
+      { id: "u12", name: "U12s", players: [] },
+    ];
+    const squadSelect = () => [...container.querySelectorAll("select")]
+      .find((s) => [...s.options].some((o) => /no squad/i.test(o.textContent)));
+    const choose = (select, value) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
+      act(() => {
+        setter.call(select, value);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    };
+
+    it("offers every squad, plus no squad at all", () => {
+      mount({ session: baseSession(), drills, squads });
+      const options = [...squadSelect().options].map((o) => o.textContent);
+      expect(options).toEqual(expect.arrayContaining(["U14A Boys", "U12s"]));
+      expect(options.some((o) => /no squad/i.test(o))).toBe(true);
+    });
+
+    it("shows the squad the session is already for", () => {
+      mount({ session: { ...baseSession(), squadId: "u12", squad: "U12s" }, drills, squads });
+      expect(squadSelect().value).toBe("u12");
+    });
+
+    it("sets the id AND keeps the free-text name in step, so existing displays still read", () => {
+      const onChange = vi.fn();
+      mount({ session: baseSession(), drills, squads, onChange });
+      choose(squadSelect(), "u14a");
+      const updated = onChange.mock.calls.at(-1)[0];
+      expect(updated.squadId).toBe("u14a");
+      expect(updated.squad).toBe("U14A Boys");
+    });
+
+    it("clears both when the session is for no squad", () => {
+      const onChange = vi.fn();
+      mount({ session: { ...baseSession(), squadId: "u12", squad: "U12s" }, drills, squads, onChange });
+      choose(squadSelect(), "");
+      const updated = onChange.mock.calls.at(-1)[0];
+      expect(updated.squadId).toBe(null);
+      expect(updated.squad).toBe("");
+    });
+
+    it("still names a squad that has since been deleted, rather than showing nothing", () => {
+      // The picker must not silently re-point a night's plan at whatever squad happens to
+      // be first in the list.
+      mount({ session: { ...baseSession(), squadId: "gone", squad: "Old squad" }, drills, squads });
+      expect(squadSelect().value).toBe("gone");
+      expect(squadSelect().textContent).toContain("Old squad");
+    });
   });
 
   it("offers a Run this session control that calls onRun", () => {

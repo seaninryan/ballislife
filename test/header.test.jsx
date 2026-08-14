@@ -40,11 +40,25 @@ describe("Header", () => {
     expect(onHome).toHaveBeenCalled();
   });
 
-  it("offers both sections wherever it is, and marks the current one", () => {
+  it("offers every section wherever it is, and marks the current one", () => {
     mount({ mode: "sessions" });
     expect(button(/Drills/)).toBeDefined();
+    expect(button(/Squads/)).toBeDefined();
     expect(button(/Sessions/).className).toContain("active");
     expect(button(/Drills/).className).not.toContain("active");
+    expect(button(/Squads/).className).not.toContain("active");
+  });
+
+  // Drills used to be marked active by `mode !== "sessions"`, which was true of every
+  // mode but one. The moment a third section existed, Drills lit up while you were
+  // standing in Squads — two sections claiming to be where you are.
+  it("marks exactly one section, in every mode there is", () => {
+    for (const mode of ["drills", "sessions", "squads"]) {
+      mount({ mode });
+      const active = [...container.querySelectorAll(".chip-button")]
+        .filter((b) => b.className.includes("active"));
+      expect(active.map((b) => b.textContent.trim())).toHaveLength(1);
+    }
   });
 
   it("switches section", () => {
@@ -52,6 +66,8 @@ describe("Header", () => {
     mount({ mode: "drills", onModeChange });
     act(() => { button(/Sessions/).click(); });
     expect(onModeChange).toHaveBeenCalledWith("sessions");
+    act(() => { button(/Squads/).click(); });
+    expect(onModeChange).toHaveBeenCalledWith("squads");
   });
 
   it("says a session is under way, in words as well as with a dot", () => {

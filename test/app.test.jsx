@@ -65,6 +65,10 @@ beforeEach(() => {
     failed: [], folderId: "F1", duplicateFolders: false, index: { version: 1, entries: {} },
   });
   drive.loadSessions.mockResolvedValue(sessionsLoad({}));
+  // No squads.json in Drive yet: the shape loadSquads returns before one has ever been
+  // written. `failed: null` is the load saying "there is nothing here", which is a
+  // different answer from "I could not read what is here".
+  drive.loadSquads.mockResolvedValue({ squads: {}, fileId: null, modifiedTime: null, failed: null });
 });
 
 afterEach(() => {
@@ -1484,6 +1488,247 @@ describe("App header", () => {
     expect(row).not.toBeNull();
     expect(row.textContent).toContain(today);
     expect(row.textContent).toContain("Resume");
+  });
+});
+
+describe("App squads", () => {
+  const squad = (id, name, players = []) => ({ id, name, players });
+  const squadsLoad = (squads, extra = {}) => ({
+    squads, fileId: "sq", modifiedTime: "Q1", failed: null, ...extra,
+  });
+
+  const openSquads = async () => {
+    await act(async () => { findButton("Squads").click(); });
+  };
+  const openSquad = async (name) => {
+    await openSquads();
+    await act(async () => { findButton(name).click(); });
+  };
+  const banners = () => [...container.querySelectorAll(".banner")].map((b) => b.textContent).join(" ");
+  const typeSquadName = async (value) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    const input = container.querySelector(".squad-name");
+    await act(async () => {
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+
+  it("loads the squads and lists them in their own section", async () => {
+    drive.loadSquads.mockResolvedValue(squadsLoad({ u14a: squad("u14a", "U14A Boys") }));
+    await mount();
+    expect(drive.loadSquads).toHaveBeenCalledWith("F1");
+    await openSquads();
+    expect(container.textContent).toContain("U14A Boys");
+  });
+
+  it("opens one squad from its own URL, and falls back to the list for an id that is gone", async () => {
+    drive.loadSquads.mockResolvedValue(squadsLoad({ u14a: squad("u14a", "U14A Boys") }));
+    location.hash = "#/squad/u14a";
+    await mount();
+    expect(container.querySelector(".squad-name").value).toBe("U14A Boys");
+
+    await act(async () => {
+      location.hash = "#/squad/does-not-exist";
+      window.dispatchEvent(new Event("hashchange"));
+    });
+    expect(location.hash).toBe("#/squads");
+  });
+
+  it("keeps the drills and the plans on screen when the squads fail to load", async () => {
+    // Its own try/catch for the same reason the sessions load has one: a flaky request for
+    // a list of names must not replace an app that has already loaded everything else.
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: session("s1", "2026-08-12") }));
+    drive.loadSquads.mockRejectedValue(Object.assign(new Error("boom"), { code: 500 }));
+    await mount();
+    expect(container.textContent).toContain("Alpha");
+    expect(banners()).toMatch(/squads could not be loaded/i);
+    await act(async () => { findButton("Sessions").click(); });
+    expect(container.textContent).toContain("2026-08-12");
+  });
+
+  it("makes a new squad from a name, with an id of its own", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("U14A Boys");
+    drive.saveSquads.mockResolvedValue({ ok: true, fileId: "sq", modifiedTime: "Q2" });
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSquads();
+      await act(async () => { findButton("New squad").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+
+      expect(drive.saveSquads).toHaveBeenCalledTimes(1);
+      const call = drive.saveSquads.mock.calls[0][0];
+      expect(Object.keys(call.data)).toEqual(["u14a-boys"]);
+      expect(call.data["u14a-boys"]).toEqual({ id: "u14a-boys", name: "U14A Boys", players: [] });
+      expect(call.baseModifiedTime).toBe(null);
+      expect(call.fileId).toBe(null); // no squads.json yet: this save creates it
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("debounces an edit and adopts the baseline the save reports", async () => {
+    drive.loadSquads.mockResolvedValue(squadsLoad({ u14a: squad("u14a", "U14A Boys") }));
+    drive.saveSquads
+      .mockResolvedValueOnce({ ok: true, fileId: "sq", modifiedTime: "Q2" })
+      .mockResolvedValueOnce({ ok: true, fileId: "sq", modifiedTime: "Q3" });
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSquad("U14A Boys");
+      await typeSquadName("U14A");
+      await typeSquadName("U14A Boy");
+      expect(drive.saveSquads).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSquads).toHaveBeenCalledTimes(1);
+      expect(drive.saveSquads.mock.calls[0][0].baseModifiedTime).toBe("Q1");
+
+      await typeSquadName("U14A Boys 2027");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      // Sending Q1 again would conflict with the write this save just made.
+      expect(drive.saveSquads.mock.calls[1][0].baseModifiedTime).toBe("Q2");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("NEVER overwrites a squads.json it could not read, and says why", async () => {
+    // Silently overwriting an unreadable file is how a corrupt sessions.json nearly lost
+    // every plan. An unreadable squad list holds every save until Drive is fixed.
+    drive.loadSquads.mockResolvedValue(squadsLoad({}, { failed: { reason: "parse", error: null } }));
+    vi.spyOn(window, "prompt").mockReturnValue("U14A Boys");
+    vi.useFakeTimers();
+    try {
+      await mount();
+      expect(banners()).toMatch(/squads\.json/i);
+      await openSquads();
+      await act(async () => { findButton("New squad").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(drive.saveSquads).not.toHaveBeenCalled();
+      // And what he typed is still on screen, not thrown away.
+      expect(container.querySelector(".squad-name").value).toBe("U14A Boys");
+      expect(banners()).toMatch(/squads\.json/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a conflict keeps the local squad and offers to keep it", async () => {
+    drive.loadSquads.mockResolvedValue(squadsLoad({ u14a: squad("u14a", "U14A Boys") }));
+    drive.saveSquads.mockResolvedValueOnce({ ok: false, conflict: true, modifiedTime: "Q9" });
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSquad("U14A Boys");
+      await typeSquadName("U14A Girls");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(banners()).toMatch(/changed in drive|changed on drive/i);
+      expect(container.querySelector(".squad-name").value).toBe("U14A Girls");
+
+      // Not re-sent by a later edit — only answering the banner may write.
+      await typeSquadName("U14A Girls B");
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSquads).toHaveBeenCalledTimes(1);
+
+      drive.saveSquads.mockResolvedValue({ ok: true, fileId: "sq", modifiedTime: "Q10" });
+      await act(async () => { findButton("Keep mine").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(drive.saveSquads).toHaveBeenCalledTimes(2);
+      expect(drive.saveSquads.mock.calls[1][0].baseModifiedTime).toBe("Q9");
+      expect(drive.saveSquads.mock.calls[1][0].data.u14a.name).toBe("U14A Girls B");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("links a plan's free-text squad to the squad of that name, without saving a thing", async () => {
+    // Linking touches every plan. Marking them all dirty would fire one write per plan the
+    // moment the app opens, on the connection least able to take it — so the link is made
+    // in memory and carried to Drive by the next real edit to that plan.
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: session("s1", "2026-08-12") }));
+    drive.loadSquads.mockResolvedValue(squadsLoad({ u12: squad("u12", "U12s") }));
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(drive.saveSession).not.toHaveBeenCalled();
+
+      // The link is real, though: the builder's picker shows the plan is for that squad.
+      await openSession("2026-08-12");
+      const picker = [...container.querySelectorAll("select")]
+        .find((s) => [...s.options].some((o) => /no squad/i.test(o.textContent)));
+      expect(picker.value).toBe("u12");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("switching to Squads mid-edit flushes the plan rather than stranding the edit", async () => {
+    drive.loadSessions.mockResolvedValue(sessionsLoad({ s1: session("s1", "2026-08-12") }));
+    drive.saveSession.mockImplementation(saveSessionOk("S2"));
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSession("2026-08-12");
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const turnout = container.querySelectorAll("input[type=number]")[0];
+      await act(async () => {
+        setter.call(turnout, "9");
+        turnout.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      expect(drive.saveSession).not.toHaveBeenCalled(); // debounce has not fired
+
+      await act(async () => { findButton("Squads").click(); });
+
+      expect(drive.saveSession).toHaveBeenCalledTimes(1);
+      expect(drive.saveSession.mock.calls[0][0].session.turnout).toBe(9);
+      expect(location.hash).toBe("#/squads");
+      expect(container.textContent).not.toContain("2026-08-12"); // the builder is gone
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaving a squad mid-edit writes it, rather than dropping what was typed", async () => {
+    drive.loadSquads.mockResolvedValue(squadsLoad({ u14a: squad("u14a", "U14A Boys") }));
+    drive.saveSquads.mockResolvedValue({ ok: true, fileId: "sq", modifiedTime: "Q2" });
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSquad("U14A Boys");
+      await typeSquadName("U14A Girls");
+      expect(drive.saveSquads).not.toHaveBeenCalled();
+
+      await act(async () => { findButton("← Back").click(); });
+
+      expect(drive.saveSquads).toHaveBeenCalledTimes(1);
+      expect(drive.saveSquads.mock.calls[0][0].data.u14a.name).toBe("U14A Girls");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("deletes a squad only after confirmation", async () => {
+    drive.loadSquads.mockResolvedValue(squadsLoad({ u14a: squad("u14a", "U14A Boys") }));
+    drive.saveSquads.mockResolvedValue({ ok: true, fileId: "sq", modifiedTime: "Q2" });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await openSquad("U14A Boys");
+      await act(async () => { findButton("Delete").click(); });
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(container.querySelector(".squad-name")).not.toBeNull(); // still on the squad
+
+      confirmSpy.mockReturnValue(true);
+      await act(async () => { findButton("Delete").click(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(drive.saveSquads.mock.calls.at(-1)[0].data).toEqual({});
+      expect(location.hash).toBe("#/squads");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

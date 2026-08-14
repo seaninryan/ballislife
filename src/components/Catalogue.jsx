@@ -8,6 +8,8 @@ import Editor from "./Editor.jsx";
 import SessionList from "./SessionList.jsx";
 import SessionBuilder from "./SessionBuilder.jsx";
 import SessionRun from "./SessionRun.jsx";
+import SquadList from "./SquadList.jsx";
+import SquadEditor from "./SquadEditor.jsx";
 import { friendlyError } from "../lib/errors.js";
 
 // Re-exported for backward compatibility: existing tests and callers import
@@ -58,6 +60,52 @@ function SessionsSaveBanner({ status, error, conflicts = [], resolving = [], onK
   );
 }
 
+// Squads live in one file, so there is one conflict and one save state for the lot —
+// unlike a plan, which owns its own file. `blocked` is the load saying squads.json exists
+// but could not be read: every save is held while it is set, because writing over a file
+// we could not read is exactly how a corrupt sessions.json nearly lost every plan.
+function SquadsSaveBanner({ status, error, conflict, resolving, blocked, loadError, onKeepMine, onReload }) {
+  return (
+    <>
+      {loadError ? (
+        <div className="banner err">
+          Your squads could not be loaded: {friendlyError(loadError)} Nothing in Drive has
+          been changed, and everything else here still works. Reload to try again.
+        </div>
+      ) : null}
+      {blocked ? (
+        <div className="banner err">
+          Your <strong>squads.json</strong> in Drive exists but could not be read
+          ({blocked.reason}), so saving squads is blocked — writing over a file we could not
+          read could destroy every player in it. Anything you change here is kept on this
+          device only. Fix or delete that file in Drive, then reload.
+        </div>
+      ) : null}
+      {conflict ? (
+        <div className="banner warn">
+          Your squads changed in Drive since you opened them. Your edit is safe and has not
+          been overwritten — choose which version to keep.
+          <div className="row" style={{ marginTop: 6 }}>
+            <button type="button" className="primary" disabled={resolving} onClick={onKeepMine}>
+              Keep mine
+            </button>
+            <button type="button" disabled={resolving} onClick={onReload}>
+              Reload Drive’s version
+            </button>
+            {resolving ? <span className="dim">Fetching Drive’s version…</span> : null}
+          </div>
+        </div>
+      ) : null}
+      {status === "failed" ? (
+        <div className="banner err">
+          Could not save your squads: {friendlyError(error)} Your edit is still here and will
+          be retried when you change something again.
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export default function Catalogue({
   status, drills = [], failed = [], error, onSignIn,
   filter = {}, onFilterChange, selected, drillStatus, drillText, drillError,
@@ -76,6 +124,9 @@ export default function Catalogue({
   onKeepMineSessions, onReloadSessions,
   sessionsMigrated = 0, sessionsFailed = [], sessionsUnmigrated = [], sessionsLoadError,
   runSession, runTexts, onOpenRun, onRunBack, onRunSwap, onRunProgress,
+  squads = [], selectedSquad, onOpenSquad, onCreateSquad, onSquadChange, onSquadBack,
+  onDeleteSquad, squadsStatus, squadsError, squadsConflict = false, squadsResolving = false,
+  squadsBlocked = null, squadsLoadError, onKeepMineSquads, onReloadSquads,
 }) {
   // The sign-in screen is the button and nothing else, centred in the viewport rather
   // than in the page flow — App renders this one outside `.page`, so only the body's
@@ -129,6 +180,21 @@ export default function Catalogue({
     />
   );
 
+  // Shown wherever the sessions one is, and for the same reason: a conflict — or a squad
+  // list that cannot be saved at all — that the owner never sees is one he can never act on.
+  const squadsBanner = (
+    <SquadsSaveBanner
+      status={squadsStatus}
+      error={squadsError}
+      conflict={squadsConflict}
+      resolving={squadsResolving}
+      blocked={squadsBlocked}
+      loadError={squadsLoadError}
+      onKeepMine={onKeepMineSquads}
+      onReload={onReloadSquads}
+    />
+  );
+
   // The editor takes over the whole view when open — it is not a peer of the grid or
   // the read view, and rendering both at once would mean two sources of truth for the
   // same drill's text.
@@ -151,6 +217,7 @@ export default function Catalogue({
     return (
       <div>
         {sessionsBanner}
+        {squadsBanner}
         <SessionRun
           session={runSession}
           drills={drills}
@@ -170,9 +237,11 @@ export default function Catalogue({
     return (
       <div>
         {sessionsBanner}
+        {squadsBanner}
         <SessionBuilder
           session={selectedSession}
           drills={drills}
+          squads={squads}
           onChange={onSessionChange}
           onBack={onSessionBack}
           onDelete={onDeleteSession}
@@ -182,10 +251,28 @@ export default function Catalogue({
     );
   }
 
+  // One squad takes over the view the way the builder does, and for the same reason: the
+  // squad on screen is the one being edited, and there is nothing else to look at.
+  if (selectedSquad) {
+    return (
+      <div>
+        {sessionsBanner}
+        {squadsBanner}
+        <SquadEditor
+          squad={selectedSquad}
+          onChange={onSquadChange}
+          onBack={onSquadBack}
+          onDelete={onDeleteSquad}
+        />
+      </div>
+    );
+  }
+
   if (selected) {
     return (
       <div>
         {sessionsBanner}
+        {squadsBanner}
         <DrillView
           drill={selected}
           status={drillStatus}
@@ -205,6 +292,7 @@ export default function Catalogue({
   return (
     <>
       {sessionsBanner}
+        {squadsBanner}
 
       {duplicateFolders ? (
         <div className="banner warn">
@@ -298,7 +386,9 @@ export default function Catalogue({
         </div>
       ) : null}
 
-      {mode === "sessions" ? (
+      {mode === "squads" ? (
+        <SquadList squads={squads} onOpen={onOpenSquad} onCreate={onCreateSquad} />
+      ) : mode === "sessions" ? (
         <SessionList
           sessions={sessions}
           drills={drills}
