@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parse } from "../src/lib/pitch.js";
-import { frames, FEET } from "../src/lib/slides.js";
+import { frames, FEET, stage } from "../src/lib/slides.js";
 
 const framesOf = (src) => {
   const { scene, errors } = parse(src);
@@ -79,5 +79,42 @@ describe("frames", () => {
     const scene = parse("red: A@1,1\n").scene;
     delete scene.slides;
     expect(frames(scene)).toHaveLength(1);
+  });
+});
+
+describe("stage", () => {
+  const fs = framesOf(
+    "red: A@0,0 B@20,10\nblue: X@10,10\nball: A\npass: A->B\n" +
+    "slide:\nremove: X\nblue: Y@5,5\nball: B 1,1\nrun: A~>30,20\n",
+  );
+
+  it("marks nothing as entering or leaving without a previous frame", () => {
+    const s = stage(null, fs[0]);
+    expect(s.players.every((p) => !p.entering && !p.leaving)).toBe(true);
+    expect(s.balls.every((b) => !b.entering && !b.leaving)).toBe(true);
+    expect(s.paths).toHaveLength(1);
+    expect(s.paths[0]).toMatchObject({ key: "0.0", kind: "pass", seq: 1, carried: false, entering: false, leaving: false });
+    expect(s.paths[0].d).toMatch(/^M /);
+  });
+
+  it("keeps what left, at its old position, marked leaving", () => {
+    const s = stage(fs[0], fs[1]);
+    const x = s.players.find((p) => p.label === "X");
+    expect(x).toMatchObject({ x: 10, y: 10, leaving: true, entering: false });
+    expect(s.players.find((p) => p.label === "Y")).toMatchObject({ entering: true, leaving: false });
+    expect(s.players.find((p) => p.label === "A")).toMatchObject({ entering: false, leaving: false });
+  });
+
+  it("matches balls by key: ball 0 glides, ball 1 enters", () => {
+    const s = stage(fs[0], fs[1]);
+    expect(s.balls.map((b) => [b.key, b.entering, b.leaving])).toEqual([[0, false, false], [1, true, false]]);
+  });
+
+  it("enters new arrows and keeps carried ones without re-entering them", () => {
+    const s = stage(fs[0], fs[1]);
+    expect(s.paths.map((p) => [p.key, p.carried, p.entering])).toEqual([
+      ["0.0", true, false],
+      ["1.0", false, true],
+    ]);
   });
 });

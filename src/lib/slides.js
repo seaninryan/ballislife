@@ -3,6 +3,8 @@
 // each slide as an edit of the one before; this is the only place that history is
 // replayed, so the renderer only ever sees whole pictures.
 
+import { actionPath } from "./pitchSvg.js";
+
 // A ball at a player's feet sits just off the player's centre, so neither hides the
 // other. Metres.
 export const FEET = 0.8;
@@ -67,4 +69,35 @@ function placeBalls(specs, players, before) {
     return { x: last.x, y: last.y };
   });
   return { specs: next, balls };
+}
+
+// What to draw for `next`, given the frame on screen before it — null on first render
+// or after a cut, when nothing should fade. Items new to `next` are entering; items only
+// in `prev` are kept, at their old position and marked leaving, so the renderer can fade
+// them out rather than have them vanish mid-glide.
+export function stage(prev, next) {
+  const from = prev ?? next;
+  return {
+    players: diff(from.players, next.players, (p) => p.label),
+    balls: diff(from.balls, next.balls, (b) => b.key),
+    paths: diff(pathsOf(from), pathsOf(next), (p) => p.key),
+  };
+}
+
+// Each arrow's geometry is resolved against its own frame, so a leaving arrow is drawn
+// where it was, between players who may since have moved or gone.
+function pathsOf(frame) {
+  return frame.actions.flatMap((a) => {
+    const p = actionPath(a, frame);
+    return p ? [{ ...p, key: a.key, carried: a.carried }] : [];
+  });
+}
+
+function diff(before, after, keyOf) {
+  const had = new Set(before.map(keyOf));
+  const has = new Set(after.map(keyOf));
+  return [
+    ...after.map((it) => ({ ...it, entering: !had.has(keyOf(it)), leaving: false })),
+    ...before.filter((it) => !has.has(keyOf(it))).map((it) => ({ ...it, entering: false, leaving: true })),
+  ];
 }
