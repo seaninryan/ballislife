@@ -475,3 +475,123 @@ describe("parse: a ball at a player's feet", () => {
     expect(serialise(parse(once).scene)).toBe(once);
   });
 });
+
+const EMPTY_SLIDE = {
+  caption: null, players: [], removes: [], clear: { arrows: false, balls: false },
+  balls: null, actions: [],
+};
+
+describe("parse: slides", () => {
+  it("has none by default", () => {
+    expect(parse("red: A@1,1\n").scene.slides).toEqual([]);
+  });
+
+  it("starts a slide with an optional caption and leaves the base untouched", () => {
+    const { scene, errors } = parse('red: A@1,1\nslide: "go"\nred: A@5,5\nslide:\n');
+    expect(errors).toEqual([]);
+    expect(scene.players).toEqual([{ team: "red", label: "A", x: 1, y: 1 }]);
+    expect(scene.slides).toEqual([
+      { ...EMPTY_SLIDE, caption: "go", players: [{ team: "red", label: "A", x: 5, y: 5 }] },
+      EMPTY_SLIDE,
+    ]);
+  });
+
+  it("rejects the fixed directives inside a slide", () => {
+    for (const line of ["area: 10x10", "goal: 0,5", "zone: 1,1 2x2", "cone: 1,1", "flag: 1,1", "loop: on", "label: x"]) {
+      const key = line.split(":")[0];
+      expect(parse(`slide:\n${line}\n`).errors, line).toEqual([
+        { line: 2, message: `"${key}" is set on the first slide and cannot change on a later one` },
+      ]);
+    }
+  });
+
+  it("rejects remove and clear before the first slide", () => {
+    expect(parse("red: A@1,1\nremove: A\n").errors).toEqual([
+      { line: 2, message: '"remove" only works on a slide, after a "slide:" line' },
+    ]);
+    expect(parse("clear: arrows\n").errors).toEqual([
+      { line: 1, message: '"clear" only works on a slide, after a "slide:" line' },
+    ]);
+  });
+
+  it("does not let a player change team", () => {
+    const { scene, errors } = parse("red: A@1,1\nslide:\nblue: A@2,2\n");
+    expect(errors).toEqual([{ line: 3, message: '"A" is red, not blue — players do not change team' }]);
+    expect(scene.slides[0].players).toEqual([]);
+  });
+
+  it("adds a player with a new label", () => {
+    const { scene, errors } = parse("red: A@1,1\nslide:\nblue: X@2,2\n");
+    expect(errors).toEqual([]);
+    expect(scene.slides[0].players).toEqual([{ team: "blue", label: "X", x: 2, y: 2 }]);
+  });
+
+  it("rejects a duplicate placement on one slide", () => {
+    expect(parse("slide:\nred: A@1,1 A@2,2\n").errors).toEqual([
+      { line: 2, message: 'duplicate player label "A"' },
+    ]);
+  });
+
+  it("removes players, and rejects unknown ones", () => {
+    const { scene, errors } = parse("red: A@1,1 B@2,2\nslide:\nremove: A Z\n");
+    expect(errors).toEqual([{ line: 3, message: 'unknown player "Z"' }]);
+    expect(scene.slides[0].removes).toEqual(["A"]);
+  });
+
+  it("rejects placing and removing the same player on one slide, in either order", () => {
+    const msg = '"A" is both placed and removed on this slide';
+    expect(parse("red: A@1,1\nslide:\nred: A@2,2\nremove: A\n").errors).toEqual([{ line: 4, message: msg }]);
+    expect(parse("red: A@1,1\nslide:\nremove: A\nred: A@2,2\n").errors).toEqual([{ line: 4, message: msg }]);
+  });
+
+  it("numbers a slide's actions from 1 and resolves them against the players at that slide", () => {
+    const { scene, errors } = parse(
+      "red: A@1,1 B@2,2\npass: A->B\nslide:\npass: B->A\nrun: A~>N\nred: N@4,4\n",
+    );
+    expect(errors).toEqual([]);
+    expect(scene.actions).toEqual([{ kind: "pass", from: "A", to: { ref: "B" }, seq: 1 }]);
+    expect(scene.slides[0].actions).toEqual([
+      { kind: "pass", from: "B", to: { ref: "A" }, seq: 1 },
+      { kind: "run", from: "A", to: { ref: "N" }, seq: 2 },
+    ]);
+  });
+
+  it("does not resolve an action to a player removed on that slide", () => {
+    expect(parse("red: A@1,1 B@2,2\nslide:\nremove: B\npass: A->B\n").errors).toEqual([
+      { line: 4, message: 'unknown player "B"' },
+    ]);
+  });
+
+  it("collects a slide's balls, concatenating several lines", () => {
+    const { scene, errors } = parse("red: A@1,1\nslide:\nball: A 3,3\nball: 4,4\n");
+    expect(errors).toEqual([]);
+    expect(scene.slides[0].balls).toEqual([{ ref: "A" }, { x: 3, y: 3 }, { x: 4, y: 4 }]);
+  });
+
+  it("rejects an empty ball line on a slide, and drops an unknown ball player", () => {
+    expect(parse("slide:\nball:\n").errors).toEqual([
+      { line: 2, message: 'expected at least one ball — use "clear: balls" for none' },
+    ]);
+    const { scene, errors } = parse("slide:\nball: Z 1,1\n");
+    expect(errors).toEqual([{ line: 2, message: 'unknown player "Z"' }]);
+    expect(scene.slides[0].balls).toEqual([{ x: 1, y: 1 }]);
+  });
+
+  it("reads clear targets", () => {
+    expect(parse("slide:\nclear: arrows balls\n").scene.slides[0].clear).toEqual({ arrows: true, balls: true });
+    expect(parse("slide:\nclear: cones\n").errors).toEqual([
+      { line: 2, message: 'unknown clear target "cones" (expected arrows, balls)' },
+    ]);
+    expect(parse("slide:\nclear:\n").errors).toEqual([
+      { line: 2, message: 'expected "arrows", "balls" or both' },
+    ]);
+  });
+
+  it("keeps building the other slides when one slide line is bad", () => {
+    const { scene, errors } = parse(
+      "red: A@1,1\nslide:\ncone: 1,1\nred: A@2,2\nslide:\nred: A@3,3\n",
+    );
+    expect(errors.map((e) => e.line)).toEqual([3]);
+    expect(scene.slides.map((s) => s.players[0].x)).toEqual([2, 3]);
+  });
+});

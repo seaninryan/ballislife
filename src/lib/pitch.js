@@ -37,6 +37,7 @@ function parseArea(rest, ctx) {
 export const TEAMS = ["red", "blue", "yellow", "gk"];
 
 // "A@10,20 B@25,14" -> one player per token. A bad token fails alone.
+// On a slide, naming a player who is already on moves them; a new label adds one.
 function parsePlayers(team) {
   return (rest, ctx) => {
     for (const token of rest.split(/\s+/).filter(Boolean)) {
@@ -51,14 +52,23 @@ function parsePlayers(team) {
           : `expected "<label>@<x>,<y>" but got "${token}"`);
         continue;
       }
-      const label = m[1];
-      if (ctx.scene.players.some((p) => p.label === label)) {
-        ctx.fail(`duplicate player label "${label}"`);
-        continue;
-      }
-      ctx.scene.players.push({ team, label, x: Number(m[2]), y: Number(m[3]) });
+      const player = { team, label: m[1], x: Number(m[2]), y: Number(m[3]) };
+      const problem = ctx.slide
+        ? placementProblem(ctx, player)
+        : ctx.roster.has(player.label) && `duplicate player label "${player.label}"`;
+      if (problem) { ctx.fail(problem); continue; }
+      (ctx.slide ?? ctx.scene).players.push(player);
+      ctx.roster.set(player.label, team);
     }
   };
+}
+
+function placementProblem({ slide, roster }, { team, label }) {
+  if (slide.players.some((p) => p.label === label)) return `duplicate player label "${label}"`;
+  if (slide.removes.includes(label)) return `"${label}" is both placed and removed on this slide`;
+  const was = roster.get(label);
+  if (was && was !== team) return `"${label}" is ${was}, not ${team} — players do not change team`;
+  return null;
 }
 
 export const GOAL_SIZES = ["full", "small", "mini"];
@@ -88,24 +98,72 @@ function parsePointMarks(kind) {
 
 // "10,12 B" -> a ball per token. A player label puts the ball at that player's feet,
 // so it follows them from slide to slide. Like an action endpoint, the label is checked
-// only once every player is known, because it may be declared on a later line.
+// only once every player in the section is known.
+//
+// The base's balls live in marks, in source order with the cones. A slide's balls
+// REPLACE the previous slide's, so they are collected on the slide — and only created
+// when a valid token arrives, so a line of nothing but typos leaves the balls unchanged
+// rather than silently clearing them.
 function parseBalls(rest, ctx) {
-  for (const token of rest.split(/\s+/).filter(Boolean)) {
+  const tokens = rest.split(/\s+/).filter(Boolean);
+  if (ctx.slide && tokens.length === 0) {
+    return ctx.fail('expected at least one ball — use "clear: balls" for none');
+  }
+  const kind = ctx.slide ? {} : { kind: "ball" };
+  const add = (ball) => {
+    const list = ctx.slide ? (ctx.slide.balls ??= []) : ctx.scene.marks;
+    list.push(ball);
+    return list;
+  };
+  for (const token of tokens) {
     const p = parsePoint(token);
-    if (p) { ctx.scene.marks.push({ kind: "ball", ...p }); continue; }
+    if (p) { add({ ...kind, ...p }); continue; }
     if (!LABEL_RE.test(token)) {
       ctx.fail(`expected "<x>,<y>" or a player label but got "${token}"`);
       continue;
     }
-    const ball = { kind: "ball", ref: token };
-    ctx.scene.marks.push(ball);
-    ctx.ballRefs.push({ ball, list: ctx.scene.marks, line: ctx.line });
+    const ball = { ...kind, ref: token };
+    ctx.ballRefs.push({ ball, list: add(ball), line: ctx.line });
   }
 }
 
 function parseLoop(rest, ctx) {
   if (rest === "on" || rest === "off") ctx.scene.loop = rest === "on";
   else ctx.fail(`expected "on" or "off" but got "${rest}"`);
+}
+
+function parseRemove(rest, ctx) {
+  for (const label of rest.split(/\s+/).filter(Boolean)) {
+    if (ctx.slide.players.some((p) => p.label === label)) {
+      ctx.fail(`"${label}" is both placed and removed on this slide`);
+      continue;
+    }
+    if (!ctx.roster.has(label)) { ctx.fail(`unknown player "${label}"`); continue; }
+    ctx.slide.removes.push(label);
+    ctx.roster.delete(label);
+  }
+}
+
+function parseClear(rest, ctx) {
+  const targets = rest.split(/\s+/).filter(Boolean);
+  if (targets.length === 0) return ctx.fail('expected "arrows", "balls" or both');
+  for (const t of targets) {
+    if (CLEAR_TARGETS.includes(t)) ctx.slide.clear[t] = true;
+    else ctx.fail(`unknown clear target "${t}" (expected ${CLEAR_TARGETS.join(", ")})`);
+  }
+}
+
+// The ground and the equipment on it are set before play starts. A slide that moved a
+// cone would show kit teleporting mid-drill, so these are the base's alone.
+const BASE_ONLY = new Set(["area", "goal", "zone", "cone", "flag", "loop", "label"]);
+// These only mean something relative to an earlier slide.
+const SLIDE_ONLY = new Set(["remove", "clear"]);
+
+function newSlide(caption) {
+  return {
+    caption, players: [], removes: [], clear: { arrows: false, balls: false },
+    balls: null, actions: [],
+  };
 }
 
 // "0,12 small"
@@ -147,6 +205,7 @@ function parseLabel(rest, ctx) {
 // Each movement kind is written with a distinct arrow so a reader can tell a pass
 // from a run at a glance in the source, not only in the rendering.
 export const ARROWS = { pass: "->", run: "~>", dribble: "=>", shot: "->>" };
+export const CLEAR_TARGETS = ["arrows", "balls"];
 const ARROW_KINDS = Object.keys(ARROWS);
 
 // Longest arrow first, so "->>" is not mis-read as "->".
@@ -168,12 +227,40 @@ function parseActions(kind) {
 }
 
 // A target is a player label, the literal "goal", or a coordinate.
-function resolveTarget(raw, scene) {
+function resolveTarget(raw, known) {
   if (raw === "goal") return { ok: true, to: { ref: "goal" } };
   const p = parsePoint(raw);
   if (p) return { ok: true, to: p };
-  if (scene.players.some((pl) => pl.label === raw)) return { ok: true, to: { ref: raw } };
+  if (known(raw)) return { ok: true, to: { ref: raw } };
   return { ok: false, message: `unknown player "${raw}"` };
+}
+
+// Resolves the endpoints collected for the section just finished — the base, or one
+// slide — against the players on the pitch at its end. Deferred to the end of the
+// section so a player may be declared on a later line of it; per section, because a
+// slide can add and remove players, so "who exists" differs from slide to slide.
+function closeSection(scene, state, errors) {
+  const known = (label) => state.roster.has(label);
+  const into = state.slide ? state.slide.actions : scene.actions;
+  for (const a of state.pending) {
+    if (!known(a.fromRaw)) {
+      errors.push({
+        line: a.line,
+        message: `expected a player label as the source, got "${a.fromRaw}"`,
+      });
+      continue;
+    }
+    const t = resolveTarget(a.toRaw, known);
+    if (!t.ok) { errors.push({ line: a.line, message: t.message }); continue; }
+    into.push({ kind: a.kind, from: a.fromRaw, to: t.to, seq: into.length + 1 });
+  }
+  for (const r of state.ballRefs) {
+    if (known(r.ball.ref)) continue;
+    errors.push({ line: r.line, message: `unknown player "${r.ball.ref}"` });
+    r.list.splice(r.list.indexOf(r.ball), 1);
+  }
+  state.pending = [];
+  state.ballRefs = [];
 }
 
 const DIRECTIVES = { area: parseArea, goal: parseGoal, zone: parseZone, label: parseLabel };
@@ -182,67 +269,57 @@ for (const kind of POINT_MARKS) DIRECTIVES[kind] = parsePointMarks(kind);
 for (const kind of ARROW_KINDS) DIRECTIVES[kind] = parseActions(kind);
 DIRECTIVES.ball = parseBalls;
 DIRECTIVES.loop = parseLoop;
+DIRECTIVES.remove = parseRemove;
+DIRECTIVES.clear = parseClear;
 
 export function parse(src) {
   const scene = emptyScene();
   const errors = [];
-  const pending = [];
-  const ballRefs = [];
+  // `roster` is every player on the pitch at the current point in the source, label ->
+  // team. It only grows in the base; slides add to it and remove from it.
+  const state = { slide: null, pending: [], ballRefs: [], roster: new Map() };
   const lines = String(src ?? "").split("\n");
 
   lines.forEach((raw, i) => {
     const line = raw.replace(/\s+$/, "");
     if (line === "" || line.trimStart().startsWith("#")) return;
+    const fail = (message) => { errors.push({ line: i + 1, message }); };
 
     const m = line.match(/^\s*([a-zA-Z]+)\s*:\s*(.*)$/);
-    if (!m) {
-      errors.push({ line: i + 1, message: 'expected "<directive>: <value>"' });
-      return;
-    }
+    if (!m) return fail('expected "<directive>: <value>"');
     const key = m[1].toLowerCase();
-    const handler = DIRECTIVES[key];
-    if (!handler) {
-      errors.push({ line: i + 1, message: `unknown directive "${key}"` });
+    const rest = m[2].trim();
+
+    if (key === "slide") {
+      closeSection(scene, state, errors);
+      state.slide = newSlide(unquote(rest));
+      scene.slides.push(state.slide);
       return;
     }
-    handler(m[2].trim(), {
+    const handler = DIRECTIVES[key];
+    if (!handler) return fail(`unknown directive "${key}"`);
+    if (state.slide && BASE_ONLY.has(key)) {
+      return fail(`"${key}" is set on the first slide and cannot change on a later one`);
+    }
+    if (!state.slide && SLIDE_ONLY.has(key)) {
+      return fail(`"${key}" only works on a slide, after a "slide:" line`);
+    }
+    handler(rest, {
       scene,
-      pending,
-      ballRefs,
+      slide: state.slide,
+      roster: state.roster,
+      pending: state.pending,
+      ballRefs: state.ballRefs,
       line: i + 1,
-      fail: (message) => { errors.push({ line: i + 1, message }); },
+      fail,
     });
   });
+  closeSection(scene, state, errors);
 
-  // Second pass: resolve action endpoints now that every player is known.
-  for (const a of pending) {
-    if (!scene.players.some((p) => p.label === a.fromRaw)) {
-      errors.push({
-        line: a.line,
-        message: `expected a player label as the source, got "${a.fromRaw}"`,
-      });
-      continue;
-    }
-    const t = resolveTarget(a.toRaw, scene);
-    if (!t.ok) { errors.push({ line: a.line, message: t.message }); continue; }
-    scene.actions.push({
-      kind: a.kind,
-      from: a.fromRaw,
-      to: t.to,
-      seq: scene.actions.length + 1,
-    });
-  }
-
-  for (const r of ballRefs) {
-    if (scene.players.some((p) => p.label === r.ball.ref)) continue;
-    errors.push({ line: r.line, message: `unknown player "${r.ball.ref}"` });
-    r.list.splice(r.list.indexOf(r.ball), 1);
-  }
-
-  // Report in source order. Endpoints resolve in this second pass, so without the sort
-  // an action error on line 1 lands after a mark error on line 2 — and the whole point
-  // of carrying a line number is that a reader can follow the list down the source.
-  // The sort is stable, so multiple errors on one line keep their original order.
+  // Report in source order. Endpoints resolve at the end of their section, so without
+  // the sort an action error on line 1 lands after a mark error on line 2 — and the
+  // whole point of carrying a line number is that a reader can follow the list down
+  // the source. The sort is stable, so multiple errors on one line keep their order.
   errors.sort((x, y) => x.line - y.line);
   return { scene, errors };
 }
