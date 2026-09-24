@@ -1,0 +1,184 @@
+# Animated pitch diagrams — design
+
+**Date:** 2026-09-24
+**Status:** approved, ready for implementation planning
+
+A `pitch` block can hold a series of slides. The diagram as written today is slide 1;
+every later slide is an edit of the slide before it. In the drill view (and the editor
+preview) the diagram gets Play / Pause / Replay controls, and players and balls glide
+from one slide to the next.
+
+A block without a `slide:` line renders exactly as it does now, with no controls. No
+existing drill changes.
+
+## The language
+
+```pitch
+area: 40x25 half
+goal: 0,12 small
+cone: 5,5 5,20
+red: A@10,20 B@25,14 C@34,20
+blue: X@18,8 Y@30,7
+ball: A
+pass: A->B
+loop: on
+
+slide: "B receives, C makes the run"
+ball: B
+run: C~>28,4
+
+slide: "B finds C"
+clear: arrows
+red: C@28,4
+ball: C
+pass: B->C
+```
+
+### New base directives
+
+| Line | Meaning |
+|---|---|
+| `loop: on` / `loop: off` | Whether playback repeats. Default `off`. Base only. |
+| `ball: B` | A ball token may be a player label as well as a coordinate: the ball sits at that player's feet and follows them on later slides. Works in the base and in slides, mixed freely with coordinates (`ball: B 30,5`). |
+
+### Inside a slide
+
+`slide:` (with an optional caption, quoted like `label:`) starts a new slide. Every line
+until the next `slide:` or the end of the block belongs to it.
+
+| Line | Effect |
+|---|---|
+| `red: C@28,4` (any team) | An existing label **moves** there. A new label **adds** a player. Re-declaring a label under a different team is a line error — players do not change team. |
+| `remove: X Y` | Takes players off. An unknown label, or a label both placed and removed on the same slide, is a line error. |
+| `ball: …` | **Replaces all balls.** Tokens as in the base; several `ball:` lines on one slide concatenate. |
+| `clear: balls` | Removes all balls (with no `ball:` line, the slide has none). |
+| `pass:` / `run:` / `dribble:` / `shot:` | **Adds** an arrow. Arrows from earlier slides carry over. |
+| `clear: arrows` | Drops the carried-over arrows before this slide's own are added. `clear:` accepts `arrows`, `balls` or both. |
+
+**Fixed from slide 1:** `area`, `goal`, `zone`, `cone`, `flag`, `loop`, `label`. Any of
+these inside a slide is a line error ("cones are set on the first slide and cannot
+change"). Conversely `remove:` and `clear:` before the first `slide:` are line
+errors — there is nothing earlier to remove or clear. A slide's caption replaces `label:` for that slide; slide 1 shows `label:`.
+
+Endpoints in a slide resolve against the players that exist at that slide: base, plus
+earlier slides' additions, minus removals, plus this slide's placements. An unknown
+label is a line error on the slide line that used it.
+
+### Error tolerance
+
+`parse` still never throws. A bad line inside a slide costs only that line; the slide
+and every other slide still build. Line numbers are block-relative, as today.
+
+## Model
+
+`parse(src).scene` gains two fields; everything existing is unchanged:
+
+```js
+scene.loop    // boolean, default false
+scene.slides  // [] when the block has none
+// each slide:
+{
+  caption: "B finds C" | null,
+  players: [{ team, label, x, y }],   // placements on this slide, in source order
+  removes: ["X"],
+  clear: { arrows: false, balls: false },
+  balls: null | [{ x, y } | { ref: "C" }],  // null = unchanged from previous slide
+  actions: [{ kind, from, to, seq }],       // seq restarts at 1 on each slide
+}
+```
+
+Base balls stay in `scene.marks` as `{ kind: "ball", x, y }` or, new,
+`{ kind: "ball", ref: "B" }`.
+
+`serialise` writes `loop: on` when set and each slide after the base, in the order
+`slide:`, `clear:`, `remove:`, players, `ball:`, actions. The invariant still holds:
+`parse(serialise(scene)).scene` deep-equals `scene`, and serialise is stable under
+re-parse. A slide with `clear.balls` and a non-empty `balls` round-trips as both lines.
+
+## Frames — `src/lib/slides.js`
+
+`frames(scene)` → an array of fully resolved scenes, one per slide (length 1 for a block
+without slides). This is the only thing the renderer consumes, for animated and
+static diagrams alike.
+
+Each frame:
+
+```js
+{
+  area, marks,            // fixed marks only (goal, zone, cone, flag); balls pulled out
+  players: [{ team, label, x, y }],
+  balls:   [{ key, x, y }],          // resolved coordinates
+  actions: [{ key, kind, from, to, seq, carried }],
+  label,                  // slide 1: scene.label; later: the slide caption
+}
+```
+
+Rules:
+
+- **Players:** start from the previous frame, apply placements (move or add), then
+  removes.
+- **Balls:** if the slide has `clear.balls` or `balls !== null`, replace the list;
+  otherwise carry. A `{ref}` ball resolves to that player's position *in this frame*,
+  so it follows a player who moves. A ball whose player has been removed stays at
+  its last position. **Ball identity is order:** `key` is the ball's index, so ball 1
+  on one slide is ball 1 on the next and glides; extras fade in, missing ones fade out.
+- **Actions:** carried actions (previous frame's, unless `clear.arrows`) get
+  `carried: true`; this slide's own get `carried: false` and their per-slide `seq`.
+  A carried action whose endpoint player has been removed is dropped. `key` is stable
+  for an action's lifetime (slide index + position within its slide), so the renderer
+  can fade it in once and keep it.
+- Slide 1 is the base: all its actions are `carried: false`, so it looks exactly as a
+  diagram does today.
+
+`pitchSvg.actionPath` and `resolvePoint` take a frame unchanged — a frame has the same
+`players` shape a scene does.
+
+## Rendering — `PitchDiagram.jsx`
+
+- New prop `animated` (default `false`). `DrillCard` and `DrillPicker` thumbnails stay
+  static and show slide 1. `DrillPreview` passes `animated`, so both the drill view and
+  the editor preview get controls.
+- With one frame, or `animated` false: renders frame 0 exactly as today.
+- With two or more frames and `animated`: a control row below the SVG —
+  **Play / Pause** (reads **Replay** once a non-looping run has ended), a `2 / 4`
+  counter, and the frame's caption.
+- Starts paused on slide 1. Nothing moves until Play is pressed.
+- Playback: a small hook advances the frame index — 1000 ms glide, then 1500 ms hold.
+  At the end: if `loop`, cut (no glide) back to slide 1 and continue; otherwise stop on
+  the last slide showing Replay. Replay cuts to slide 1 and plays.
+- Players and balls are keyed (label, ball key) and positioned with a `transform`;
+  a CSS transition on `transform` does the glide. Arrows are keyed and fade in and out
+  by opacity. Carried arrows draw at reduced opacity with no number badge, so badges
+  number only what is new on the current slide.
+- `prefers-reduced-motion: reduce` disables the transitions: slides cut instead of
+  gliding.
+- Timers are cleared on pause, unmount, and when the source changes (editing in the
+  preview resets to slide 1, paused).
+
+## Help card
+
+`PitchHelp` gains an "Animating it" section: `slide:`, moving a player by
+re-declaring it, `ball: B`, `remove:`, `clear: arrows`/`clear: balls`, `loop: on`, and
+the rule that cones, goals, zones and flags are set on the first slide. Examples are
+built from `pitch.js` exports, as the rest of the card is.
+
+## Testing
+
+- `test/pitch.test.js`: slide parsing; each base-only directive rejected inside a slide;
+  team change, unknown label, place-and-remove errors; `ball: B` in base and slides;
+  `loop`; round trip and serialise stability with slides; one bad slide line leaving
+  the other slides intact.
+- `test/slides.test.js`: cumulative moves across three slides; add and remove; ball
+  replace vs carry; ball order-matching keys; `{ref}` ball follows a moving player and
+  stays put when its player is removed; `clear: arrows` / `clear: balls`; carried flag
+  and per-slide seq; carried action dropped when its player is removed; no slides →
+  one frame equal to today's scene.
+- A fixture `test/fixtures/3v2-animated.md`.
+- `test/pitchDiagram.test.jsx` (SSR): no controls without slides or without
+  `animated`; controls and `1 / 3` counter with slides; initial render is slide 1.
+- Playback timing and gliding are checked by hand in `npm run dev`.
+
+## Out of scope
+
+Per-slide durations, step forward/back buttons, a viewer loop toggle, cones or other
+fixed marks changing between slides, drag-to-edit, GIF/video export.
