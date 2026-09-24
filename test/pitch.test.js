@@ -426,6 +426,65 @@ describe("serialise", () => {
     expect(parse(serialise(scene)).scene.label).toBe(null);
   });
 
+  it("writes slides after the base, in canonical line order", () => {
+    const src = [
+      "red: A@1,1 B@2,2",
+      "ball: A",
+      "pass: A->B",
+      "loop: on",
+      'slide: "B goes"',
+      "run: B~>8,8",
+      "ball: B 9,9",
+      "red: B@5,5",
+      "remove: A",
+      "clear: arrows",
+      "slide:",
+      "clear: balls arrows",
+    ].join("\n");
+    const { scene, errors } = parse(src);
+    expect(errors).toEqual([]);
+    expect(serialise(scene)).toBe([
+      "area: 40x25",
+      "ball: A",
+      "red: A@1,1 B@2,2",
+      "pass: A->B",
+      "loop: on",
+      'slide: "B goes"',
+      "clear: arrows",
+      "remove: A",
+      "red: B@5,5",
+      "ball: B 9,9",
+      "run: B~>8,8",
+      "slide:",
+      "clear: arrows balls",
+      "",
+    ].join("\n"));
+  });
+
+  it("round-trips slides and is stable under re-parse", () => {
+    const src = [
+      "red: A@1,1 B@2,2",
+      "blue: X@3,3",
+      "ball: A",
+      'slide: "one"',
+      "red: A@4,4",
+      "blue: Y@6,6",
+      "red: N@7,7",
+      "ball: A 1,2",
+      "pass: A->N",
+      "slide: two",
+      "remove: X",
+      "shot: N->>goal",
+    ].join("\n");
+    const { scene, errors } = parse(src);
+    expect(errors).toEqual([]);
+    const once = serialise(scene);
+    const again = parse(once);
+    expect(again.errors).toEqual([]);
+    expect(again.scene).toEqual(scene);
+    expect(serialise(again.scene)).toBe(once);
+  });
+
 });
 
 describe("parse: loop", () => {

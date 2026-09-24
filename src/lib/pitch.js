@@ -354,13 +354,40 @@ function runs(items, keyOf) {
   return out;
 }
 
+function playerLines(players) {
+  return runs(players, (p) => p.team)
+    .map((run) => `${run.key}: ${run.items.map((p) => `${p.label}@${pt(p)}`).join(" ")}`);
+}
+
+function actionLines(actions) {
+  return [...actions].sort((x, y) => x.seq - y.seq).map((a) => {
+    const to = a.to.ref !== undefined ? a.to.ref : pt(a.to);
+    return `${a.kind}: ${a.from}${ARROWS[a.kind]}${to}`;
+  });
+}
+
+// clear and remove come first: they act on what the previous slide left, before this
+// slide's placements. Parse forbids placing and removing one label on a slide, so the
+// order never changes what the slide means.
+function slideLines(s) {
+  const out = [s.caption ? `slide: ${quote(s.caption)}` : "slide:"];
+  const clear = CLEAR_TARGETS.filter((t) => s.clear[t]);
+  if (clear.length) out.push(`clear: ${clear.join(" ")}`);
+  if (s.removes.length) out.push(`remove: ${s.removes.join(" ")}`);
+  out.push(...playerLines(s.players));
+  if (s.balls?.length) out.push(`ball: ${s.balls.map(tok).join(" ")}`);
+  out.push(...actionLines(s.actions));
+  return out;
+}
+
 // Scene -> canonical source. Inverse of parse() at the MODEL level:
 // parse(serialise(scene)).scene deep-equals scene, and serialise is stable under
 // re-parse. It is NOT byte-identical to arbitrary input source: directives are
 // reordered, multi-action lines are split one per line, and `#` comments are dropped
 // entirely — they are stripped by parse and have no home in the scene model. A future
 // drag-to-edit canvas that writes back through serialise will therefore lose any
-// comments a coach hand-wrote in the block.
+// comments a coach hand-wrote in the block. Slides are written after the base, one
+// directive group per line, in the order above.
 export function serialise(scene) {
   const lines = [];
 
@@ -381,19 +408,15 @@ export function serialise(scene) {
       lines.push(`${run.key}: ${run.items.map(tok).join(" ")}`);
     }
   }
-  for (const run of runs(scene.players, (p) => p.team)) {
-    lines.push(`${run.key}: ${run.items.map((p) => `${p.label}@${pt(p)}`).join(" ")}`);
-  }
-  for (const a of [...scene.actions].sort((x, y) => x.seq - y.seq)) {
-    const to = a.to.ref !== undefined ? a.to.ref : pt(a.to);
-    lines.push(`${a.kind}: ${a.from}${ARROWS[a.kind]}${to}`);
-  }
+  lines.push(...playerLines(scene.players));
+  lines.push(...actionLines(scene.actions));
   // Truthiness rather than a null check: an empty label serialises to `label: ` which
   // parses back as null, so emitting it would break round-trip stability.
   if (scene.label) {
     lines.push(`label: ${quote(scene.label)}`);
   }
   if (scene.loop) lines.push("loop: on");
+  for (const s of scene.slides ?? []) lines.push(...slideLines(s));
 
   return lines.join("\n") + "\n";
 }
