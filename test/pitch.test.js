@@ -577,6 +577,12 @@ describe("parse: slides", () => {
     expect(scene.slides[0].balls).toEqual([{ x: 1, y: 1 }]);
   });
 
+  it("keeps the previous balls when a slide's only ball names nobody", () => {
+    const { scene, errors } = parse("red: A@1,1\nball: A\nslide:\nball: Z\n");
+    expect(errors).toEqual([{ line: 4, message: 'unknown player "Z"' }]);
+    expect(scene.slides[0].balls).toBeNull();
+  });
+
   it("reads clear targets", () => {
     expect(parse("slide:\nclear: arrows balls\n").scene.slides[0].clear).toEqual({ arrows: true, balls: true });
     expect(parse("slide:\nclear: cones\n").errors).toEqual([

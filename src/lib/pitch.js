@@ -103,7 +103,8 @@ function parsePointMarks(kind) {
 // The base's balls live in marks, in source order with the cones. A slide's balls
 // REPLACE the previous slide's, so they are collected on the slide — and only created
 // when a valid token arrives, so a line of nothing but typos leaves the balls unchanged
-// rather than silently clearing them.
+// rather than silently clearing them. A label that turns out to name nobody is dropped
+// at the end of the slide, and closeSection resets an emptied list for the same reason.
 function parseBalls(rest, ctx) {
   const tokens = rest.split(/\s+/).filter(Boolean);
   if (ctx.slide && tokens.length === 0) {
@@ -259,6 +260,9 @@ function closeSection(scene, state, errors) {
     errors.push({ line: r.line, message: `unknown player "${r.ball.ref}"` });
     r.list.splice(r.list.indexOf(r.ball), 1);
   }
+  // A slide whose every ball named nobody is a typo, not a request for no balls, so it
+  // keeps the previous slide's balls; "clear: balls" is how to ask for none.
+  if (state.slide?.balls?.length === 0) state.slide.balls = null;
   state.pending = [];
   state.ballRefs = [];
 }
