@@ -69,6 +69,12 @@ blue: X@18,8 Y@30,7
 pass: A->B
 run: C~>28,4
 label: "3v2 to end line"
+
+slide: "B finds C in the zone"
+clear: arrows
+red: C@28,4
+ball: B
+pass: B->C
 \`\`\``;
 
 function Lines({ rows }) {

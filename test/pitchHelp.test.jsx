@@ -51,6 +51,7 @@ describe("PitchHelp", () => {
     expect(out).toContain("area:");
     expect(out).toContain("red:");
     expect(out).toContain("pass:");
+    expect(out).toContain("slide:");
   });
 
   it("documents both checklist forms: one item per list line, and several inline", () => {

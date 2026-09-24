@@ -324,6 +324,8 @@ textarea, input, select {
   .run-controls button { display: none; }
   .run-block-actions { display: none; }
   .drill-picker { display: none; }
+  /* Paper shows whichever slide was on screen; a Play button there does nothing. */
+  .pitch-controls { display: none; }
   /* Nothing on paper opens, so a caret on every summary row is fifteen marks that mean
      nothing there. */
   .disclosure { display: none; }

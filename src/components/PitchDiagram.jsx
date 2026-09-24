@@ -128,7 +128,7 @@ export default function PitchDiagram({ source = "", baseLine = 1, animated = fal
     <div>
       <svg
         className={cls("pitch", !prev && "cut")} viewBox={viewBox(scene.area)}
-        role="img" aria-label={scene.label || "Pitch diagram"}
+        role="img" aria-label={frame.label || scene.label || "Pitch diagram"}
       >
         <defs>
           {/* markerUnits="userSpaceOnUse" is essential: SVG markers scale with
@@ -186,7 +186,8 @@ export default function PitchDiagram({ source = "", baseLine = 1, animated = fal
           </button>
           {/* One string, not {a} / {b}: separate text children render with comment
               separators between them, which breaks the counter as a single run of text. */}
-          <span className="dim">{`${index + 1} / ${all.length}`}</span>
+          {/* Announced, so a screen-reader user hears the slide change after pressing Play. */}
+          <span className="dim" aria-live="polite">{`${index + 1} / ${all.length}`}</span>
         </div>
       ) : null}
 

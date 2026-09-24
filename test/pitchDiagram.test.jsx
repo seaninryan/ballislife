@@ -87,6 +87,14 @@ describe("PitchDiagram", () => {
   const SLIDES = "red: A@1,1\nslide:\nred: A@5,5\nslide:\nred: A@9,9\n";
   const animated = (src) => renderToStaticMarkup(<PitchDiagram source={src} animated />);
 
+  it("renders the first paint as a cut, so nothing glides in from the origin", () => {
+    expect(animated(SLIDES)).toMatch(/<svg class="pitch cut"/);
+  });
+
+  it("names the diagram after the slide on screen", () => {
+    expect(animated("red: A@1,1\nlabel: base\nslide: later\n")).toContain('aria-label="base"');
+  });
+
   it("shows no controls unless animated", () => {
     expect(render(SLIDES)).not.toContain(">Play<");
   });
