@@ -83,4 +83,23 @@ describe("PitchDiagram", () => {
     expect(html).not.toContain("later");
     expect(html).not.toContain(">B<");
   });
+
+  const SLIDES = "red: A@1,1\nslide:\nred: A@5,5\nslide:\nred: A@9,9\n";
+  const animated = (src) => renderToStaticMarkup(<PitchDiagram source={src} animated />);
+
+  it("shows no controls unless animated", () => {
+    expect(render(SLIDES)).not.toContain(">Play<");
+  });
+
+  it("shows no controls for a diagram without slides", () => {
+    expect(animated("red: A@1,1\n")).not.toContain(">Play<");
+  });
+
+  it("shows Play and the slide counter for an animated diagram with slides", () => {
+    const html = animated(SLIDES);
+    expect(html).toContain(">Play<");
+    expect(html).toContain("1 / 3");
+    // Starts on slide 1 — nothing moves until Play is pressed.
+    expect(html).toContain("translate(30px, 30px)");
+  });
 });

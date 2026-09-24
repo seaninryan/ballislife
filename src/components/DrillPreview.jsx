@@ -40,7 +40,7 @@ export default function DrillPreview({ source = "", interactive = false, slug, t
   let tickCursor = 0;
   const rendered = segments.map((seg, i) => {
     if (seg.kind === "pitch") {
-      return <PitchDiagram key={i} source={seg.text} baseLine={seg.line + offset} />;
+      return <PitchDiagram key={i} source={seg.text} baseLine={seg.line + offset} animated />;
     }
     const html = interactive
       ? renderProse(seg.text, { interactive: true, tickOffset: tickCursor })

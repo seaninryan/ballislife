@@ -1,10 +1,12 @@
 // src/components/PitchDiagram.jsx
-// Renders a `pitch` source block. Parse errors are shown inline and the last
-// renderable scene is still drawn: a typo must never blank the preview.
-import React, { useMemo } from "react";
+// Renders a `pitch` source block, and with `animated` plays its slides. Parse errors
+// are shown inline and the last renderable scene is still drawn: a typo must never
+// blank the preview.
+import React, { useEffect, useMemo, useReducer } from "react";
 import { parse } from "../lib/pitch.js";
 import { viewBox, toPx, markings, markShape } from "../lib/pitchSvg.js";
 import { frames, stage } from "../lib/slides.js";
+import { step, initial } from "../lib/playback.js";
 
 const TEAM_FILL = { red: "var(--red)", blue: "var(--blue)", yellow: "var(--yellow)", gk: "var(--gk)" };
 const ACTION_STROKE = {
@@ -96,18 +98,36 @@ function Ball({ ball }) {
   );
 }
 
-export default function PitchDiagram({ source = "", baseLine = 1 }) {
+// Turns the reducer's `delay` into a timer. Every rule about what comes next is in
+// lib/playback.js; this only keeps time. Editing the source starts over, paused.
+function usePlayback(count, loop, source) {
+  const [state, dispatch] = useReducer(step, initial);
+  useEffect(() => { dispatch({ type: "reset" }); }, [source]);
+  useEffect(() => {
+    if (!state.playing) return undefined;
+    const t = setTimeout(() => dispatch({ type: "tick", n: count, loop }), state.delay);
+    return () => clearTimeout(t);
+  }, [state, count, loop]);
+  return [state, dispatch];
+}
+
+export default function PitchDiagram({ source = "", baseLine = 1, animated = false }) {
   const { scene, errors } = useMemo(() => parse(source), [source]);
   const all = useMemo(() => frames(scene), [scene]);
-  const frame = all[0];
-  const { players, balls, paths } = useMemo(() => stage(null, frame), [frame]);
+  const [play, dispatch] = usePlayback(all.length, scene.loop, source);
+  const controls = animated && all.length > 1;
+  // Clamped: the reset after an edit lands one render after the new source.
+  const index = controls ? Math.min(play.index, all.length - 1) : 0;
+  const frame = all[index];
+  const prev = controls && play.from !== null ? all[play.from] ?? null : null;
+  const { players, balls, paths } = useMemo(() => stage(prev, frame), [prev, frame]);
   const shapes = useMemo(() => markings(scene.area), [scene.area]);
   const labelAt = toPx(scene.area.w / 2, scene.area.h);
 
   return (
     <div>
       <svg
-        className="pitch cut" viewBox={viewBox(scene.area)}
+        className={cls("pitch", !prev && "cut")} viewBox={viewBox(scene.area)}
         role="img" aria-label={scene.label || "Pitch diagram"}
       >
         <defs>
@@ -158,6 +178,17 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
           </text>
         ) : null}
       </svg>
+
+      {controls ? (
+        <div className="row pitch-controls">
+          <button type="button" onClick={() => dispatch({ type: play.playing ? "pause" : "play" })}>
+            {play.playing ? "Pause" : play.ended ? "Replay" : "Play"}
+          </button>
+          {/* One string, not {a} / {b}: separate text children render with comment
+              separators between them, which breaks the counter as a single run of text. */}
+          <span className="dim">{`${index + 1} / ${all.length}`}</span>
+        </div>
+      ) : null}
 
       {errors.length > 0 ? (
         <div className="banner err mono">
