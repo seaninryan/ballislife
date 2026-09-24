@@ -219,6 +219,12 @@ describe("parse: actions", () => {
 });
 
 describe("parse: robustness", () => {
+  it("reports a directive named after an Object.prototype key", () => {
+    expect(parse("constructor: x\n").errors).toEqual([
+      { line: 1, message: 'unknown directive "constructor"' },
+    ]);
+  });
+
   const nasty = [
     "",
     "\n\n\n",
@@ -649,6 +655,24 @@ describe("parse: slides", () => {
     ]);
     expect(parse("slide:\nclear:\n").errors).toEqual([
       { line: 2, message: 'expected "arrows", "balls" or both' },
+    ]);
+  });
+
+  it("lets a later slide bring back a removed label as a new player, on any team", () => {
+    const { scene, errors } = parse("red: A@1,1\nslide:\nremove: A\nslide:\nblue: A@2,2\n");
+    expect(errors).toEqual([]);
+    expect(scene.slides[1].players).toEqual([{ team: "blue", label: "A", x: 2, y: 2 }]);
+  });
+
+  it("resolves a slide ball at a player placed later on the same slide", () => {
+    const { scene, errors } = parse("slide:\nball: N\nred: N@4,4\n");
+    expect(errors).toEqual([]);
+    expect(scene.slides[0].balls).toEqual([{ ref: "N" }]);
+  });
+
+  it("reports a label removed twice", () => {
+    expect(parse("red: A@1,1\nslide:\nremove: A A\n").errors).toEqual([
+      { line: 3, message: 'unknown player "A"' },
     ]);
   });
 

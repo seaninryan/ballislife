@@ -300,7 +300,9 @@ export function parse(src) {
       scene.slides.push(state.slide);
       return;
     }
-    const handler = DIRECTIVES[key];
+    // Own keys only: a plain lookup finds Object.prototype's `constructor`, so the line
+    // `constructor: x` was silently accepted rather than reported.
+    const handler = Object.hasOwn(DIRECTIVES, key) ? DIRECTIVES[key] : undefined;
     if (!handler) return fail(`unknown directive "${key}"`);
     if (state.slide && BASE_ONLY.has(key)) {
       return fail(`"${key}" is set on the first slide and cannot change on a later one`);
