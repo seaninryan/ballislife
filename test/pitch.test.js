@@ -427,3 +427,51 @@ describe("serialise", () => {
   });
 
 });
+
+describe("parse: loop", () => {
+  it("defaults to off", () => {
+    expect(parse("area: 40x25\n").scene.loop).toBe(false);
+  });
+
+  it("reads on and off", () => {
+    expect(parse("loop: on\n").scene.loop).toBe(true);
+    expect(parse("loop: off\n").scene.loop).toBe(false);
+  });
+
+  it("rejects anything else", () => {
+    expect(parse("loop: maybe\n").errors).toEqual([
+      { line: 1, message: 'expected "on" or "off" but got "maybe"' },
+    ]);
+  });
+});
+
+describe("parse: a ball at a player's feet", () => {
+  it("accepts a player label as a ball token, declared before or after", () => {
+    const { scene, errors } = parse("ball: 10,12 B\nred: B@3,4\n");
+    expect(errors).toEqual([]);
+    expect(scene.marks).toEqual([
+      { kind: "ball", x: 10, y: 12 },
+      { kind: "ball", ref: "B" },
+    ]);
+  });
+
+  it("drops a ball at an unknown player with an error on its line", () => {
+    const { scene, errors } = parse("red: A@1,1\nball: Z 2,2\n");
+    expect(errors).toEqual([{ line: 2, message: 'unknown player "Z"' }]);
+    expect(scene.marks).toEqual([{ kind: "ball", x: 2, y: 2 }]);
+  });
+
+  it("names both accepted forms for a token that is neither", () => {
+    expect(parse("ball: 9x\n").errors).toEqual([
+      { line: 1, message: 'expected "<x>,<y>" or a player label but got "9x"' },
+    ]);
+  });
+
+  it("round-trips a ball at a player and loop", () => {
+    const { scene } = parse("red: B@3,4\nball: B 1,1\nloop: on\n");
+    const once = serialise(scene);
+    expect(once).toBe(["area: 40x25", "ball: B 1,1", "red: B@3,4", "loop: on", ""].join("\n"));
+    expect(parse(once).scene).toEqual(scene);
+    expect(serialise(parse(once).scene)).toBe(once);
+  });
+});

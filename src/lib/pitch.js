@@ -9,7 +9,10 @@ export const MARKINGS = ["plain", "half", "full", "box", "third"];
 const DEFAULT_AREA = { w: 40, h: 25, markings: "plain" };
 
 function emptyScene() {
-  return { area: { ...DEFAULT_AREA }, marks: [], players: [], actions: [], label: null };
+  return {
+    area: { ...DEFAULT_AREA }, marks: [], players: [], actions: [], label: null,
+    loop: false, slides: [],
+  };
 }
 
 // "40x25 half" -> { w, h, markings }
@@ -70,6 +73,9 @@ function parsePoint(token) {
   return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
 }
 
+// A player label on its own, as a ball token: "ball: B" puts the ball at B's feet.
+const LABEL_RE = /^[A-Za-z][A-Za-z0-9]{0,3}$/;
+
 function parsePointMarks(kind) {
   return (rest, ctx) => {
     for (const token of rest.split(/\s+/).filter(Boolean)) {
@@ -78,6 +84,28 @@ function parsePointMarks(kind) {
       ctx.scene.marks.push({ kind, ...p });
     }
   };
+}
+
+// "10,12 B" -> a ball per token. A player label puts the ball at that player's feet,
+// so it follows them from slide to slide. Like an action endpoint, the label is checked
+// only once every player is known, because it may be declared on a later line.
+function parseBalls(rest, ctx) {
+  for (const token of rest.split(/\s+/).filter(Boolean)) {
+    const p = parsePoint(token);
+    if (p) { ctx.scene.marks.push({ kind: "ball", ...p }); continue; }
+    if (!LABEL_RE.test(token)) {
+      ctx.fail(`expected "<x>,<y>" or a player label but got "${token}"`);
+      continue;
+    }
+    const ball = { kind: "ball", ref: token };
+    ctx.scene.marks.push(ball);
+    ctx.ballRefs.push({ ball, list: ctx.scene.marks, line: ctx.line });
+  }
+}
+
+function parseLoop(rest, ctx) {
+  if (rest === "on" || rest === "off") ctx.scene.loop = rest === "on";
+  else ctx.fail(`expected "on" or "off" but got "${rest}"`);
 }
 
 // "0,12 small"
@@ -152,11 +180,14 @@ const DIRECTIVES = { area: parseArea, goal: parseGoal, zone: parseZone, label: p
 for (const team of TEAMS) DIRECTIVES[team] = parsePlayers(team);
 for (const kind of POINT_MARKS) DIRECTIVES[kind] = parsePointMarks(kind);
 for (const kind of ARROW_KINDS) DIRECTIVES[kind] = parseActions(kind);
+DIRECTIVES.ball = parseBalls;
+DIRECTIVES.loop = parseLoop;
 
 export function parse(src) {
   const scene = emptyScene();
   const errors = [];
   const pending = [];
+  const ballRefs = [];
   const lines = String(src ?? "").split("\n");
 
   lines.forEach((raw, i) => {
@@ -177,6 +208,7 @@ export function parse(src) {
     handler(m[2].trim(), {
       scene,
       pending,
+      ballRefs,
       line: i + 1,
       fail: (message) => { errors.push({ line: i + 1, message }); },
     });
@@ -201,6 +233,12 @@ export function parse(src) {
     });
   }
 
+  for (const r of ballRefs) {
+    if (scene.players.some((p) => p.label === r.ball.ref)) continue;
+    errors.push({ line: r.line, message: `unknown player "${r.ball.ref}"` });
+    r.list.splice(r.list.indexOf(r.ball), 1);
+  }
+
   // Report in source order. Endpoints resolve in this second pass, so without the sort
   // an action error on line 1 lands after a mark error on line 2 — and the whole point
   // of carrying a line number is that a reader can follow the list down the source.
@@ -212,6 +250,8 @@ export function parse(src) {
 // Trims trailing zeros so 10 serialises as "10", not "10.0".
 const n = (v) => String(Number(v));
 const pt = (o) => `${n(o.x)},${n(o.y)}`;
+// A ball may stand at a player rather than a coordinate.
+const tok = (o) => (o.ref !== undefined ? o.ref : pt(o));
 // Quote when the value contains whitespace, so short labels stay unquoted — and also
 // when it already starts with a quote, or the round trip breaks: `"a"` would serialise
 // unquoted as `label: "a"`, which parses back as the bare string `a`.
@@ -257,7 +297,7 @@ export function serialise(scene) {
         lines.push(`goal: ${pt(g)}${g.size === "full" ? "" : ` ${g.size}`}`);
       }
     } else {
-      lines.push(`${run.key}: ${run.items.map(pt).join(" ")}`);
+      lines.push(`${run.key}: ${run.items.map(tok).join(" ")}`);
     }
   }
   for (const run of runs(scene.players, (p) => p.team)) {
@@ -272,6 +312,7 @@ export function serialise(scene) {
   if (scene.label) {
     lines.push(`label: ${quote(scene.label)}`);
   }
+  if (scene.loop) lines.push("loop: on");
 
   return lines.join("\n") + "\n";
 }
