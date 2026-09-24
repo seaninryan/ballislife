@@ -140,8 +140,9 @@ Rules:
   the editor preview get controls.
 - With one frame, or `animated` false: renders frame 0 exactly as today.
 - With two or more frames and `animated`: a control row below the SVG —
-  **Play / Pause** (reads **Replay** once a non-looping run has ended), a `2 / 4`
-  counter, and the frame's caption.
+  **Play / Pause** (reads **Replay** once a non-looping run has ended) and a `2 / 4`
+  counter. The frame's caption is drawn where `label:` is today, at the foot of the
+  diagram, so it also shows on a thumbnail's slide 1.
 - Starts paused on slide 1. Nothing moves until Play is pressed.
 - Playback: a small hook advances the frame index — 1000 ms glide, then 1500 ms hold.
   At the end: if `loop`, cut (no glide) back to slide 1 and continue; otherwise stop on
