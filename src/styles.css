@@ -48,6 +48,17 @@ textarea, input, select {
 .banner.err { background: #fbdcd7; color: #8c1d18; }
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 .pitch { display: block; width: 100%; border-radius: 8px; }
+/* Animated diagrams (lib/playback.js). The transform duration must match GLIDE_MS. */
+.pitch-glide { transition: transform 1s ease-in-out, opacity 0.4s ease-out; }
+.pitch-arrow { transition: opacity 0.4s ease-out; }
+/* A cut (first render, loop, replay) jumps rather than gliding everything home. */
+.pitch.cut .pitch-glide { transition: none; }
+/* Arrows carried from an earlier slide are context, not the move being shown. */
+.pitch-carried { opacity: 0.4; }
+.pitch-leave { opacity: 0; }
+.pitch-enter { animation: pitch-enter 0.6s ease-out; }
+@keyframes pitch-enter { from { opacity: 0; } }
+.pitch-controls { margin-top: 6px; }
 .split { display: flex; gap: 10px; align-items: flex-start; }
 .split > * { flex: 1; min-width: 0; }
 @media (max-width: 780px) { .split { flex-direction: column; } }
@@ -252,6 +263,9 @@ textarea, input, select {
   /* The caret still turns, it just turns instantly: the direction is the signal, the
      sweep is only decoration. */
   .disclosure { transition: none; }
+  /* Slides still change; they cut instead of gliding. */
+  .pitch-glide, .pitch-arrow { transition: none; }
+  .pitch-enter { animation: none; }
 }
 
 /* Choosing a drill, used mid-session to swap a block. The list scrolls inside itself

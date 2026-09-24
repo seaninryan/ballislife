@@ -3,7 +3,8 @@
 // renderable scene is still drawn: a typo must never blank the preview.
 import React, { useMemo } from "react";
 import { parse } from "../lib/pitch.js";
-import { viewBox, toPx, markings, actionPath, markShape } from "../lib/pitchSvg.js";
+import { viewBox, toPx, markings, markShape } from "../lib/pitchSvg.js";
+import { frames, stage } from "../lib/slides.js";
 
 const TEAM_FILL = { red: "var(--red)", blue: "var(--blue)", yellow: "var(--yellow)", gk: "var(--gk)" };
 const ACTION_STROKE = {
@@ -14,6 +15,10 @@ const ACTION_STROKE = {
 };
 const ACTION_WIDTH = { pass: 2.4, dribble: 2.4, run: 2.2, shot: 4 };
 const R = 7; // player radius, px
+
+// Joins the truthy class names; undefined rather than "" so no empty attribute renders.
+const cls = (...names) => names.filter(Boolean).join(" ") || undefined;
+const motion = (item) => cls(item.entering && "pitch-enter", item.leaving && "pitch-leave");
 
 function Marking({ shape }) {
   const stroke = { stroke: "var(--paint)", fill: "none", strokeWidth: 1.3 };
@@ -69,32 +74,40 @@ function Player({ player }) {
   const p = toPx(player.x, player.y);
   const fill = TEAM_FILL[player.team];
   return (
-    <g>
+    <g className={cls("pitch-glide", motion(player))} style={{ transform: `translate(${p.x}px, ${p.y}px)` }}>
       {player.team === "gk" ? (
-        <rect x={p.x - R} y={p.y - R} width={R * 2} height={R * 2} rx="3" fill={fill} stroke="#fff" strokeWidth="1" />
+        <rect x={-R} y={-R} width={R * 2} height={R * 2} rx="3" fill={fill} stroke="#fff" strokeWidth="1" />
       ) : (
-        <circle cx={p.x} cy={p.y} r={R} fill={fill} stroke="#fff" strokeWidth="1" />
+        <circle cx="0" cy="0" r={R} fill={fill} stroke="#fff" strokeWidth="1" />
       )}
-      <text x={p.x} y={p.y + 3} fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">
+      <text x="0" y="3" fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">
         {player.label}
       </text>
     </g>
   );
 }
 
+function Ball({ ball }) {
+  const s = markShape({ kind: "ball", x: ball.x, y: ball.y });
+  return (
+    <g className={cls("pitch-glide", motion(ball))} style={{ transform: `translate(${s.cx}px, ${s.cy}px)` }}>
+      <circle cx="0" cy="0" r={s.r} fill="#fff" stroke="#222" strokeWidth="1" />
+    </g>
+  );
+}
+
 export default function PitchDiagram({ source = "", baseLine = 1 }) {
   const { scene, errors } = useMemo(() => parse(source), [source]);
-  const paths = useMemo(
-    () => scene.actions.map((a) => actionPath(a, scene)).filter(Boolean),
-    [scene],
-  );
+  const all = useMemo(() => frames(scene), [scene]);
+  const frame = all[0];
+  const { players, balls, paths } = useMemo(() => stage(null, frame), [frame]);
   const shapes = useMemo(() => markings(scene.area), [scene.area]);
   const labelAt = toPx(scene.area.w / 2, scene.area.h);
 
   return (
     <div>
       <svg
-        className="pitch" viewBox={viewBox(scene.area)}
+        className="pitch cut" viewBox={viewBox(scene.area)}
         role="img" aria-label={scene.label || "Pitch diagram"}
       >
         <defs>
@@ -114,30 +127,34 @@ export default function PitchDiagram({ source = "", baseLine = 1 }) {
 
         <rect x="0" y="0" width="100%" height="100%" fill="var(--grass)" />
         {shapes.map((s, i) => <Marking key={i} shape={s} />)}
-        {scene.marks.map((m, i) => <Mark key={i} mark={m} />)}
-        {paths.map((p, i) => (
+        {frame.marks.map((m, i) => <Mark key={i} mark={m} />)}
+        {paths.map((p) => (
           <path
-            key={i} d={p.d} fill="none"
+            key={p.key} d={p.d} fill="none"
+            className={cls("pitch-arrow", p.carried && "pitch-carried", motion(p))}
             stroke={ACTION_STROKE[p.kind]} strokeWidth={ACTION_WIDTH[p.kind]}
             strokeDasharray={p.kind === "run" ? "6 4" : undefined}
             markerEnd={`url(#arrow-${p.kind})`}
           />
         ))}
         {/* Badges before players, so a crowded drill hides a sequence number rather
-            than a player. A missing player is a missing entity; a missing ordinal is
-            recoverable from the source. */}
-        {paths.map((p, i) => (
-          <g key={`b${i}`}>
+            than a player. Only this slide's own arrows are numbered: a carried arrow is
+            context, and its old number would read as part of the current sequence. */}
+        {paths.filter((p) => !p.carried && !p.leaving).map((p) => (
+          <g key={`b${p.key}`} className={motion(p)}>
             <circle cx={p.badge.x} cy={p.badge.y} r="6.5" fill="#000" fillOpacity="0.55" />
             <text x={p.badge.x} y={p.badge.y + 3} fontSize="8" fontWeight="700" fill="#fff" textAnchor="middle">
               {p.seq}
             </text>
           </g>
         ))}
-        {scene.players.map((p) => <Player key={p.label} player={p} />)}
-        {scene.label ? (
+        {players.map((p) => <Player key={p.label} player={p} />)}
+        {/* Balls after players: a ball at a player's feet overlaps the marker's edge
+            and must sit on top of it to be seen. */}
+        {balls.map((b) => <Ball key={b.key} ball={b} />)}
+        {frame.label ? (
           <text x={labelAt.x} y={labelAt.y + 14} fontSize="10" fill="#fff" fillOpacity="0.85" textAnchor="middle">
-            {scene.label}
+            {frame.label}
           </text>
         ) : null}
       </svg>

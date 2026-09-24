@@ -70,4 +70,17 @@ describe("PitchDiagram", () => {
     const html = renderToStaticMarkup(<PitchDiagram source={"goal: nope\n"} baseLine={7} />);
     expect(html).toContain("line 7");
   });
+
+  it("positions players and balls by transform, so they can glide", () => {
+    const html = render("red: A@10,20\nball: A\n");
+    expect(html).toContain("transform:translate(120px, 220px)");
+    expect(html).toContain('class="pitch-glide"');
+  });
+
+  it("draws slide 1 of a diagram with slides", () => {
+    const html = render('red: A@1,1\nlabel: base\nslide: "later"\nred: B@5,5\n');
+    expect(html).toContain("base");
+    expect(html).not.toContain("later");
+    expect(html).not.toContain(">B<");
+  });
 });
