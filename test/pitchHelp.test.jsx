@@ -66,4 +66,11 @@ describe("PitchHelp", () => {
     expect(out).toMatch(/never (changes?|writes?)|not (changed|written)/i);
     expect(out).toMatch(/next day|tomorrow|clear(ed)? again/i);
   });
+
+  it("documents slides", () => {
+    for (const s of ["slide:", "remove:", "clear: arrows balls", "loop: on", "ball: C"]) {
+      expect(html()).toContain(s);
+    }
+    expect(html()).toMatch(/first slide/);
+  });
 });

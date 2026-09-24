@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parse } from "../src/lib/pitch.js";
+import { readFileSync } from "node:fs";
+import { parse, serialise } from "../src/lib/pitch.js";
 import { frames, FEET, stage } from "../src/lib/slides.js";
+import { parseDoc } from "../src/lib/frontmatter.js";
+import { splitSegments } from "../src/lib/markdown.js";
 
 const framesOf = (src) => {
   const { scene, errors } = parse(src);
@@ -116,5 +119,22 @@ describe("stage", () => {
       ["0.0", true, false],
       ["1.0", false, true],
     ]);
+  });
+});
+
+describe("the animated fixture", () => {
+  const text = readFileSync(new URL("./fixtures/3v2-animated.md", import.meta.url), "utf8");
+  const block = splitSegments(parseDoc(text).body).find((s) => s.kind === "pitch").text;
+
+  it("parses cleanly into three frames", () => {
+    const fs = framesOf(block);
+    expect(fs).toHaveLength(3);
+    expect(fs.map((f) => f.label)).toEqual(["3v2 to end line", "B receives, C makes the run", "B finds C in the zone"]);
+    expect(fs[2].actions.map((a) => a.from)).toEqual(["B"]);
+  });
+
+  it("round-trips", () => {
+    const { scene } = parse(block);
+    expect(parse(serialise(scene)).scene).toEqual(scene);
   });
 });

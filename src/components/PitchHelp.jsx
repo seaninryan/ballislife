@@ -12,7 +12,7 @@
 // The vocabulary is built from pitch.js's own exported constants rather than retyped, so
 // the card cannot quietly drift out of step with what the parser accepts.
 import React from "react";
-import { MARKINGS, TEAMS, GOAL_SIZES, POINT_MARKS, ARROWS } from "../lib/pitch.js";
+import { MARKINGS, TEAMS, GOAL_SIZES, POINT_MARKS, ARROWS, CLEAR_TARGETS } from "../lib/pitch.js";
 
 const FRONTMATTER = [
   ["title: Rondo 4v2", "What the drill is called."],
@@ -43,6 +43,16 @@ const MOVES = [
   [`run: C${ARROWS.run}28,4`, "A dashed line: a player moves without the ball."],
   [`dribble: B${ARROWS.dribble}32,12`, "A wavy line: a player carries the ball."],
   [`shot: C${ARROWS.shot}goal`, "A thick line: a shot or a long delivery."],
+];
+
+const SLIDES = [
+  ['slide: "B finds C"', "Starts the next slide, with an optional caption. Everything below it, up to the next slide, is what changes."],
+  ["red: C@28,4", "Naming a player who is already on moves them there — they glide. A new label adds a player."],
+  ["ball: C", "Replaces every ball. A player's label puts the ball at their feet, and it follows them."],
+  [`pass: B${ARROWS.pass}C`, "Adds an arrow. Arrows from earlier slides stay, drawn fainter."],
+  [`clear: ${CLEAR_TARGETS.join(" ")}`, "Wipes the arrows, the balls, or both, carried over from the slide before."],
+  ["remove: X", "Takes a player off."],
+  ["loop: on", "Before the first slide line: play round again after the last slide. Off by default."],
 ];
 
 const CHECKLISTS = [
@@ -99,6 +109,15 @@ export default function PitchHelp() {
       <p className="dim">
         A movement can point at another player, at <code>goal</code>, or at a coordinate.
         They are numbered in the order you write them.
+      </p>
+
+      <h4>Animating it</h4>
+      <Lines rows={SLIDES} />
+      <p className="dim">
+        What you write before the first <code>slide:</code> is the first slide. Cones,
+        goals, zones and flags are set on the first slide and stay put — only players,
+        balls and arrows change. The drill view gets a Play button; thumbnails show the
+        first slide.
       </p>
 
       <h4>Two things that are not obvious</h4>
