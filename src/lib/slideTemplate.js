@@ -30,25 +30,43 @@ export function slideTemplate(scene) {
   return lines.join("\n") + "\n";
 }
 
+// Whether the drill has a diagram for Add slide to extend.
+export const hasPitchBlock = (doc) => splitSegments(parseDoc(doc).body).some((s) => s.kind === "pitch");
+
 // (document, cursor offset) -> { text, select: [start, end] } with a slide appended to the
 // pitch block holding the cursor, or the last block; null when there is none. `select`
 // is the caption, so typing replaces it.
 export function addSlide(doc, cursor) {
   const body = parseDoc(doc).body;
   const bodyStart = doc.length - body.length;
-  const blocks = pitchRanges(body).map((b) => ({ from: b.from + bodyStart, to: b.to + bodyStart }));
+  const blocks = pitchRanges(body).map((b) => ({
+    start: b.start + bodyStart, from: b.from + bodyStart, to: b.to + bodyStart, end: b.end + bodyStart,
+  }));
   if (blocks.length === 0) return null;
-  const block = blocks.find((b) => cursor >= b.from && cursor <= b.to) ?? blocks[blocks.length - 1];
+  // The fence lines count as inside the block: a cursor on ```pitch is visibly in that diagram.
+  const block = blocks.find((b) => cursor >= b.start && cursor <= b.end) ?? blocks[blocks.length - 1];
   const source = doc.slice(block.from, block.to);
-  // One blank line between the block's last line and the new slide, as a coach would type it.
-  const lead = source === "" || source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
-  const text = doc.slice(0, block.to) + lead + slideTemplate(parse(source).scene) + doc.slice(block.to);
+  // A CRLF drill gets a CRLF template, so one file does not end up with mixed endings.
+  const eol = doc.includes("\r\n") ? "\r\n" : "\n";
+  const flat = source.replace(/\r/g, "");
+  // The slide starts on a line of its own, one blank line after the block's last line, as
+  // a coach would type it. A document that ends on the ```pitch line itself has its
+  // content starting mid-line, straight after the fence: gluing the template there would
+  // turn the fence into "```pitchslide: …" and the diagram into prose.
+  const midLine = block.from > 0 && doc[block.from - 1] !== "\n";
+  const lead = midLine ? eol
+    : flat === "" || flat.endsWith("\n\n") ? ""
+    : flat.endsWith("\n") ? eol
+    : eol + eol;
+  const template = slideTemplate(parse(source).scene).replace(/\n/g, eol);
+  const text = doc.slice(0, block.to) + lead + template + doc.slice(block.to);
   const start = block.to + lead.length + 'slide: "'.length;
   return { text, select: [start, start + CAPTION.length] };
 }
 
-// Character range of each pitch block's content within the body. splitSegments gives the
-// content's 1-based starting line, and the content is an exact slice, so its length ends it.
+// Each pitch block within the body: `from`/`to` bound its content, `start`/`end` its fence
+// lines too. splitSegments gives the content's 1-based starting line, and the content is
+// an exact slice, so its length ends it.
 function pitchRanges(body) {
   const lineStarts = [0];
   for (let i = 0; i < body.length; i++) if (body[i] === "\n") lineStarts.push(i + 1);
@@ -56,6 +74,8 @@ function pitchRanges(body) {
     .filter((s) => s.kind === "pitch")
     .map((s) => {
       const from = lineStarts[s.line - 1] ?? body.length;
-      return { from, to: from + s.text.length };
+      const to = from + s.text.length;
+      const nl = body.indexOf("\n", to);
+      return { start: lineStarts[s.line - 2], from, to, end: nl === -1 ? body.length : nl };
     });
 }

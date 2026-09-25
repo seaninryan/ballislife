@@ -6,7 +6,7 @@ import DrillPreview from "./DrillPreview.jsx";
 import PitchHelp from "./PitchHelp.jsx";
 import { DIRTY, SAVING, CONFLICT, FAILED } from "../lib/editor.js";
 import { friendlyError } from "../lib/errors.js";
-import { addSlide } from "../lib/slideTemplate.js";
+import { addSlide, hasPitchBlock } from "../lib/slideTemplate.js";
 
 function Status({ state }) {
   if (state.status === CONFLICT) return <span className="chip warn-chip">conflict</span>;
@@ -19,7 +19,7 @@ function Status({ state }) {
 export default function Editor({ state, onEdit, onBack, onDelete, onKeepMine, onReload }) {
   const sourceRef = useRef(null);
   const pendingSelect = useRef(null);
-  const canAddSlide = useMemo(() => addSlide(state.text, 0) !== null, [state.text]);
+  const canAddSlide = useMemo(() => hasPitchBlock(state.text), [state.text]);
 
   // Applied after the edit re-renders the textarea: React writing the new value moves
   // the cursor to the end, so selecting any earlier would be undone.
@@ -30,6 +30,11 @@ export default function Editor({ state, onEdit, onBack, onDelete, onKeepMine, on
     pendingSelect.current = null;
     el.focus();
     el.setSelectionRange(range[0], range[1]);
+    // Selecting text does not scroll a textarea to it, and on a long drill the new slide
+    // is well below the fold.
+    const line = el.value.slice(0, range[0]).split("\n").length - 1;
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 18;
+    el.scrollTop = Math.max(0, line * lineHeight - el.clientHeight / 3);
   }, [state.text]);
 
   const onAddSlide = () => {
