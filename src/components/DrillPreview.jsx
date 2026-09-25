@@ -24,8 +24,9 @@ function frontmatterLines(source, body) {
 // still say that next time).
 // `onBlockChange(line, content)` makes the diagrams editable (the editor passes it; the
 // drill view does not): a drag hands back the new content of the block at file `line`.
-// `onPick(coord)` receives a coordinate picked by pressing on a diagram.
-export default function DrillPreview({ source = "", interactive = false, slug, today, onBlockChange, onPick }) {
+// `onPick(coord)` receives a coordinate picked by pressing on a diagram, and
+// `onErrorLine(line)` a diagram error's file line when it is clicked.
+export default function DrillPreview({ source = "", interactive = false, slug, today, onBlockChange, onPick, onErrorLine }) {
   const doc = useMemo(() => parseDoc(source), [source]);
   const segments = useMemo(() => splitSegments(doc.body), [doc.body]);
   const offset = useMemo(() => frontmatterLines(source, doc.body), [source, doc.body]);
@@ -50,6 +51,7 @@ export default function DrillPreview({ source = "", interactive = false, slug, t
           editable={Boolean(onBlockChange)}
           onChange={onBlockChange ? (next) => onBlockChange(line, next) : undefined}
           onPick={onPick}
+          onErrorLine={onErrorLine}
         />
       );
     }

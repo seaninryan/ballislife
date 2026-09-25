@@ -4,7 +4,7 @@
 // blank the preview.
 import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { parse } from "../lib/pitch.js";
-import { viewBox, toPx, toMetres, markings, markShape } from "../lib/pitchSvg.js";
+import { viewBox, toPx, toMetres, markings, markShape, rulerTicks } from "../lib/pitchSvg.js";
 import { moveInSource, moveInFrame } from "../lib/sourceEdit.js";
 import { frames, stage } from "../lib/slides.js";
 import { step, initial } from "../lib/playback.js";
@@ -129,7 +129,7 @@ function usePlayback(count, loop, source) {
 // that coordinate (onPick), and dragging a player, ball, mark or arrow head hands back
 // the whole block with that one coordinate rewritten (onChange).
 export default function PitchDiagram({
-  source = "", baseLine = 1, animated = false, editable = false, onChange, onPick,
+  source = "", baseLine = 1, animated = false, editable = false, onChange, onPick, onErrorLine,
 }) {
   const { scene, errors } = useMemo(() => parse(source), [source]);
   const all = useMemo(() => frames(scene), [scene]);
@@ -142,11 +142,14 @@ export default function PitchDiagram({
   const svgRef = useRef(null);
   // { target, x, y, moved }: target null means a press on the grass, which picks.
   const [drag, setDrag] = useState(null);
+  // The snapped coordinate under the pointer, for the editor's readout.
+  const [hover, setHover] = useState(null);
   const shown = drag?.moved ? moveInFrame(frame, drag.target, drag.x, drag.y) : frame;
   // No previous slide while dragging: the item must follow the pointer, not glide to it.
   const { players, balls, paths } = useMemo(() => stage(drag ? null : prev, shown), [prev, shown, drag]);
   const shapes = useMemo(() => markings(scene.area), [scene.area]);
   const labelAt = toPx(scene.area.w / 2, scene.area.h);
+  const ticks = editable ? rulerTicks(scene.area) : null;
 
   const metresAt = (e) => {
     const svg = svgRef.current;
@@ -167,8 +170,9 @@ export default function PitchDiagram({
     setDrag({ target, ...metresAt(e), moved: false });
   };
   const onPointerMove = (e) => {
-    if (!drag?.target) return;
     const m = metresAt(e);
+    setHover(m);
+    if (!drag?.target) return;
     if (m.x !== drag.x || m.y !== drag.y) setDrag({ ...drag, ...m, moved: true });
   };
   const onPointerUp = (e) => {
@@ -198,6 +202,7 @@ export default function PitchDiagram({
         onPointerMove={editable ? onPointerMove : undefined}
         onPointerUp={editable ? onPointerUp : undefined}
         onPointerCancel={editable ? () => setDrag(null) : undefined}
+        onPointerLeave={editable ? () => setHover(null) : undefined}
       >
         <defs>
           {/* markerUnits="userSpaceOnUse" is essential: SVG markers scale with
@@ -216,6 +221,25 @@ export default function PitchDiagram({
 
         <rect x="0" y="0" width="100%" height="100%" fill="var(--grass)" />
         {shapes.map((s, i) => <Marking key={i} shape={s} />)}
+        {ticks ? (
+          <g className="pitch-ruler" aria-hidden="true">
+            {/* Across the top is x, down the left is y: the order a coordinate is typed. */}
+            {ticks.x.map((t) => (
+              <g key={`x${t.m}`}>
+                <line x1={t.px} y1={t.label ? 13 : 16} x2={t.px} y2={20} />
+                {t.label ? <text x={t.px} y={10} textAnchor="middle">{t.label}</text> : null}
+              </g>
+            ))}
+            {ticks.y.map((t) => (
+              <g key={`y${t.m}`}>
+                <line x1={t.label ? 13 : 16} y1={t.px} x2={20} y2={t.px} />
+                {t.label ? <text x={11} y={t.px + 2.5} textAnchor="end">{t.label}</text> : null}
+              </g>
+            ))}
+            <text x={1} y={7}>x →</text>
+            <text x={1} y={17}>y ↓</text>
+          </g>
+        ) : null}
         {shown.marks.map((m, i) => (
           <Mark key={i} mark={m} onGrab={editable ? press({ kind: "mark", index: i }) : undefined} />
         ))}
@@ -261,6 +285,11 @@ export default function PitchDiagram({
             {frame.label}
           </text>
         ) : null}
+        {editable && hover ? (
+          <text className="pitch-readout" x={toPx(hover.x, hover.y).x + 9} y={toPx(hover.x, hover.y).y - 9}>
+            {`${hover.x},${hover.y}`}
+          </text>
+        ) : null}
       </svg>
 
       {controls ? (
@@ -290,7 +319,14 @@ export default function PitchDiagram({
       {errors.length > 0 ? (
         <div className="banner err mono">
           {errors.map((e, i) => (
-            <div key={i}>line {e.line + baseLine - 1}: {e.message}</div>
+            // One template string, so the text renders as a single node.
+            onErrorLine ? (
+              <button key={i} type="button" className="error-line" onClick={() => onErrorLine(e.line + baseLine - 1)}>
+                {`line ${e.line + baseLine - 1}: ${e.message}`}
+              </button>
+            ) : (
+              <div key={i}>{`line ${e.line + baseLine - 1}: ${e.message}`}</div>
+            )
           ))}
         </div>
       ) : null}

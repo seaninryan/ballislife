@@ -118,6 +118,23 @@ describe("PitchDiagram", () => {
 
   const editable = (src) => renderToStaticMarkup(<PitchDiagram source={src} editable />);
 
+  it("draws rulers only when editable", () => {
+    expect(render("area: 12x6\n")).not.toContain("pitch-ruler");
+    const html = editable("area: 12x6\n");
+    expect(html).toContain('class="pitch-ruler"');
+    expect(html).toContain("x →");
+    expect(html).toContain("y ↓");
+    expect(html).toContain(">10<");
+  });
+
+  it("makes each error a button that names its file line, when given onErrorLine", () => {
+    const html = renderToStaticMarkup(
+      <PitchDiagram source={"goal: nope\n"} baseLine={7} editable onErrorLine={() => {}} />,
+    );
+    expect(html).toMatch(/<button[^>]*class="error-line"[^>]*>line 7: /);
+    expect(render("goal: nope\n")).not.toContain("error-line");
+  });
+
   it("is inert unless editable", () => {
     const html = render("red: A@1,1\npass: A->5,5\n");
     expect(html).not.toContain("pitch-handle");

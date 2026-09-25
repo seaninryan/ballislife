@@ -442,3 +442,9 @@ textarea, input, select {
      targets are meaningless there, so it prints as plain rows. */
   .attendance-row { border-color: var(--line); }
 }
+
+/* The editor's rulers sit in the diagram's margin, off the pitch itself. */
+.pitch-ruler line { stroke: #fff; stroke-opacity: 0.55; stroke-width: 1; }
+.pitch-ruler text { fill: #fff; fill-opacity: 0.8; font-size: 7px; }
+.pitch-readout { fill: #fff; font-size: 9px; font-weight: 700; stroke: #1d4d31; stroke-width: 2.5px; paint-order: stroke; pointer-events: none; }
+.error-line { display: block; background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; }
