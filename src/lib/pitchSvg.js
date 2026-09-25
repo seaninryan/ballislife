@@ -8,6 +8,13 @@ export const viewBox = (area) => `0 0 ${(area.w + 2 * PAD) * S} ${(area.h + 2 * 
 
 export const toPx = (x, y) => ({ x: (x + PAD) * S, y: (y + PAD) * S });
 
+// Pixels -> metres: the inverse of toPx, snapped to the half metre (as fine as anyone
+// places a cone) and kept on the pitch, for picking and dragging in the editor.
+export function toMetres(px, py, area) {
+  const snap = (v, max) => Math.min(max, Math.max(0, Math.round((v / S - PAD) * 2) / 2));
+  return { x: snap(px, area.w), y: snap(py, area.h) };
+}
+
 // Marking dimensions are capped proportions of the area: a real 16.5 m penalty box
 // would swallow a 40x25 m training grid.
 const BOX_DEPTH = (w) => Math.min(16.5, w * 0.35);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { S, PAD, viewBox, toPx, markings, resolvePoint, actionPath, MARKER_GAP, markShape } from "../src/lib/pitchSvg.js";
+import { S, PAD, viewBox, toPx, markings, resolvePoint, actionPath, MARKER_GAP, markShape, toMetres } from "../src/lib/pitchSvg.js";
 import { parse } from "../src/lib/pitch.js";
 
 describe("scaling", () => {
@@ -222,5 +222,21 @@ describe("markShape", () => {
 
   it("returns null for an unknown kind rather than throwing", () => {
     expect(markShape({ kind: "spaceship", x: 1, y: 1 })).toBe(null);
+  });
+});
+
+describe("toMetres", () => {
+  const area = { w: 40, h: 25 };
+  it("inverts toPx", () => {
+    const p = toPx(12, 7);
+    expect(toMetres(p.x, p.y, area)).toEqual({ x: 12, y: 7 });
+  });
+  it("snaps to the half metre", () => {
+    const p = toPx(12.3, 7.8);
+    expect(toMetres(p.x, p.y, area)).toEqual({ x: 12.5, y: 8 });
+  });
+  it("keeps the point on the pitch", () => {
+    expect(toMetres(0, 0, area)).toEqual({ x: 0, y: 0 });
+    expect(toMetres(10000, 10000, area)).toEqual({ x: 40, y: 25 });
   });
 });
