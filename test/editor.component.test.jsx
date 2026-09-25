@@ -19,6 +19,20 @@ describe("Editor", () => {
     expect(render(withPitch)).toContain("<svg");
   });
 
+  it("numbers the source's lines", () => {
+    const s = openEditor("a", "one\ntwo\nthree\n", "T1");
+    const html = render(s);
+    expect(html).toContain('class="mono editor-gutter"');
+    // Four lines: the trailing newline starts an empty fourth.
+    expect(html).toMatch(/editor-gutter[^>]*>1\n2\n3\n4</);
+    expect(html).toContain('wrap="off"');
+  });
+
+  it("wires the preview's errors to the source", () => {
+    const bad = openEditor("a", "```pitch\ngoal: nope\n```\n", "T1");
+    expect(render(bad)).toContain('class="error-line"');
+  });
+
   it("says saved when clean", () => {
     expect(render(base)).toMatch(/saved/i);
   });

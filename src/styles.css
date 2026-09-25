@@ -130,7 +130,18 @@ textarea, input, select {
 .chip-button.small { font-size: 13px; padding: 6px 12px; }
 .chip-button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .search { flex: 1; min-width: 140px; }
-.editor-source { width: 100%; min-height: 60vh; resize: vertical; }
+.editor-source-wrap { display: flex; align-items: stretch; }
+/* Gutter and source share one font size and line height, or the numbers drift. */
+.editor-source, .editor-gutter { font-size: 13px; line-height: 18px; padding: 6px; }
+.editor-source {
+  flex: 1; min-width: 0; min-height: 60vh; resize: vertical; white-space: pre; overflow: auto;
+  border-radius: 0 8px 8px 0;
+}
+.editor-gutter {
+  margin: 0; min-width: 2.5em; text-align: right; color: var(--dim); background: var(--bg);
+  border: 1px solid var(--line); border-right: 0; border-radius: 8px 0 0 8px;
+  overflow: hidden; user-select: none;
+}
 .editor-preview { min-width: 0; }
 .warn-chip { background: #fdf2d0; color: #6e5400; border-color: #e7d9a4; }
 .err-chip { background: #fbdcd7; color: #8c1d18; border-color: #f0c2ba; }
