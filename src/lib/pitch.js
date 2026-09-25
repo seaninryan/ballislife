@@ -133,8 +133,22 @@ function parseLoop(rest, ctx) {
   else ctx.fail(`expected "on" or "off" but got "${rest}"`);
 }
 
+// Players by label, arrows as they were written: "remove: X A->B". An arrow is checked
+// against those on the pitch at the end of the previous slide, so one removed with its
+// player on this same slide is still there to name.
 function parseRemove(rest, ctx) {
-  for (const label of rest.split(/\s+/).filter(Boolean)) {
+  for (const token of rest.split(/\s+/).filter(Boolean)) {
+    if (ARROW_RE.test(token)) {
+      const arrow = parseArrow(token);
+      if (!arrow) { ctx.fail(`expected "<from><arrow><to>" but got "${token}"`); continue; }
+      if (!ctx.arrows.some((a) => sameArrow(a, arrow))) {
+        ctx.fail(`no arrow "${token}" on the pitch to remove`);
+        continue;
+      }
+      ctx.slide.removeArrows.push(arrow);
+      continue;
+    }
+    const label = token;
     if (ctx.slide.players.some((p) => p.label === label)) {
       ctx.fail(`"${label}" is both placed and removed on this slide`);
       continue;
@@ -162,7 +176,7 @@ const SLIDE_ONLY = new Set(["remove", "clear"]);
 
 function newSlide(caption) {
   return {
-    caption, players: [], removes: [], clear: { arrows: false, balls: false },
+    caption, players: [], removes: [], removeArrows: [], clear: { arrows: false, balls: false },
     balls: null, actions: [],
   };
 }
@@ -211,6 +225,22 @@ const ARROW_KINDS = Object.keys(ARROWS);
 
 // Longest arrow first, so "->>" is not mis-read as "->".
 const ARROW_RE = /^(.*?)(->>|~>|=>|->)(.*)$/;
+
+// "A->B" -> { kind, from, to } without checking the players exist: a removal names an
+// arrow already on the pitch, so it is matched rather than resolved. Null if malformed.
+function parseArrow(token) {
+  const m = token.match(ARROW_RE);
+  if (!m || m[1] === "" || m[3] === "") return null;
+  const to = m[3] === "goal" ? { ref: "goal" } : parsePoint(m[3]) ?? { ref: m[3] };
+  return { kind: ARROW_KINDS.find((k) => ARROWS[k] === m[2]), from: m[1], to };
+}
+
+// Same kind, source and target: what "the same arrow" means to remove:.
+export function sameArrow(a, b) {
+  if (a.kind !== b.kind || a.from !== b.from) return false;
+  if (a.to.ref !== undefined || b.to.ref !== undefined) return a.to.ref === b.to.ref;
+  return a.to.x === b.to.x && a.to.y === b.to.y;
+}
 
 function parseActions(kind) {
   return (rest, ctx) => {
@@ -263,6 +293,17 @@ function closeSection(scene, state, errors) {
   // A slide whose every ball named nobody is a typo, not a request for no balls, so it
   // keeps the previous slide's balls; "clear: balls" is how to ask for none.
   if (state.slide?.balls?.length === 0) state.slide.balls = null;
+  // The arrows on the pitch when this section ends, computed as frames() will draw
+  // them, so the next slide's removals are checked against what is actually shown.
+  if (state.slide) {
+    const s = state.slide;
+    const onPitch = (a) =>
+      known(a.from) && (a.to.ref === undefined || a.to.ref === "goal" || known(a.to.ref));
+    const kept = s.clear.arrows ? [] : state.arrows.filter((a) => !s.removeArrows.some((r) => sameArrow(r, a)));
+    state.arrows = [...kept.filter(onPitch), ...s.actions];
+  } else {
+    state.arrows = scene.actions;
+  }
   state.pending = [];
   state.ballRefs = [];
 }
@@ -281,7 +322,7 @@ export function parse(src) {
   const errors = [];
   // `roster` is every player on the pitch at the current point in the source, label ->
   // team. It only grows in the base; slides add to it and remove from it.
-  const state = { slide: null, pending: [], ballRefs: [], roster: new Map() };
+  const state = { slide: null, pending: [], ballRefs: [], roster: new Map(), arrows: [] };
   const lines = String(src ?? "").split("\n");
 
   lines.forEach((raw, i) => {
@@ -316,6 +357,7 @@ export function parse(src) {
       roster: state.roster,
       pending: state.pending,
       ballRefs: state.ballRefs,
+      arrows: state.arrows,
       line: i + 1,
       fail,
     });
@@ -356,16 +398,19 @@ function runs(items, keyOf) {
   return out;
 }
 
-function playerLines(players) {
+export function playerLines(players) {
   return runs(players, (p) => p.team)
     .map((run) => `${run.key}: ${run.items.map((p) => `${p.label}@${pt(p)}`).join(" ")}`);
 }
 
+// One arrow as it is written in source: "A->B", "C~>28,4", "C->>goal".
+export function arrowToken(a) {
+  const to = a.to.ref !== undefined ? a.to.ref : pt(a.to);
+  return `${a.from}${ARROWS[a.kind]}${to}`;
+}
+
 function actionLines(actions) {
-  return [...actions].sort((x, y) => x.seq - y.seq).map((a) => {
-    const to = a.to.ref !== undefined ? a.to.ref : pt(a.to);
-    return `${a.kind}: ${a.from}${ARROWS[a.kind]}${to}`;
-  });
+  return [...actions].sort((x, y) => x.seq - y.seq).map((a) => `${a.kind}: ${arrowToken(a)}`);
 }
 
 // clear and remove come first: they act on what the previous slide left, before this
@@ -375,7 +420,8 @@ function slideLines(s) {
   const out = [s.caption ? `slide: ${quote(s.caption)}` : "slide:"];
   const clear = CLEAR_TARGETS.filter((t) => s.clear[t]);
   if (clear.length) out.push(`clear: ${clear.join(" ")}`);
-  if (s.removes.length) out.push(`remove: ${s.removes.join(" ")}`);
+  const removes = [...s.removes, ...s.removeArrows.map(arrowToken)];
+  if (removes.length) out.push(`remove: ${removes.join(" ")}`);
   out.push(...playerLines(s.players));
   if (s.balls?.length) out.push(`ball: ${s.balls.map(tok).join(" ")}`);
   out.push(...actionLines(s.actions));

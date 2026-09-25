@@ -542,7 +542,7 @@ describe("parse: a ball at a player's feet", () => {
 });
 
 const EMPTY_SLIDE = {
-  caption: null, players: [], removes: [], clear: { arrows: false, balls: false },
+  caption: null, players: [], removes: [], removeArrows: [], clear: { arrows: false, balls: false },
   balls: null, actions: [],
 };
 
@@ -682,5 +682,71 @@ describe("parse: slides", () => {
     );
     expect(errors.map((e) => e.line)).toEqual([3]);
     expect(scene.slides.map((s) => s.players[0].x)).toEqual([2, 3]);
+  });
+});
+
+describe("parse: removing arrows", () => {
+  const TWO = "red: A@1,1 B@2,2\n";
+
+  it("removes carried arrows written as they were added", () => {
+    const { scene, errors } = parse(TWO + "pass: A->B\nrun: B~>5,5\nslide:\nremove: A->B B~>5,5\n");
+    expect(errors).toEqual([]);
+    expect(scene.slides[0].removeArrows).toEqual([
+      { kind: "pass", from: "A", to: { ref: "B" } },
+      { kind: "run", from: "B", to: { x: 5, y: 5 } },
+    ]);
+  });
+
+  it("mixes players and arrows on one line", () => {
+    const { scene, errors } = parse(TWO + "pass: A->B\nslide:\nremove: B A->B\n");
+    expect(errors).toEqual([]);
+    expect(scene.slides[0].removes).toEqual(["B"]);
+    expect(scene.slides[0].removeArrows).toHaveLength(1);
+  });
+
+  it("matches the arrow kind", () => {
+    expect(parse(TWO + "pass: A->B\nslide:\nremove: A~>B\n").errors).toEqual([
+      { line: 4, message: 'no arrow "A~>B" on the pitch to remove' },
+    ]);
+  });
+
+  it("removes a shot at goal", () => {
+    expect(parse("red: A@1,1\nshot: A->>goal\nslide:\nremove: A->>goal\n").errors).toEqual([]);
+  });
+
+  it("finds an arrow carried over several slides", () => {
+    expect(parse(TWO + "pass: A->B\nslide:\nslide:\nremove: A->B\n").errors).toEqual([]);
+  });
+
+  it("rejects an arrow the previous slide cleared", () => {
+    expect(parse(TWO + "pass: A->B\nslide:\nclear: arrows\nslide:\nremove: A->B\n").errors).toEqual([
+      { line: 6, message: 'no arrow "A->B" on the pitch to remove' },
+    ]);
+  });
+
+  it("rejects an arrow that went when its player was removed", () => {
+    expect(parse(TWO + "pass: A->B\nslide:\nremove: B\nslide:\nremove: A->B\n").errors).toEqual([
+      { line: 6, message: 'no arrow "A->B" on the pitch to remove' },
+    ]);
+  });
+
+  it("rejects an arrow added on the same slide", () => {
+    expect(parse(TWO + "slide:\npass: A->B\nremove: A->B\n").errors).toEqual([
+      { line: 4, message: 'no arrow "A->B" on the pitch to remove' },
+    ]);
+  });
+
+  it("rejects a malformed arrow token", () => {
+    expect(parse(TWO + "pass: A->B\nslide:\nremove: ->B\n").errors).toEqual([
+      { line: 4, message: 'expected "<from><arrow><to>" but got "->B"' },
+    ]);
+  });
+
+  it("serialises removed arrows after removed players, and round-trips", () => {
+    const { scene } = parse(TWO + "pass: A->B\nrun: B~>5,5\nslide:\nremove: A->B B~>5,5 B\n");
+    const once = serialise(scene);
+    expect(once).toContain("remove: B A->B B~>5,5\n");
+    expect(parse(once).scene).toEqual(scene);
+    expect(serialise(parse(once).scene)).toBe(once);
   });
 });
