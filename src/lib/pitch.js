@@ -1,8 +1,10 @@
 // src/lib/pitch.js
 // The `pitch` diagram language: source text <-> scene model.
 //
-// parse() NEVER throws. It returns { scene, errors } so that one malformed line
-// degrades to an inline message while the rest of the drill still renders.
+// parse() NEVER throws. It returns { scene, errors, spans } so that one malformed line
+// degrades to an inline message while the rest of the drill still renders. The spans
+// say where each coordinate is written in the source, so the editor can change one in
+// place; they are not part of the scene.
 // Coordinates are metres, origin top-left.
 
 export const MARKINGS = ["plain", "half", "full", "box", "third"];
@@ -40,7 +42,7 @@ export const TEAMS = ["red", "blue", "yellow", "gk"];
 // On a slide, naming a player who is already on moves them; a new label adds one.
 function parsePlayers(team) {
   return (rest, ctx) => {
-    for (const token of rest.split(/\s+/).filter(Boolean)) {
+    for (const { text: token, at } of tokens(rest)) {
       const m = token.match(/^([A-Za-z][A-Za-z0-9]{0,3})@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
       if (!m) {
         // Name the real problem when the label is simply too long. Drills get pasted
@@ -58,6 +60,7 @@ function parsePlayers(team) {
         : ctx.roster.has(player.label) && `duplicate player label "${player.label}"`;
       if (problem) { ctx.fail(problem); continue; }
       (ctx.slide ?? ctx.scene).players.push(player);
+      ctx.record(player, at + player.label.length + 1, at + token.length);
       ctx.roster.set(player.label, team);
     }
   };
@@ -88,10 +91,12 @@ const LABEL_RE = /^[A-Za-z][A-Za-z0-9]{0,3}$/;
 
 function parsePointMarks(kind) {
   return (rest, ctx) => {
-    for (const token of rest.split(/\s+/).filter(Boolean)) {
+    for (const { text: token, at } of tokens(rest)) {
       const p = parsePoint(token);
       if (!p) { ctx.fail(`expected "<x>,<y>" but got "${token}"`); continue; }
-      ctx.scene.marks.push({ kind, ...p });
+      const mark = { kind, ...p };
+      ctx.scene.marks.push(mark);
+      ctx.record(mark, at, at + token.length);
     }
   };
 }
@@ -106,8 +111,8 @@ function parsePointMarks(kind) {
 // rather than silently clearing them. A label that turns out to name nobody is dropped
 // at the end of the slide, and closeSection resets an emptied list for the same reason.
 function parseBalls(rest, ctx) {
-  const tokens = rest.split(/\s+/).filter(Boolean);
-  if (ctx.slide && tokens.length === 0) {
+  const toks = tokens(rest);
+  if (ctx.slide && toks.length === 0) {
     return ctx.fail('expected at least one ball — use "clear: balls" for none');
   }
   const kind = ctx.slide ? {} : { kind: "ball" };
@@ -116,15 +121,21 @@ function parseBalls(rest, ctx) {
     list.push(ball);
     return list;
   };
-  for (const token of tokens) {
+  for (const { text: token, at } of toks) {
     const p = parsePoint(token);
-    if (p) { add({ ...kind, ...p }); continue; }
+    if (p) {
+      const ball = { ...kind, ...p };
+      add(ball);
+      ctx.record(ball, at, at + token.length);
+      continue;
+    }
     if (!LABEL_RE.test(token)) {
       ctx.fail(`expected "<x>,<y>" or a player label but got "${token}"`);
       continue;
     }
     const ball = { ...kind, ref: token };
     ctx.ballRefs.push({ ball, list: add(ball), line: ctx.line });
+    ctx.record(ball, at, at + token.length);
   }
 }
 
@@ -183,26 +194,30 @@ function newSlide(caption) {
 
 // "0,12 small"
 function parseGoal(rest, ctx) {
-  const parts = rest.split(/\s+/).filter(Boolean);
-  const p = parsePoint(parts[0] ?? "");
+  const [first, second] = tokens(rest);
+  const p = parsePoint(first?.text ?? "");
   if (!p) return ctx.fail('expected "<x>,<y> [size]"');
-  const size = parts[1] ?? "full";
+  const size = second?.text ?? "full";
   if (!GOAL_SIZES.includes(size)) {
     return ctx.fail(`unknown goal size "${size}" (expected ${GOAL_SIZES.join(", ")})`);
   }
-  ctx.scene.marks.push({ kind: "goal", ...p, size });
+  const goal = { kind: "goal", ...p, size };
+  ctx.scene.marks.push(goal);
+  ctx.record(goal, first.at, first.at + first.text.length);
 }
 
 // '12,0 16x25 "press here"'
 function parseZone(rest, ctx) {
   const m = rest.match(ZONE_RE);
   if (!m) return ctx.fail('expected "<x>,<y> <w>x<h> [label]"');
-  ctx.scene.marks.push({
+  const zone = {
     kind: "zone",
     x: Number(m[1]), y: Number(m[2]),
     w: Number(m[3]), h: Number(m[4]),
     label: unquote(m[5]),
-  });
+  };
+  ctx.scene.marks.push(zone);
+  ctx.record(zone, 0, m[1].length + 1 + m[2].length);
 }
 
 // Strips surrounding double quotes; returns null for empty.
@@ -211,6 +226,16 @@ function unquote(s) {
   if (t === "") return null;
   const m = t.match(/^"(.*)"$/);
   return m ? m[1] : t;
+}
+
+// Whitespace-separated tokens with their offset in `rest`, so a coordinate's position in
+// the source can be recorded for the editor's drag-to-move.
+function tokens(rest) {
+  const out = [];
+  const re = /\S+/g;
+  let m;
+  while ((m = re.exec(rest))) out.push({ text: m[0], at: m.index });
+  return out;
 }
 
 function parseLabel(rest, ctx) {
@@ -245,14 +270,17 @@ export function sameArrow(a, b) {
 function parseActions(kind) {
   return (rest, ctx) => {
     const arrow = ARROWS[kind];
-    for (const token of rest.split(/\s+/).filter(Boolean)) {
+    for (const { text: token, at } of tokens(rest)) {
       const m = token.match(ARROW_RE);
       if (!m || m[2] !== arrow || m[1] === "" || m[3] === "") {
         ctx.fail(`expected "<from><arrow><to>" but got "${token}"`);
         continue;
       }
       // Resolution is deferred: the player may be declared on a later line.
-      ctx.pending.push({ kind, fromRaw: m[1], toRaw: m[3], line: ctx.line });
+      ctx.pending.push({
+        kind, fromRaw: m[1], toRaw: m[3], line: ctx.line,
+        toSpan: ctx.span(at + m[1].length + m[2].length, at + token.length),
+      });
     }
   };
 }
@@ -283,7 +311,9 @@ function closeSection(scene, state, errors) {
     }
     const t = resolveTarget(a.toRaw, known);
     if (!t.ok) { errors.push({ line: a.line, message: t.message }); continue; }
-    into.push({ kind: a.kind, from: a.fromRaw, to: t.to, seq: into.length + 1 });
+    const action = { kind: a.kind, from: a.fromRaw, to: t.to, seq: into.length + 1 };
+    into.push(action);
+    state.spanOf.set(action, a.toSpan);
   }
   for (const r of state.ballRefs) {
     if (known(r.ball.ref)) continue;
@@ -322,27 +352,39 @@ export function parse(src) {
   const errors = [];
   // `roster` is every player on the pitch at the current point in the source, label ->
   // team. It only grows in the base; slides add to it and remove from it.
-  const state = { slide: null, pending: [], ballRefs: [], roster: new Map(), arrows: [] };
+  // `spanOf` maps each scene item to where its coordinate is written; `sections` has
+  // one entry per section (the base, then each slide) with its last non-blank line.
+  const state = {
+    slide: null, pending: [], ballRefs: [], roster: new Map(), arrows: [],
+    spanOf: new Map(), sections: [{ last: -1 }],
+  };
   const lines = String(src ?? "").split("\n");
 
   lines.forEach((raw, i) => {
     const line = raw.replace(/\s+$/, "");
-    if (line === "" || line.trimStart().startsWith("#")) return;
+    if (line === "") return;
+    const section = state.sections[state.sections.length - 1];
+    if (line.trimStart().startsWith("#")) { section.last = i; return; }
     const fail = (message) => { errors.push({ line: i + 1, message }); };
 
     const m = line.match(/^\s*([a-zA-Z]+)\s*:\s*(.*)$/);
     if (!m) return fail('expected "<directive>: <value>"');
     const key = m[1].toLowerCase();
     const rest = m[2].trim();
+    // The line has no trailing whitespace and the regex consumed the leading, so
+    // rest === m[2] and it ends the line.
+    const restAt = line.length - m[2].length;
 
     if (key === "slide") {
       closeSection(scene, state, errors);
       state.slide = newSlide(unquote(rest));
       scene.slides.push(state.slide);
+      state.sections.push({ last: i });
       return;
     }
     // Own keys only: a plain lookup finds Object.prototype's `constructor`, so the line
     // `constructor: x` was silently accepted rather than reported.
+    section.last = i;
     const handler = Object.hasOwn(DIRECTIVES, key) ? DIRECTIVES[key] : undefined;
     if (!handler) return fail(`unknown directive "${key}"`);
     if (state.slide && BASE_ONLY.has(key)) {
@@ -360,6 +402,8 @@ export function parse(src) {
       arrows: state.arrows,
       line: i + 1,
       fail,
+      span: (from, to) => ({ line: i, from: restAt + from, to: restAt + to }),
+      record: (item, from, to) => state.spanOf.set(item, { line: i, from: restAt + from, to: restAt + to }),
     });
   });
   closeSection(scene, state, errors);
@@ -369,7 +413,23 @@ export function parse(src) {
   // whole point of carrying a line number is that a reader can follow the list down
   // the source. The sort is stable, so multiple errors on one line keep their order.
   errors.sort((x, y) => x.line - y.line);
-  return { scene, errors };
+
+  // Built from the FINAL lists, so a ball or action dropped during resolution cannot
+  // misalign a span with its item.
+  const get = (item) => state.spanOf.get(item) ?? null;
+  const spans = {
+    marks: scene.marks.map(get),
+    sections: state.sections.map((s, n) => {
+      const own = n === 0 ? scene : scene.slides[n - 1];
+      return {
+        last: s.last,
+        players: own.players.map(get),
+        actions: own.actions.map(get),
+        balls: n === 0 ? null : own.balls?.map(get) ?? null,
+      };
+    }),
+  };
+  return { scene, errors, spans };
 }
 
 // Trims trailing zeros so 10 serialises as "10", not "10.0".

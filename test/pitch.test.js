@@ -750,3 +750,48 @@ describe("parse: removing arrows", () => {
     expect(serialise(parse(once).scene)).toBe(once);
   });
 });
+
+describe("parse: spans", () => {
+  // The source text a span covers.
+  const at = (src, s) => src.split("\n")[s.line].slice(s.from, s.to);
+
+  it("locates player coordinates, per section", () => {
+    const src = "red: A@1,2 B@3,4\nslide:\nred: B@5,6\n";
+    const { spans } = parse(src);
+    expect(spans.sections[0].players.map((s) => at(src, s))).toEqual(["1,2", "3,4"]);
+    expect(spans.sections[1].players.map((s) => at(src, s))).toEqual(["5,6"]);
+  });
+
+  it("locates every mark's coordinate, aligned with scene.marks", () => {
+    const src = 'cone: 5,5 6,6\ngoal: 0,12 small\nzone: 12,0 16x25 "z"\nball: 1,1\n';
+    const { scene, spans } = parse(src);
+    expect(spans.marks).toHaveLength(scene.marks.length);
+    expect(spans.marks.map((s) => at(src, s))).toEqual(["5,5", "6,6", "0,12", "12,0", "1,1"]);
+  });
+
+  it("locates action targets, aligned with each section's actions", () => {
+    const src = "red: A@1,1 B@2,2\npass: A->3,4 A->B\nslide:\nshot: B->>goal\n";
+    const { spans } = parse(src);
+    expect(spans.sections[0].actions.map((s) => at(src, s))).toEqual(["3,4", "B"]);
+    expect(spans.sections[1].actions.map((s) => at(src, s))).toEqual(["goal"]);
+  });
+
+  it("locates a slide's balls, and stays aligned when a ball is dropped", () => {
+    const src = "red: A@1,1\nslide:\nball: Z A 2,2\n";
+    const { scene, spans } = parse(src);
+    expect(scene.slides[0].balls).toHaveLength(2);
+    expect(spans.sections[1].balls.map((s) => at(src, s))).toEqual(["A", "2,2"]);
+    expect(spans.sections[0].balls).toBeNull();
+  });
+
+  it("records each section's last non-blank line, comments included", () => {
+    const { spans } = parse("red: A@1,1\n\nslide: x\n# note\n\n");
+    expect(spans.sections.map((s) => s.last)).toEqual([0, 3]);
+  });
+
+  it("leaves the scene exactly as before", () => {
+    const src = "red: A@1,1\nball: A\nslide:\nred: A@2,2\n";
+    expect(Object.keys(parse(src))).toEqual(["scene", "errors", "spans"]);
+    expect(parse(serialise(parse(src).scene)).scene).toEqual(parse(src).scene);
+  });
+});
