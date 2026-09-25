@@ -51,8 +51,8 @@ describe("frames", () => {
       "red: A@0,0\nball: A\nslide:\nred: A@10,0\nslide:\nremove: A\nslide:\nred: A@30,0\n",
     );
     expect(fs.map((f) => f.balls[0])).toEqual([
-      { key: 0, x: FEET, y: FEET },
-      { key: 0, x: 10 + FEET, y: FEET },
+      { key: 0, x: FEET, y: FEET, ref: "A" },
+      { key: 0, x: 10 + FEET, y: FEET, ref: "A" },
       { key: 0, x: 10 + FEET, y: FEET },
       // A new player reusing the label does not claim the ball left behind.
       { key: 0, x: 10 + FEET, y: FEET },
@@ -71,6 +71,11 @@ describe("frames", () => {
   it("drops a carried arrow whose player has been removed", () => {
     const fs = framesOf("red: A@0,0 B@5,5\npass: A->B\nslide:\nremove: B\n");
     expect(fs[1].actions).toEqual([]);
+  });
+
+  it("drops the carried arrows a slide removes", () => {
+    const fs = framesOf("red: A@0,0 B@5,5\npass: A->B\nrun: B~>9,9\nslide:\nremove: A->B\n");
+    expect(fs[1].actions.map((a) => a.key)).toEqual(["0.1"]);
   });
 
   it("labels slide 1 with the drill label and later slides with their captions", () => {

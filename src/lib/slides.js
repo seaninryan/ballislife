@@ -3,6 +3,7 @@
 // each slide as an edit of the one before; this is the only place that history is
 // replayed, so the renderer only ever sees whole pictures.
 
+import { sameArrow } from "./pitch.js";
 import { actionPath } from "./pitchSvg.js";
 
 // A ball at a player's feet sits just off the player's centre, so neither hides the
@@ -31,7 +32,10 @@ export function frames(scene) {
     const on = new Set(players.map((p) => p.label));
     const alive = (a) =>
       on.has(a.from) && (a.to.ref === undefined || a.to.ref === "goal" || on.has(a.to.ref));
-    const carried = s.clear.arrows ? [] : actions.filter(alive).map((a) => ({ ...a, carried: true }));
+    const removed = (a) => s.removeArrows.some((r) => sameArrow(r, a));
+    const carried = s.clear.arrows
+      ? []
+      : actions.filter((a) => alive(a) && !removed(a)).map((a) => ({ ...a, carried: true }));
     // key is slide number + position on that slide: stable for the arrow's lifetime, so
     // the renderer fades it in once and then keeps the same element.
     const own = s.actions.map((a, i) => ({ ...a, key: `${n + 1}.${i}`, carried: false }));
@@ -50,7 +54,8 @@ function applyPlayers(players, slide) {
 // A ball's identity is its position in the list: ball i on one slide is ball i on the
 // next, which is what lets it glide. A ball at a player's feet follows them; once that
 // player leaves, the ball stays where it was, pinned to coordinates so a later player
-// reusing the label does not claim it.
+// reusing the label does not claim it. `ref` names the player a ball is at, so the Add
+// slide template can write `ball: C` rather than coordinates.
 function placeBalls(specs, players, before) {
   const balls = [];
   const next = specs.map((spec, key) => {
@@ -60,7 +65,7 @@ function placeBalls(specs, players, before) {
     }
     const p = players.find((pl) => pl.label === spec.ref);
     if (p) {
-      balls.push({ key, x: p.x + FEET, y: p.y + FEET });
+      balls.push({ key, x: p.x + FEET, y: p.y + FEET, ref: spec.ref });
       return spec;
     }
     const last = before.find((b) => b.key === key);
