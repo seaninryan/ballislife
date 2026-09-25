@@ -88,3 +88,12 @@ describe("moveInFrame", () => {
     expect(moveInFrame(frame, { kind: "arrow", key: "0.0" }, 4, 5).actions[0].to).toEqual({ x: 4, y: 5 });
   });
 });
+
+describe("moveInSource and remove:", () => {
+  it("moves a later remove: of a dragged arrow with it, so it still matches", () => {
+    const src = "red: A@1,1\npass: A->10,10\nslide:\nremove: A->10,10 A\nslide:\n";
+    const out = moveInSource(src, 0, { kind: "arrow", key: "0.0" }, 4, 5.5);
+    expect(out).toBe("red: A@1,1\npass: A->4,5.5\nslide:\nremove: A->4,5.5 A\nslide:\n");
+    expect(parse(out).errors).toEqual([]);
+  });
+});

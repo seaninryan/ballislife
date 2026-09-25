@@ -6,7 +6,7 @@
 //
 // A target is { kind: "player", label } | { kind: "mark", index } (into frame.marks) |
 // { kind: "ball", key } | { kind: "arrow", key } (a frame action's key).
-import { parse } from "./pitch.js";
+import { parse, sameArrow, arrowToken } from "./pitch.js";
 import { frames } from "./slides.js";
 
 const num = (v) => String(Math.round(v * 10) / 10);
@@ -61,7 +61,21 @@ export function moveInSource(source, frameIndex, target, x, y) {
       const list = s === 0 ? scene.actions : scene.slides[s - 1]?.actions;
       const action = list?.[i];
       if (!action || action.to.ref !== undefined) return null;
-      return replace(spans.sections[s].actions[i], coord(x, y));
+      // A later `remove:` names this arrow by its coordinates, so it must move with it
+      // or it stops matching — an error, and the arrow suddenly carried on.
+      const moved = { ...action, to: { x, y } };
+      const edits = [{ span: spans.sections[s].actions[i], text: coord(x, y) }];
+      scene.slides.forEach((slide, k) => {
+        if (k + 1 <= s) return;
+        slide.removeArrows.forEach((r, j) => {
+          if (sameArrow(r, action)) edits.push({ span: spans.sections[k + 1].removeArrows[j], text: arrowToken(moved) });
+        });
+      });
+      // Right to left within a line, so earlier offsets stay valid.
+      edits.sort((a, b) => a.span.line - b.span.line || b.span.from - a.span.from);
+      let out = null;
+      for (const e of edits) out = replace(e.span, e.text);
+      return out;
     }
     default:
       return null;

@@ -40,9 +40,15 @@ export function replaceBlock(doc, line, content) {
 
 // Inserts `text` over [start, end) -> { text, cursor after it }. A picked coordinate is
 // spaced from a token it would otherwise run into — but not after whitespace, `@`
-// (a player's position) or `>` (the end of every arrow).
+// (a player's position) or `>` (the end of every arrow). It is spaced from a token right
+// after it too: "cone: |5,5" must not become "cone: 1,15,5", which parses as the wrong cone.
 export function insertText(doc, start, end, text) {
   const before = start > 0 ? doc[start - 1] : "\n";
+  const after = end < doc.length ? doc[end] : "\n";
   const sep = /[\s@>]/.test(before) ? "" : " ";
-  return { text: doc.slice(0, start) + sep + text + doc.slice(end), cursor: start + sep.length + text.length };
+  const tail = /\s/.test(after) ? "" : " ";
+  return {
+    text: doc.slice(0, start) + sep + text + tail + doc.slice(end),
+    cursor: start + sep.length + text.length,
+  };
 }

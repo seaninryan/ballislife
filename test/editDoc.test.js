@@ -35,3 +35,9 @@ describe("insertText", () => {
     expect(insertText("red: A@1,1", 7, 10, "4,5")).toEqual({ text: "red: A@4,5", cursor: 10 });
   });
 });
+
+describe("insertText before a token", () => {
+  it("spaces a pick from the token after the cursor", () => {
+    expect(insertText("cone: 5,5", 6, 6, "1,1")).toEqual({ text: "cone: 1,1 5,5", cursor: 9 });
+  });
+});

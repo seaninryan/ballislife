@@ -148,7 +148,7 @@ function parseLoop(rest, ctx) {
 // against those on the pitch at the end of the previous slide, so one removed with its
 // player on this same slide is still there to name.
 function parseRemove(rest, ctx) {
-  for (const token of rest.split(/\s+/).filter(Boolean)) {
+  for (const { text: token, at } of tokens(rest)) {
     if (ARROW_RE.test(token)) {
       const arrow = parseArrow(token);
       if (!arrow) { ctx.fail(`expected "<from><arrow><to>" but got "${token}"`); continue; }
@@ -157,6 +157,8 @@ function parseRemove(rest, ctx) {
         continue;
       }
       ctx.slide.removeArrows.push(arrow);
+      // The whole token, so dragging that arrow's head can rewrite this mention too.
+      ctx.record(arrow, at, at + token.length);
       continue;
     }
     const label = token;
@@ -426,6 +428,7 @@ export function parse(src) {
         players: own.players.map(get),
         actions: own.actions.map(get),
         balls: n === 0 ? null : own.balls?.map(get) ?? null,
+        removeArrows: n === 0 ? [] : own.removeArrows.map(get),
       };
     }),
   };
