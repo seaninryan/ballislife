@@ -17,7 +17,8 @@ export const initial = { index: 0, from: null, playing: false, ended: false, del
 export function step(state, event) {
   switch (event.type) {
     case "play":
-      if (state.ended) return { index: 0, from: null, playing: true, ended: false, delay: HOLD_MS };
+      // From the end, or from the last slide reached by seeking, Play means "again".
+      if (state.ended || state.index >= event.n - 1) return replayed();
       return { ...state, playing: true, delay: START_MS };
     case "pause":
       return { ...state, playing: false };
@@ -29,9 +30,19 @@ export function step(state, event) {
       if (event.loop) return { ...state, index: 0, from: null, delay: HOLD_MS };
       return { ...state, playing: false, ended: true };
     }
+    case "replay":
+      return replayed();
+    case "seek":
+      return { index: event.index, from: null, playing: false, ended: false, delay: 0 };
+    // The source changed under the diagram. Stay on the slide shown — the coach is
+    // probably editing it — but stop, and clamp in case slides were deleted.
+    case "edited":
+      return { ...state, index: Math.min(state.index, Math.max(0, event.n - 1)), from: null, playing: false, ended: false };
     case "reset":
       return initial;
     default:
       return state;
   }
 }
+
+const replayed = () => ({ index: 0, from: null, playing: true, ended: false, delay: HOLD_MS });

@@ -45,4 +45,31 @@ describe("playback", () => {
   it("resets to the start", () => {
     expect(run([{ type: "play" }, tick(3), { type: "reset" }])).toEqual(initial);
   });
+
+  it("starts again from slide 1 when Play is pressed on the last slide", () => {
+    const onLast = run([{ type: "seek", index: 2 }]);
+    expect(run([{ type: "play", n: 3 }], onLast)).toEqual({
+      index: 0, from: null, playing: true, ended: false, delay: HOLD_MS,
+    });
+  });
+
+  it("replays from slide 1 whatever the state", () => {
+    const mid = run([{ type: "play", n: 3 }, tick(3)]);
+    expect(run([{ type: "replay" }], mid)).toEqual({
+      index: 0, from: null, playing: true, ended: false, delay: HOLD_MS,
+    });
+  });
+
+  it("seeks to a slide with a cut, paused", () => {
+    const mid = run([{ type: "play", n: 3 }, tick(3)]);
+    expect(run([{ type: "seek", index: 2 }], mid)).toEqual({
+      index: 2, from: null, playing: false, ended: false, delay: 0,
+    });
+  });
+
+  it("stays on the slide shown after an edit, paused, clamped to what is left", () => {
+    const onThird = run([{ type: "seek", index: 2 }]);
+    expect(run([{ type: "edited", n: 3 }], onThird)).toMatchObject({ index: 2, playing: false, from: null });
+    expect(run([{ type: "edited", n: 2 }], onThird)).toMatchObject({ index: 1 });
+  });
 });
