@@ -74,4 +74,9 @@ describe("PitchHelp", () => {
     }
     expect(html()).toMatch(/first slide/);
   });
+
+  it("explains removing an arrow and the Add slide button", () => {
+    expect(html()).toContain("remove: X B-&gt;C");
+    expect(html()).toContain("Add slide");
+  });
 });

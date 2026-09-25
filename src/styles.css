@@ -47,7 +47,9 @@ textarea, input, select {
 .banner.warn { background: #fdf2d0; color: #6e5400; }
 .banner.err { background: #fbdcd7; color: #8c1d18; }
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
-.pitch { display: block; width: 100%; border-radius: 8px; }
+/* Capped so a laptop does not blow a 40x25 grid up to the full window width. A phone is
+   narrower than the cap, so it is unaffected; so are thumbnails, capped by their card. */
+.pitch { display: block; width: 100%; max-width: 560px; border-radius: 8px; }
 /* Animated diagrams (lib/playback.js). The transform duration must match GLIDE_MS. */
 .pitch-glide { transition: transform 1s ease-in-out, opacity 0.4s ease-out; }
 .pitch-arrow { transition: opacity 0.4s ease-out; }

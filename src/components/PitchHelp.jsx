@@ -51,7 +51,7 @@ const SLIDES = [
   ["ball: C", "Replaces every ball. A player's label puts the ball at their feet, and it follows them."],
   [`pass: B${ARROWS.pass}C`, "Adds an arrow. Arrows from earlier slides stay, drawn fainter."],
   [`clear: ${CLEAR_TARGETS.join(" ")}`, "Wipes the arrows, the balls, or both, carried over from the slide before."],
-  ["remove: X", "Takes a player off."],
+  [`remove: X B${ARROWS.pass}C`, "Takes a player off, or an arrow — write the arrow as it was added."],
   ["loop: on", "Before the first slide line: play round again after the last slide. Off by default."],
 ];
 
@@ -123,7 +123,8 @@ export default function PitchHelp() {
         What you write before the first <code>slide:</code> is the first slide. Cones,
         goals, zones and flags are set on the first slide and stay put — only players,
         balls and arrows change. The drill view gets a Play button; thumbnails show the
-        first slide.
+        first slide. The <strong>Add slide</strong> button above the source starts one for
+        you, with where everything is now written out as notes to uncomment.
       </p>
 
       <h4>Two things that are not obvious</h4>

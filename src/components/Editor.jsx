@@ -1,11 +1,12 @@
 // src/components/Editor.jsx
 // Renders the editor state machine's state. Presentational: no Drive, no timers, no
 // rules about when to save — App owns those.
-import React from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import DrillPreview from "./DrillPreview.jsx";
 import PitchHelp from "./PitchHelp.jsx";
 import { DIRTY, SAVING, CONFLICT, FAILED } from "../lib/editor.js";
 import { friendlyError } from "../lib/errors.js";
+import { addSlide } from "../lib/slideTemplate.js";
 
 function Status({ state }) {
   if (state.status === CONFLICT) return <span className="chip warn-chip">conflict</span>;
@@ -16,6 +17,29 @@ function Status({ state }) {
 }
 
 export default function Editor({ state, onEdit, onBack, onDelete, onKeepMine, onReload }) {
+  const sourceRef = useRef(null);
+  const pendingSelect = useRef(null);
+  const canAddSlide = useMemo(() => addSlide(state.text, 0) !== null, [state.text]);
+
+  // Applied after the edit re-renders the textarea: React writing the new value moves
+  // the cursor to the end, so selecting any earlier would be undone.
+  useEffect(() => {
+    const range = pendingSelect.current;
+    const el = sourceRef.current;
+    if (!range || !el) return;
+    pendingSelect.current = null;
+    el.focus();
+    el.setSelectionRange(range[0], range[1]);
+  }, [state.text]);
+
+  const onAddSlide = () => {
+    const el = sourceRef.current;
+    const r = addSlide(state.text, el ? el.selectionStart : state.text.length);
+    if (!r) return;
+    pendingSelect.current = r.select;
+    onEdit?.(r.text);
+  };
+
   return (
     <div>
       <div className="row" style={{ marginBottom: 8 }}>
@@ -45,8 +69,18 @@ export default function Editor({ state, onEdit, onBack, onDelete, onKeepMine, on
 
       <PitchHelp />
 
+      <div className="row" style={{ marginBottom: 6 }}>
+        <button
+          type="button" onClick={onAddSlide} disabled={!canAddSlide}
+          title={canAddSlide ? "Add a slide to the diagram the cursor is in" : "Add a pitch diagram first"}
+        >
+          Add slide
+        </button>
+      </div>
+
       <div className="split">
         <textarea
+          ref={sourceRef}
           className="mono editor-source"
           value={state.text}
           onChange={(e) => onEdit?.(e.target.value)}

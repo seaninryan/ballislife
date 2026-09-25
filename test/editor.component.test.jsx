@@ -52,4 +52,15 @@ describe("Editor", () => {
     expect(html).toMatch(/delete/i);
     expect(html).toMatch(/back/i);
   });
+
+  it("offers Add slide when the drill has a diagram", () => {
+    const withPitch = openEditor("a", "```pitch\nred: A@5,5\n```\n", "T1");
+    const html = render(withPitch);
+    expect(html).toContain("Add slide");
+    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Add slide/);
+  });
+
+  it("disables Add slide when there is no diagram to add to", () => {
+    expect(render(base)).toMatch(/<button[^>]*disabled=""[^>]*>Add slide/);
+  });
 });
