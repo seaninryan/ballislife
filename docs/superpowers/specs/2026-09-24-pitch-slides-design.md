@@ -280,3 +280,24 @@ The editor passes `editable` to the preview's diagrams; the drill view stays rea
 - `src/lib/editDoc.js`: `pitchBlocks(doc)`, `replaceBlock(doc, line, content)`,
   `insertText(doc, start, end, text)`. `slideTemplate.js` uses `pitchBlocks`.
 - `pitchSvg.js`: `toMetres(px, py, area)`, the inverse of `toPx`, snapped and clamped.
+
+## Addendum — 2026-09-25 (3): line numbers and rulers
+
+### Line numbers in the editor
+
+- A gutter of line numbers left of the source textarea, scrolled with it, counting from
+  line 1 of the file (frontmatter included) — the numbering error messages already use.
+- The textarea no longer wraps (`wrap="off"`, horizontal scroll), so a number always
+  sits beside its line. Gutter and textarea share an explicit 13px/18px font and line
+  height so they cannot drift.
+- In the editor preview, each diagram error is a button that selects that line in the
+  source and scrolls it into view. Read-only views keep plain text.
+
+### Rulers on the editor's diagram
+
+- When `editable`: ticks every metre and numbers every 5 m along the top (x) and down
+  the left (y), in the diagram's margin; the corner reads `x →` over `y ↓`.
+- While the pointer is over the pitch, a readout beside it shows the snapped coordinate
+  as it would be typed, `12.5,8` — the same text a click inserts.
+- Geometry is pure: `rulerTicks(area)` in `pitchSvg.js`; `lineRange(doc, line)` in
+  `editDoc.js` gives a line's offsets for selecting it.
