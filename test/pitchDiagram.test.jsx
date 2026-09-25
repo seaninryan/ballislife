@@ -103,10 +103,15 @@ describe("PitchDiagram", () => {
     expect(animated("red: A@1,1\n")).not.toContain(">Play<");
   });
 
-  it("shows Play and the slide counter for an animated diagram with slides", () => {
-    const html = animated(SLIDES);
+  it("shows Play, Replay and a button per slide, slide 1 current", () => {
+    const html = animated('red: A@1,1\nslide: "go"\nred: A@5,5\nslide:\nred: A@9,9\n');
     expect(html).toContain(">Play<");
-    expect(html).toContain("1 / 3");
+    expect(html).toContain(">Replay<");
+    expect(html.match(/class="pitch-slide"/g)).toHaveLength(3);
+    expect(html.match(/aria-current="step"/g)).toHaveLength(1);
+    expect(html).toMatch(/aria-current="step"[^>]*>1</);
+    expect(html).toContain('title="go"');
+    expect(html).toContain('title="Slide 3"');
     // Starts on slide 1 — nothing moves until Play is pressed.
     expect(html).toContain("translate(30px, 30px)");
   });

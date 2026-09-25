@@ -99,10 +99,11 @@ function Ball({ ball }) {
 }
 
 // Turns the reducer's `delay` into a timer. Every rule about what comes next is in
-// lib/playback.js; this only keeps time. Editing the source starts over, paused.
+// lib/playback.js; this only keeps time.
 function usePlayback(count, loop, source) {
   const [state, dispatch] = useReducer(step, initial);
-  useEffect(() => { dispatch({ type: "reset" }); }, [source]);
+  // Editing the source pauses and keeps the slide shown.
+  useEffect(() => { dispatch({ type: "edited", n: count }); }, [source]);
   useEffect(() => {
     if (!state.playing) return undefined;
     const t = setTimeout(() => dispatch({ type: "tick", n: count, loop }), state.delay);
@@ -181,13 +182,25 @@ export default function PitchDiagram({ source = "", baseLine = 1, animated = fal
 
       {controls ? (
         <div className="row pitch-controls">
-          <button type="button" onClick={() => dispatch({ type: play.playing ? "pause" : "play" })}>
-            {play.playing ? "Pause" : play.ended ? "Replay" : "Play"}
+          <button
+            type="button"
+            onClick={() => dispatch(play.playing ? { type: "pause" } : { type: "play", n: all.length })}
+          >
+            {play.playing ? "Pause" : "Play"}
           </button>
-          {/* One string, not {a} / {b}: separate text children render with comment
-              separators between them, which breaks the counter as a single run of text. */}
-          {/* Announced, so a screen-reader user hears the slide change after pressing Play. */}
-          <span className="dim" aria-live="polite">{`${index + 1} / ${all.length}`}</span>
+          <button type="button" onClick={() => dispatch({ type: "replay" })}>Replay</button>
+          <span className="pitch-slides" role="group" aria-label="Slides">
+            {all.map((f, i) => (
+              <button
+                key={i} type="button" className="pitch-slide"
+                aria-current={i === index ? "step" : undefined}
+                title={f.label || `Slide ${i + 1}`}
+                onClick={() => dispatch({ type: "seek", index: i })}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </span>
         </div>
       ) : null}
 
