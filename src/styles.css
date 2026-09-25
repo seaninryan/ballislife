@@ -141,6 +141,9 @@ textarea, input, select {
   margin: 0; min-width: 2.5em; text-align: right; color: var(--dim); background: var(--bg);
   border: 1px solid var(--line); border-right: 0; border-radius: 8px 0 0 8px;
   overflow: hidden; user-select: none;
+  /* Room for the source's horizontal scrollbar, which the gutter does not have: without
+     it the gutter cannot scroll as far and the last numbers sit a bar's height off. */
+  padding-bottom: 24px;
 }
 .editor-preview { min-width: 0; }
 .warn-chip { background: #fdf2d0; color: #6e5400; border-color: #e7d9a4; }
