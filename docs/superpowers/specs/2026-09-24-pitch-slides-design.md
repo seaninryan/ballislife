@@ -230,3 +230,53 @@ applies the result.
 ### A smaller diagram
 
 `.pitch` is capped at 560px wide (left-aligned). Phones and thumbnails are unaffected.
+
+## Addendum — 2026-09-25 (2): slide controls, picking and dragging
+
+### Controls
+
+`[Play] [Replay]  1 2 3 4` below an animated diagram, replacing the `2 / 4` counter.
+
+- **Play / Pause** is one button that swaps its label. Play on the last slide (or after
+  the run ended) starts again from slide 1.
+- **Replay** is always shown: cut to slide 1 and play.
+- **A slide number** cuts to that slide and pauses. The current one is marked
+  (`aria-current`); each number's tooltip is the slide's caption.
+- An edit to the source no longer resets to slide 1: it pauses and stays on the slide
+  shown (clamped if slides were removed), so editing slide 3 keeps showing slide 3.
+
+### Editing on the diagram (editor preview only)
+
+The editor passes `editable` to the preview's diagrams; the drill view stays read-only.
+
+- **Pick:** a click on the pitch that does not start a drag inserts `x,y` (snapped to
+  0.5 m, clamped to the area) at the source cursor, replacing any selection, with a space
+  before it unless the cursor follows whitespace, `@` or an arrow's `>`. Focus returns to
+  the source.
+- **Drag:** players, balls, cones, flags, goals, zones (by their top-left corner, the
+  whole zone moves), and the head of an arrow whose target is a coordinate (a round
+  handle at the target). The item follows the pointer live; playback pauses. On release
+  the source is edited **in place** — only the dragged coordinate's text changes, so
+  comments and layout survive:
+  - *Player:* on the slide shown. If that slide places the label, its coordinate is
+    rewritten; otherwise `<team>: <label>@x,y` is appended to the slide.
+  - *Cone, flag, goal, zone:* always their line in slide 1 (they are fixed).
+  - *Ball:* if the slide shown owns the ball list (it has a `ball:` line, or it is slide
+    1), that token is rewritten — a ball at a player's feet becomes coordinates. Otherwise
+    `ball: …` is appended to the slide listing every current ball, the dragged one at its
+    new place, the rest as they are (labels for balls at a player's feet).
+  - *Arrow head:* the arrow's own line, in the slide it was added on.
+- Touch works: the diagram sets `touch-action: none` while editable.
+
+### Structure
+
+- `parse` returns `{ scene, errors, spans }`. `spans` records, per section, where each
+  player's, ball's and action target's coordinate text sits (`{ line, from, to }`), the
+  same for every mark, and each section's last line. The scene is unchanged, so the
+  round-trip invariant is untouched.
+- `src/lib/sourceEdit.js`: `moveInSource(source, frameIndex, target, x, y)` → new source
+  or null; `moveInFrame(frame, target, x, y)` → the frame with that item moved, for the
+  live drag.
+- `src/lib/editDoc.js`: `pitchBlocks(doc)`, `replaceBlock(doc, line, content)`,
+  `insertText(doc, start, end, text)`. `slideTemplate.js` uses `pitchBlocks`.
+- `pitchSvg.js`: `toMetres(px, py, area)`, the inverse of `toPx`, snapped and clamped.
