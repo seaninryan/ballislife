@@ -122,9 +122,19 @@ export default function PitchHelp() {
       <p className="dim">
         What you write before the first <code>slide:</code> is the first slide. Cones,
         goals, zones and flags are set on the first slide and stay put — only players,
-        balls and arrows change. The drill view gets a Play button; thumbnails show the
-        first slide. The <strong>Add slide</strong> button above the source starts one for
-        you, with where everything is now written out as notes to uncomment.
+        balls and arrows change. Under the diagram, Play, Replay and a numbered button
+        per slide; thumbnails show the first slide. The <strong>Add slide</strong> button
+        above the source starts one for you, with where everything is now written out as
+        notes to uncomment.
+      </p>
+
+      <h4>Editing on the diagram</h4>
+      <p className="dim">
+        In the preview beside the source, click the pitch to write that spot&apos;s
+        coordinate where your cursor is — type <code>cone: </code> and click. Drag players,
+        balls, cones, goals, zones and arrow heads to move them: the change is made on the
+        slide showing (pick one with its number), and cones, goals, zones and flags always
+        move on the first slide. Only the numbers change; your notes stay as they are.
       </p>
 
       <h4>Two things that are not obvious</h4>

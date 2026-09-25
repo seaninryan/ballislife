@@ -80,3 +80,11 @@ describe("PitchHelp", () => {
     expect(html()).toContain("Add slide");
   });
 });
+
+describe("PitchHelp: editing on the diagram", () => {
+  it("explains clicking and dragging in the preview", () => {
+    const out = renderToStaticMarkup(<PitchHelp />);
+    expect(out).toContain("Editing on the diagram");
+    expect(out).toMatch(/drag/i);
+  });
+});
