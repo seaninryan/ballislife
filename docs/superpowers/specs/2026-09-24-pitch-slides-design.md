@@ -183,3 +183,50 @@ built from `pitch.js` exports, as the rest of the card is.
 
 Per-slide durations, step forward/back buttons, a viewer loop toggle, cones or other
 fixed marks changing between slides, drag-to-edit, GIF/video export.
+
+## Addendum — 2026-09-25: removing arrows, an Add slide button, a smaller diagram
+
+### `remove:` takes arrows
+
+`remove:` accepts arrow tokens as well as player labels, written as the arrow was added:
+`remove: X A->B C~>28,4`. A token matching the arrow grammar (`<from><arrow><to>`) is an
+arrow; anything else is a label.
+
+- The arrow symbol must match too: `remove: A->B` drops a pass A→B, not a run A~>B. Every
+  carried arrow equal in kind, source and target is dropped.
+- Checked against the arrows on the pitch at the end of the previous slide. One that is
+  not there is a line error: `no arrow "A->B" on the pitch to remove`. An arrow to or from
+  a player removed on the same slide is still on the pitch at that point, so listing it
+  is not an error.
+- To track this, the parser keeps the arrows on the pitch section by section, exactly as
+  `frames` computes them: previous arrows (none after `clear: arrows`), minus removed
+  ones, minus any whose endpoint player has gone, plus the slide's own.
+- Model: each slide gains `removeArrows: [{ kind, from, to }]`. `serialise` writes
+  them on the `remove:` line after the labels.
+- `frames` drops matching carried arrows; they fade out like any leaving arrow.
+
+### Add slide
+
+An **Add slide** button above the editor source appends a slide to the `pitch` block the
+cursor is in (or the drill's last block), with the caption selected so typing replaces
+it. Disabled when the drill has no `pitch` block. What it inserts, positions taken from
+the block's last frame:
+
+```
+slide: "What happens next"
+# Uncomment a line and change it; delete the ones you don't need.
+# Add arrows with pass:, run:, dribble: or shot:.
+# red: A@10,20 B@25,14 C@28,4
+# blue: X@18,8 Y@27,8
+# ball: C
+# remove: B->C
+```
+
+`ball:` names a player when the ball is at their feet, coordinates otherwise; the
+`ball:` and `remove:` lines are omitted when there are no balls or arrows. The logic is a
+pure function in `src/lib/slideTemplate.js`; the component only reads the cursor and
+applies the result.
+
+### A smaller diagram
+
+`.pitch` is capped at 560px wide (left-aligned). Phones and thumbnails are unaffected.
