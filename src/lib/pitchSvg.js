@@ -15,6 +15,20 @@ export function toMetres(px, py, area) {
   return { x: snap(px, area.w), y: snap(py, area.h) };
 }
 
+// The editor's rulers: a tick per metre along the top (x) and left (y) edges, labelled
+// every 5 m. `px` is the tick's position along its edge.
+export function rulerTicks(area) {
+  const along = (max, axis) => {
+    const out = [];
+    for (let m = 0; m <= max; m++) {
+      const p = axis === "x" ? toPx(m, 0).x : toPx(0, m).y;
+      out.push({ m, px: p, label: m % 5 === 0 ? String(m) : null });
+    }
+    return out;
+  };
+  return { x: along(Math.floor(area.w), "x"), y: along(Math.floor(area.h), "y") };
+}
+
 // Marking dimensions are capped proportions of the area: a real 16.5 m penalty box
 // would swallow a 40x25 m training grid.
 const BOX_DEPTH = (w) => Math.min(16.5, w * 0.35);

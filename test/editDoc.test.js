@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pitchBlocks, replaceBlock, insertText } from "../src/lib/editDoc.js";
+import { pitchBlocks, replaceBlock, insertText, lineRange } from "../src/lib/editDoc.js";
 
 const DOC = "---\ntitle: x\n---\n\nIntro\n\n```pitch\nred: A@1,1\n```\n\n```pitch\nblue: X@2,2\n```\n";
 
@@ -39,5 +39,18 @@ describe("insertText", () => {
 describe("insertText before a token", () => {
   it("spaces a pick from the token after the cursor", () => {
     expect(insertText("cone: 5,5", 6, 6, "1,1")).toEqual({ text: "cone: 1,1 5,5", cursor: 9 });
+  });
+});
+
+describe("lineRange", () => {
+  it("gives a 1-based line's start and end offsets", () => {
+    expect(lineRange("ab\ncde\nf", 2)).toEqual({ start: 3, end: 6 });
+    expect(lineRange("ab\ncde\nf", 3)).toEqual({ start: 7, end: 8 });
+  });
+  it("excludes a CRLF line's carriage return", () => {
+    expect(lineRange("ab\r\ncd\r\n", 1)).toEqual({ start: 0, end: 2 });
+  });
+  it("returns null for a line past the end", () => {
+    expect(lineRange("ab", 5)).toBeNull();
   });
 });

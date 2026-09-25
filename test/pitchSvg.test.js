@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { S, PAD, viewBox, toPx, markings, resolvePoint, actionPath, MARKER_GAP, markShape, toMetres } from "../src/lib/pitchSvg.js";
+import { S, PAD, viewBox, toPx, markings, resolvePoint, actionPath, MARKER_GAP, markShape, toMetres, rulerTicks } from "../src/lib/pitchSvg.js";
 import { parse } from "../src/lib/pitch.js";
 
 describe("scaling", () => {
@@ -238,5 +238,21 @@ describe("toMetres", () => {
   it("keeps the point on the pitch", () => {
     expect(toMetres(0, 0, area)).toEqual({ x: 0, y: 0 });
     expect(toMetres(10000, 10000, area)).toEqual({ x: 40, y: 25 });
+  });
+});
+
+describe("rulerTicks", () => {
+  const t = rulerTicks({ w: 12, h: 6 });
+  it("ticks every metre along both edges, from 0 to the far side", () => {
+    expect(t.x.map((k) => k.m)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(t.y.map((k) => k.m)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+  it("labels every fifth metre", () => {
+    expect(t.x.filter((k) => k.label).map((k) => k.label)).toEqual(["0", "5", "10"]);
+    expect(t.y.filter((k) => k.label).map((k) => k.label)).toEqual(["0", "5"]);
+  });
+  it("places ticks in pixels on the pitch edge", () => {
+    expect(t.x[1].px).toBe(toPx(1, 0).x);
+    expect(t.y[2].px).toBe(toPx(0, 2).y);
   });
 });

@@ -52,3 +52,17 @@ export function insertText(doc, start, end, text) {
     cursor: start + sep.length + text.length,
   };
 }
+
+// A 1-based line's offsets in `doc`, for selecting it — the line an error message names.
+export function lineRange(doc, line) {
+  let start = 0;
+  for (let n = 1; n < line; n++) {
+    const nl = doc.indexOf("\n", start);
+    if (nl === -1) return null;
+    start = nl + 1;
+  }
+  const nl = doc.indexOf("\n", start);
+  let end = nl === -1 ? doc.length : nl;
+  if (doc[end - 1] === "\r") end -= 1;
+  return { start, end };
+}
