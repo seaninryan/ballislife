@@ -4,8 +4,7 @@
 // looking up where everyone is. Pure — the editor only reads the cursor and applies it.
 import { parse, playerLines, arrowToken } from "./pitch.js";
 import { frames } from "./slides.js";
-import { parseDoc } from "./frontmatter.js";
-import { splitSegments } from "./markdown.js";
+import { pitchBlocks } from "./editDoc.js";
 
 export const CAPTION = "What happens next";
 
@@ -31,17 +30,13 @@ export function slideTemplate(scene) {
 }
 
 // Whether the drill has a diagram for Add slide to extend.
-export const hasPitchBlock = (doc) => splitSegments(parseDoc(doc).body).some((s) => s.kind === "pitch");
+export const hasPitchBlock = (doc) => pitchBlocks(doc).length > 0;
 
 // (document, cursor offset) -> { text, select: [start, end] } with a slide appended to the
 // pitch block holding the cursor, or the last block; null when there is none. `select`
 // is the caption, so typing replaces it.
 export function addSlide(doc, cursor) {
-  const body = parseDoc(doc).body;
-  const bodyStart = doc.length - body.length;
-  const blocks = pitchRanges(body).map((b) => ({
-    start: b.start + bodyStart, from: b.from + bodyStart, to: b.to + bodyStart, end: b.end + bodyStart,
-  }));
+  const blocks = pitchBlocks(doc);
   if (blocks.length === 0) return null;
   // The fence lines count as inside the block: a cursor on ```pitch is visibly in that diagram.
   const block = blocks.find((b) => cursor >= b.start && cursor <= b.end) ?? blocks[blocks.length - 1];
@@ -62,20 +57,4 @@ export function addSlide(doc, cursor) {
   const text = doc.slice(0, block.to) + lead + template + doc.slice(block.to);
   const start = block.to + lead.length + 'slide: "'.length;
   return { text, select: [start, start + CAPTION.length] };
-}
-
-// Each pitch block within the body: `from`/`to` bound its content, `start`/`end` its fence
-// lines too. splitSegments gives the content's 1-based starting line, and the content is
-// an exact slice, so its length ends it.
-function pitchRanges(body) {
-  const lineStarts = [0];
-  for (let i = 0; i < body.length; i++) if (body[i] === "\n") lineStarts.push(i + 1);
-  return splitSegments(body)
-    .filter((s) => s.kind === "pitch")
-    .map((s) => {
-      const from = lineStarts[s.line - 1] ?? body.length;
-      const to = from + s.text.length;
-      const nl = body.indexOf("\n", to);
-      return { start: lineStarts[s.line - 2], from, to, end: nl === -1 ? body.length : nl };
-    });
 }
