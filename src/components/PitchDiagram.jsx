@@ -2,9 +2,10 @@
 // Renders a `pitch` source block, and with `animated` plays its slides. Parse errors
 // are shown inline and the last renderable scene is still drawn: a typo must never
 // blank the preview.
-import React, { useEffect, useMemo, useReducer } from "react";
+import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { parse } from "../lib/pitch.js";
-import { viewBox, toPx, markings, markShape } from "../lib/pitchSvg.js";
+import { viewBox, toPx, toMetres, markings, markShape } from "../lib/pitchSvg.js";
+import { moveInSource, moveInFrame } from "../lib/sourceEdit.js";
 import { frames, stage } from "../lib/slides.js";
 import { step, initial } from "../lib/playback.js";
 
@@ -37,12 +38,12 @@ function Marking({ shape }) {
   return <path d={shape.d} {...stroke} />;
 }
 
-function Mark({ mark }) {
+function Mark({ mark, onGrab }) {
   const s = markShape(mark);
   if (!s) return null;
   if (s.type === "zone") {
     return (
-      <g>
+      <g onPointerDown={onGrab}>
         <rect
           x={s.x} y={s.y} width={s.w} height={s.h}
           fill="var(--yellow)" fillOpacity="0.16"
@@ -59,6 +60,12 @@ function Mark({ mark }) {
       </g>
     );
   }
+  // Wrapped only when grabbable, so a read-only diagram renders exactly as it did.
+  const body = markBody(s);
+  return onGrab ? <g onPointerDown={onGrab}>{body}</g> : body;
+}
+
+function markBody(s) {
   if (s.type === "path") return <path d={s.d} fill="var(--cone)" />;
   if (s.type === "circle") return <circle cx={s.cx} cy={s.cy} r={s.r} fill="#fff" stroke="#222" strokeWidth="1" />;
   if (s.type === "flag") {
@@ -72,11 +79,14 @@ function Mark({ mark }) {
   return <rect x={s.x} y={s.y} width={s.w} height={s.h} fill="none" stroke="#fff" strokeWidth="2" />;
 }
 
-function Player({ player }) {
+function Player({ player, onGrab }) {
   const p = toPx(player.x, player.y);
   const fill = TEAM_FILL[player.team];
   return (
-    <g className={cls("pitch-glide", motion(player))} style={{ transform: `translate(${p.x}px, ${p.y}px)` }}>
+    <g
+      className={cls("pitch-glide", motion(player))} style={{ transform: `translate(${p.x}px, ${p.y}px)` }}
+      onPointerDown={onGrab}
+    >
       {player.team === "gk" ? (
         <rect x={-R} y={-R} width={R * 2} height={R * 2} rx="3" fill={fill} stroke="#fff" strokeWidth="1" />
       ) : (
@@ -89,10 +99,13 @@ function Player({ player }) {
   );
 }
 
-function Ball({ ball }) {
+function Ball({ ball, onGrab }) {
   const s = markShape({ kind: "ball", x: ball.x, y: ball.y });
   return (
-    <g className={cls("pitch-glide", motion(ball))} style={{ transform: `translate(${s.cx}px, ${s.cy}px)` }}>
+    <g
+      className={cls("pitch-glide", motion(ball))} style={{ transform: `translate(${s.cx}px, ${s.cy}px)` }}
+      onPointerDown={onGrab}
+    >
       <circle cx="0" cy="0" r={s.r} fill="#fff" stroke="#222" strokeWidth="1" />
     </g>
   );
@@ -112,7 +125,12 @@ function usePlayback(count, loop, source) {
   return [state, dispatch];
 }
 
-export default function PitchDiagram({ source = "", baseLine = 1, animated = false }) {
+// `editable` turns the diagram into an input for the editor: a press on the grass picks
+// that coordinate (onPick), and dragging a player, ball, mark or arrow head hands back
+// the whole block with that one coordinate rewritten (onChange).
+export default function PitchDiagram({
+  source = "", baseLine = 1, animated = false, editable = false, onChange, onPick,
+}) {
   const { scene, errors } = useMemo(() => parse(source), [source]);
   const all = useMemo(() => frames(scene), [scene]);
   const [play, dispatch] = usePlayback(all.length, scene.loop, source);
@@ -121,15 +139,65 @@ export default function PitchDiagram({ source = "", baseLine = 1, animated = fal
   const index = controls ? Math.min(play.index, all.length - 1) : 0;
   const frame = all[index];
   const prev = controls && play.from !== null ? all[play.from] ?? null : null;
-  const { players, balls, paths } = useMemo(() => stage(prev, frame), [prev, frame]);
+  const svgRef = useRef(null);
+  // { target, x, y, moved }: target null means a press on the grass, which picks.
+  const [drag, setDrag] = useState(null);
+  const shown = drag?.moved ? moveInFrame(frame, drag.target, drag.x, drag.y) : frame;
+  // No previous slide while dragging: the item must follow the pointer, not glide to it.
+  const { players, balls, paths } = useMemo(() => stage(drag ? null : prev, shown), [prev, shown, drag]);
   const shapes = useMemo(() => markings(scene.area), [scene.area]);
   const labelAt = toPx(scene.area.w / 2, scene.area.h);
+
+  const metresAt = (e) => {
+    const svg = svgRef.current;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return toMetres(p.x, p.y, scene.area);
+  };
+  const press = (target) => (e) => {
+    if (!editable) return;
+    // Stopped so a press on a player does not also reach the svg and pick.
+    e.stopPropagation();
+    e.preventDefault();
+    // Captured on the svg, so the drag keeps coming here when the pointer outruns the item.
+    svgRef.current.setPointerCapture?.(e.pointerId);
+    dispatch({ type: "pause" });
+    setDrag({ target, ...metresAt(e), moved: false });
+  };
+  const onPointerMove = (e) => {
+    if (!drag?.target) return;
+    const m = metresAt(e);
+    if (m.x !== drag.x || m.y !== drag.y) setDrag({ ...drag, ...m, moved: true });
+  };
+  const onPointerUp = (e) => {
+    if (!drag) return;
+    const m = metresAt(e);
+    if (drag.target && drag.moved) {
+      const next = moveInSource(source, index, drag.target, m.x, m.y);
+      if (next !== null) onChange?.(next);
+    } else if (!drag.target) {
+      onPick?.(`${m.x},${m.y}`);
+    }
+    setDrag(null);
+  };
+  // Arrow heads that point at a coordinate can be dragged; one into a player follows them.
+  const handles = editable
+    ? shown.actions.filter((a) => a.to.ref === undefined).map((a) => ({ key: a.key, ...toPx(a.to.x, a.to.y) }))
+    : [];
 
   return (
     <div>
       <svg
-        className={cls("pitch", !prev && "cut")} viewBox={viewBox(scene.area)}
+        ref={svgRef}
+        className={cls("pitch", editable && "editable", (drag || !prev) && "cut")} viewBox={viewBox(scene.area)}
         role="img" aria-label={frame.label || scene.label || "Pitch diagram"}
+        style={editable ? { touchAction: "none" } : undefined}
+        onPointerDown={editable ? press(null) : undefined}
+        onPointerMove={editable ? onPointerMove : undefined}
+        onPointerUp={editable ? onPointerUp : undefined}
+        onPointerCancel={editable ? () => setDrag(null) : undefined}
       >
         <defs>
           {/* markerUnits="userSpaceOnUse" is essential: SVG markers scale with
@@ -148,7 +216,9 @@ export default function PitchDiagram({ source = "", baseLine = 1, animated = fal
 
         <rect x="0" y="0" width="100%" height="100%" fill="var(--grass)" />
         {shapes.map((s, i) => <Marking key={i} shape={s} />)}
-        {frame.marks.map((m, i) => <Mark key={i} mark={m} />)}
+        {shown.marks.map((m, i) => (
+          <Mark key={i} mark={m} onGrab={editable ? press({ kind: "mark", index: i }) : undefined} />
+        ))}
         {paths.map((p) => (
           <path
             key={p.key} d={p.d} fill="none"
@@ -169,10 +239,23 @@ export default function PitchDiagram({ source = "", baseLine = 1, animated = fal
             </text>
           </g>
         ))}
-        {players.map((p) => <Player key={p.label} player={p} />)}
+        {players.map((p) => (
+          <Player
+            key={p.label} player={p}
+            onGrab={editable && !p.leaving ? press({ kind: "player", label: p.label }) : undefined}
+          />
+        ))}
         {/* Balls after players: a ball at a player's feet overlaps the marker's edge
             and must sit on top of it to be seen. */}
-        {balls.map((b) => <Ball key={b.key} ball={b} />)}
+        {balls.map((b) => (
+          <Ball key={b.key} ball={b} onGrab={editable && !b.leaving ? press({ kind: "ball", key: b.key }) : undefined} />
+        ))}
+        {handles.map((h) => (
+          <circle
+            key={`h${h.key}`} className="pitch-handle" cx={h.x} cy={h.y} r="7"
+            onPointerDown={press({ kind: "arrow", key: h.key })}
+          />
+        ))}
         {frame.label ? (
           <text x={labelAt.x} y={labelAt.y + 14} fontSize="10" fill="#fff" fillOpacity="0.85" textAnchor="middle">
             {frame.label}

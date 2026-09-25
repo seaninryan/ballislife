@@ -63,4 +63,9 @@ describe("Editor", () => {
   it("disables Add slide when there is no diagram to add to", () => {
     expect(render(base)).toMatch(/<button[^>]*disabled=""[^>]*>Add slide/);
   });
+
+  it("makes the preview's diagrams editable", () => {
+    const withPitch = openEditor("a", "```pitch\nred: A@5,5\n```\n", "T1");
+    expect(render(withPitch)).toContain('class="pitch editable');
+  });
 });

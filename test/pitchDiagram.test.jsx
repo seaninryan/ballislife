@@ -115,4 +115,19 @@ describe("PitchDiagram", () => {
     // Starts on slide 1 — nothing moves until Play is pressed.
     expect(html).toContain("translate(30px, 30px)");
   });
+
+  const editable = (src) => renderToStaticMarkup(<PitchDiagram source={src} editable />);
+
+  it("is inert unless editable", () => {
+    const html = render("red: A@1,1\npass: A->5,5\n");
+    expect(html).not.toContain("pitch-handle");
+    expect(html).not.toContain("touch-action");
+  });
+
+  it("stops the page scrolling and offers a handle on coordinate arrow heads when editable", () => {
+    const html = editable("red: A@1,1 B@9,9\npass: A->5,5 A->B\n");
+    expect(html).toContain("touch-action:none");
+    expect(html).toContain('class="pitch editable');
+    expect(html.match(/class="pitch-handle"/g)).toHaveLength(1);
+  });
 });

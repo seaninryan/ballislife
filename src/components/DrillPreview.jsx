@@ -22,7 +22,10 @@ function frontmatterLines(source, body) {
 // written back into `source`; they go to localStorage only (see lib/checklist.js's
 // header comment for why: a drill is reused every season, so `- [ ] cones out` must
 // still say that next time).
-export default function DrillPreview({ source = "", interactive = false, slug, today }) {
+// `onBlockChange(line, content)` makes the diagrams editable (the editor passes it; the
+// drill view does not): a drag hands back the new content of the block at file `line`.
+// `onPick(coord)` receives a coordinate picked by pressing on a diagram.
+export default function DrillPreview({ source = "", interactive = false, slug, today, onBlockChange, onPick }) {
   const doc = useMemo(() => parseDoc(source), [source]);
   const segments = useMemo(() => splitSegments(doc.body), [doc.body]);
   const offset = useMemo(() => frontmatterLines(source, doc.body), [source, doc.body]);
@@ -40,7 +43,15 @@ export default function DrillPreview({ source = "", interactive = false, slug, t
   let tickCursor = 0;
   const rendered = segments.map((seg, i) => {
     if (seg.kind === "pitch") {
-      return <PitchDiagram key={i} source={seg.text} baseLine={seg.line + offset} animated />;
+      const line = seg.line + offset;
+      return (
+        <PitchDiagram
+          key={i} source={seg.text} baseLine={line} animated
+          editable={Boolean(onBlockChange)}
+          onChange={onBlockChange ? (next) => onBlockChange(line, next) : undefined}
+          onPick={onPick}
+        />
+      );
     }
     const html = interactive
       ? renderProse(seg.text, { interactive: true, tickOffset: tickCursor })

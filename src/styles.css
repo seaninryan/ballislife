@@ -65,6 +65,10 @@ textarea, input, select {
 .pitch-slide { min-width: 32px; padding: 4px 8px; }
 /* The slide on screen. Colour plus weight, since colour alone fails in bright sun. */
 .pitch-slide[aria-current] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+/* Editing in the preview: things that can be dragged say so. */
+.pitch.editable { cursor: crosshair; }
+.pitch.editable .pitch-glide, .pitch.editable .pitch-handle { cursor: grab; }
+.pitch-handle { fill: transparent; stroke: #fff; stroke-opacity: 0.6; stroke-dasharray: 2 2; }
 .split { display: flex; gap: 10px; align-items: flex-start; }
 .split > * { flex: 1; min-width: 0; }
 @media (max-width: 780px) { .split { flex-direction: column; } }

@@ -7,6 +7,7 @@ import PitchHelp from "./PitchHelp.jsx";
 import { DIRTY, SAVING, CONFLICT, FAILED } from "../lib/editor.js";
 import { friendlyError } from "../lib/errors.js";
 import { addSlide, hasPitchBlock } from "../lib/slideTemplate.js";
+import { replaceBlock, insertText } from "../lib/editDoc.js";
 
 function Status({ state }) {
   if (state.status === CONFLICT) return <span className="chip warn-chip">conflict</span>;
@@ -42,6 +43,21 @@ export default function Editor({ state, onEdit, onBack, onDelete, onKeepMine, on
     const r = addSlide(state.text, el ? el.selectionStart : state.text.length);
     if (!r) return;
     pendingSelect.current = r.select;
+    onEdit?.(r.text);
+  };
+
+  // A drag on the preview hands back the whole new block; splice it into the drill.
+  const onBlockChange = (line, content) => {
+    const next = replaceBlock(state.text, line, content);
+    if (next !== null) onEdit?.(next);
+  };
+  // A click on the preview writes that coordinate where the coach is typing.
+  const onPick = (coord) => {
+    const el = sourceRef.current;
+    const start = el ? el.selectionStart : state.text.length;
+    const end = el ? el.selectionEnd : start;
+    const r = insertText(state.text, start, end, coord);
+    pendingSelect.current = [r.cursor, r.cursor];
     onEdit?.(r.text);
   };
 
@@ -92,7 +108,7 @@ export default function Editor({ state, onEdit, onBack, onDelete, onKeepMine, on
           spellCheck={false}
         />
         <div className="editor-preview">
-          <DrillPreview source={state.text} />
+          <DrillPreview source={state.text} onBlockChange={onBlockChange} onPick={onPick} />
         </div>
       </div>
     </div>

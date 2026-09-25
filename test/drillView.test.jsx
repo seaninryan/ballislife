@@ -39,4 +39,12 @@ describe("DrillView", () => {
     expect(html).not.toContain("disabled");
     expect(html).toContain('data-tick="0"');
   });
+
+  it("keeps the drill view's diagrams read-only", () => {
+    const text = "---\ntitle: Rondo 4v2\n---\n\n```pitch\narea: 20x20 plain\nred: A@5,5 B@9,9\npass: A->5,5\n```\n";
+    const html = render({ status: "ready", text });
+    expect(html).toContain("<svg");
+    expect(html).not.toContain("editable");
+    expect(html).not.toContain("pitch-handle");
+  });
 });
